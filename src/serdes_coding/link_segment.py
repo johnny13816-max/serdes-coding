@@ -3,7 +3,6 @@ from typing import Union
 from dataclasses import dataclass, field
 import skrf as rf
 
-
 # =========================
 # helper
 # =========================
@@ -174,6 +173,48 @@ def _s4p_to_sdd(
     ], axis=-2)
 
 # ========================
+# IEEE COM helpers
+# ========================
+def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
+    """
+    Cascade two Sdd arrays using IEEE COM equations.
+
+    Reference:
+    - IEEE 802.3 Annex 93A.1.2.1, Eq. 93A-4 through Eq. 93A-7.
+
+    The physical order is:
+        x -> y
+
+    sx and sy must each have shape (N, 2, 2), using:
+        [[S11, S12],
+            [S21, S22]]
+    """
+    sx = np.asarray(sx, dtype=complex)
+    sy = np.asarray(sy, dtype=complex)
+
+    if sx.shape != sy.shape or sx.ndim != 3 or sx.shape[1:] != (2, 2):
+        raise ValueError("sx and sy must both have shape (N, 2, 2).")
+
+    x11, x12 = sx[:, 0, 0], sx[:, 0, 1]
+    x21, x22 = sx[:, 1, 0], sx[:, 1, 1]
+    y11, y12 = sy[:, 0, 0], sy[:, 0, 1]
+    y21, y22 = sy[:, 1, 0], sy[:, 1, 1]
+
+    denom = 1 - x22 * y11
+    if np.any(np.isclose(denom, 0.0)):
+        raise ZeroDivisionError("S-parameter cascade denominator is close to zero.")
+
+    z11 = x11 + (x12 * y11 * x21) / denom
+    z12 = (x12 * y12) / denom
+    z21 = (y21 * x21) / denom
+    z22 = y22 + (y21 * x22 * y12) / denom
+
+    return np.stack([
+        np.stack([z11, z12], axis=-1),
+        np.stack([z21, z22], axis=-1),
+    ], axis=-2)
+
+# ========================
 # classes
 # ========================
 
@@ -252,7 +293,21 @@ class LinkConfig:
 
     @staticmethod
     def validate_times(times: np.ndarray) -> np.ndarray:
-        pass
+        times = np.asarray(times, dtype=float)
+
+        if times.ndim != 1:
+            raise ValueError("times must be a 1D array.")
+
+        if len(times) < 2:
+            raise ValueError("times must contain at least two points.")
+
+        if not np.all(np.isfinite(times)):
+            raise ValueError("times contains non-finite values.")
+
+        if not np.all(np.diff(times) > 0):
+            raise ValueError("times must be strictly increasing.")
+
+        return times
 
 class sparamModel:
     """
@@ -311,7 +366,7 @@ class sparamModel:
         - sdd: complex array with shape (len(freqs), 2, 2)
         - z0: reference impedance assigned to the internal rf.Network
         """
-        freqs = cls.validate_freq_axis(freqs)
+        freqs = LinkConfig.validate_freqs(freqs)
         sdd = cls.validate_sdd(sdd, freqs)
         return cls(_network_from_smatrix(freqs, sdd, z0=z0), source_type="sdd")
 
@@ -332,7 +387,7 @@ class sparamModel:
         - port_order: zero-based (tx_p, tx_n, rx_p, rx_n)
         - z0: differential-mode reference impedance assigned after Sdd conversion
         """
-        freqs = cls.validate_freq_axis(freqs)
+        freqs = LinkConfig.validate_freqs(freqs)
         port_order = cls.validate_port_order(port_order)
         sdd = _s4p_to_sdd(s4p, port_order, freqs)
         return cls(_network_from_smatrix(freqs, sdd, z0=z0), source_type="s4p", port_order=port_order)
@@ -435,7 +490,7 @@ class sparamModel:
             raise ValueError("sparamModel.network must store Sdd with shape (N, 2, 2).")
 
         freqs = np.asarray(network.f, dtype=float)
-        sparamModel.validate_freq_axis(freqs)
+        LinkConfig.validate_freqs(freqs)
         sparamModel.validate_sdd(sdd, freqs)
 
         return network
@@ -455,6 +510,25 @@ class sparamModel:
 
         if not np.allclose(self.network.z0, other.network.z0):
             raise ValueError("Cannot cascade sparamModel objects with different z0.")
+
+    def validate_resample_freqs(self, freqs: np.ndarray) -> np.ndarray:
+        freqs = LinkConfig.validate_freqs(freqs)
+
+        if freqs[-1] < self.freqs[0]:
+            raise ValueError("resample() target grid is entirely below the measured frequency span.")
+
+        return freqs
+
+    def validate_renum_port_order(self, port_order: tuple[int, ...]) -> tuple[int, ...]:
+        if len(port_order) != self.sdd.shape[1]:
+            raise ValueError("port_order length must match the number of ports.")
+
+        port_order = tuple(int(p) for p in port_order)
+        expected = list(range(self.sdd.shape[1]))
+        if sorted(port_order) != expected:
+            raise ValueError(f"port_order must be a permutation of {tuple(expected)}.")
+
+        return port_order
 
     # -------------------
     # proxy
@@ -496,148 +570,161 @@ class sparamModel:
         self.validate_compatible_sparam(other)
         cascaded_network = self.network ** other.network
         return sparamModel.from_network(cascaded_network, mode="sdd")
-    
-    def to_LinkSegment(self, cfg: 'LinkConfig', term: str = "sdd21") -> 'LinkSegment':
+
+    def renormalized(self, z0_new: Union[float, np.ndarray], s_def: str | None = None) -> 'sparamModel':
         """
-        Build a scalar LinkSegment from one Sdd term.
+        Return a new model with S-parameters renormalized to a new reference impedance.
 
-        Default term="sdd21" gives the differential insertion transfer. Full
-        COM terminated H_i(f) should be computed separately before constructing
-        a LinkSegment if S11/S12/S21/S22 termination effects are required.
+        This changes the S-parameter values, not only the Network.z0 metadata.
+        For real-valued SerDes reference impedances, the default scikit-rf
+        scattering definition is sufficient.
         """
-        term_map = {
-            "sdd11": self.sdd11,
-            "sdd12": self.sdd12,
-            "sdd21": self.sdd21,
-            "sdd22": self.sdd22,
-        }
+        ntwk = self.network.copy()
+        ntwk.renormalize(z0_new, s_def=s_def)
+        return type(self).from_network(ntwk, mode="sdd", z0=z0_new)
 
-        if term not in term_map:
-            raise ValueError("term must be one of: sdd11, sdd12, sdd21, sdd22.")
-
-        return LinkSegment.from_tf(self.freqs, term_map[term], cfg)
-
-# ========================
-# IEEE COM helpers
-# ========================
-def IEEECOM_shunt_capacitance_sdd(freqs: np.ndarray, capacitance: float, R0: float = 50.0) -> np.ndarray:
-    """
-    Build the IEEE COM differential-mode S-parameter model for a shunt capacitance.
-
-    Reference:
-    - IEEE 802.3 Annex 93A.1.2.2, Eq. 93A-8.
-
-    This implements the shunt-admittance two-port:
-        Y = j * 2*pi*f*C
-        S11 = S22 = -Y*z0 / (2 + Y*z0)
-        S21 = S12 =  2    / (2 + Y*z0)
-
-    R0 is single-ended reference resistance
-    """
-    capacitance = float(capacitance)
-    R0 = float(R0)
-
-    if capacitance < 0.0:
-        raise ValueError("capacitance must be non-negative.")
-
-    y = 1j * 2 * np.pi * freqs * capacitance        # y = jwc
-    denom = 2 + y * R0
-
-    s11 = -(y * R0) / denom
-    s21 = 2 / denom
-
-    return np.stack([
-        np.stack([s11, s21], axis=-1),
-        np.stack([s21, s11], axis=-1),
-    ], axis=-2)
-
-def IEEECOM_series_inductance_sdd(freqs: np.ndarray, inductance: float, R0: float = 50.0) -> np.ndarray:
-    " eq. 93A-9a "
-    inductance = float(inductance)
-    R0 = float(R0)
-    y = 1j * 2*np.pi *freqs * inductance
-    denum = 2 + y / R0
-
-    s11 = (y/R0) / denum
-    s21 = 2 / denum
-
-    return np.stack([
-        np.stack([s11, s21], axis=-1),
-        np.stack([s21, s11], axis=-1)
-    ], axis=-2)
-
-def IEEECOM_pkg_trans_line_sdd(
+    def resample(
+        self,
         freqs: np.ndarray,
-        R0: float, 
-        zp: float, 
-        gamma0: float = 0.0,
-        a1: float = float(1.734e-3),
-        a2: float = float(1.455e-4),
-        tau: float = float(6.141e-3), 
-        Zc: float = 78.2
+        basis: str = "s",
+        coords: str = "cart",
+        kind: str | None = None,
+        dc_method: str = "skrf",
+        dc_sparam: np.ndarray | None = None,
+        dc_kind: str = "linear",
+        dc_coords: str = "cart",
+    ) -> 'sparamModel':
+        """
+        Return a new model sampled on the requested grid within the measured span.
+
+        If the requested grid starts below the measured low-frequency point,
+        this method first calls extrapolate_to_dc(). After that it only keeps
+        requested points up to the measured f_stop. It intentionally does not
+        extrapolate S-parameters above the measured bandwidth.
+        """
+        freqs = self.validate_resample_freqs(freqs)
+
+        source = self
+        if freqs[0] < self.freqs[0]:
+            source = self.extrapolate_to_dc(
+                method=dc_method,
+                dc_sparam=dc_sparam,
+                kind=dc_kind,
+                coords=dc_coords,
+            )
+
+        f_stop = source.freqs[-1]
+        freqs_inband = freqs[freqs <= f_stop]
+        if len(freqs_inband) < 2:
+            raise ValueError("resample() target grid must contain at least two in-band frequency points.")
+
+        if freqs_inband[0] < source.freqs[0]:
+            raise ValueError("resample() target grid starts below the available frequency span after DC handling.")
+
+        ntwk = source.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
+        return type(self).from_network(ntwk, mode="sdd", z0=ntwk.z0)
+
+    def extrapolate_to_dc(
+        self,
+        method: str = "skrf",
+        dc_sparam: np.ndarray | None = None,
+        kind: str = "linear",
+        coords: str = "cart",
+    ) -> 'sparamModel':
+        """
+        Return a new model with a DC point added when the measurement lacks DC.
+
+        method="skrf" delegates to skrf.Network.extrapolate_to_dc(). Other
+        DC models from the sparam_to_sbr reference can be added here later.
+        """
+        if np.isclose(self.freqs[0], 0.0):
+            return type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+
+        if method != "skrf":
+            raise NotImplementedError('Only method="skrf" is implemented for DC extrapolation.')
+
+        ntwk = self.network.extrapolate_to_dc(
+            dc_sparam=dc_sparam,
+            kind=kind,
+            coords=coords,
+        )
+        return type(self).from_network(ntwk, mode="sdd", z0=ntwk.z0)
+
+    def voltage_transfer_function(
+        self,
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
     ) -> np.ndarray:
-    """eq. 93A-9, 10, 11, 12, 13, 14"""
+        """
+        Compute the terminated voltage transfer function H21(f).
 
-    if np.any(freqs < 0): 
-        raise ValueError("The definition of pkg transmission line model do not include f < 0.")
-    R0 = float(R0)
-    zp = float(zp)
+        Reference:
+        - IEEE 802.3 Annex 93A.1.3, Eq. 93A-18.
+
+        gamma_src and gamma_load are the reflection coefficients seen at port 1
+        and port 2. With matched terminations, both are zero and H21(f)=Sdd21(f).
+        """
+        gamma_src = np.asarray(gamma_src, dtype=complex)
+        gamma_load = np.asarray(gamma_load, dtype=complex)
+
+        delta_s = self.sdd11 * self.sdd22 - self.sdd12 * self.sdd21
+        denom = (
+            1
+            - self.sdd11 * gamma_src
+            - self.sdd22 * gamma_load
+            + gamma_src * gamma_load * delta_s
+        )
+        if np.any(np.isclose(denom, 0.0)):
+            raise ZeroDivisionError("H21 denominator is close to zero.")
+
+        return self.sdd21 * (1 - gamma_src) * (1 + gamma_load) / denom
+
+    def renum(self, port_order: tuple[int, ...]) -> 'sparamModel':
+        """
+        Return a new model with ports reordered.
+
+        port_order gives old port indices in the desired new order. For example,
+        port_order=(1, 0) swaps a two-port Sdd network.
+        """
+        port_order = self.validate_renum_port_order(port_order)
+        s_new = self.sdd[:, port_order, :][:, :, port_order]
+        z0_new = self.network.z0[:, port_order]
+        return type(self).from_sdd_array(self.freqs, s_new, z0=z0_new)
     
-    gamma1 = a1 * (1 + 1j)
-    gamma2 = a2 * (1 - ( 1j * (2/np.pi) * np.log(freqs[freqs>0]/1e9) )) + 1j * 2*np.pi * tau
-    gamma2 = np.r_[0, gamma2]
-    gamma = gamma0 + gamma1 * np.sqrt(freqs) + gamma2 * freqs
-    rho = (Zc - 2*R0) / (Zc + 2*R0)
+    def to_LinkSegment(
+        self,
+        cfg: 'LinkConfig',
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        basis: str = "s",
+        coords: str = "cart",
+        kind: str | None = None,
+        dc_method: str = "skrf",
+        dc_sparam: np.ndarray | None = None,
+        dc_kind: str = "linear",
+        dc_coords: str = "cart",
+    ) -> 'LinkSegment':
+        """
+        Build a scalar LinkSegment from the terminated voltage transfer H21(f).
 
-    y = np.exp( -(gamma * 2*zp) )
-    y1 = np.exp( -(gamma * zp) )
-    denum = 1 - rho**2 * y
-    s11 = (rho * (1 - y)) / denum
-    s21 = (1 - rho**2) * y1 / denum
-
-    return np.stack([
-        np.stack([s11, s21], axis=-1),
-        np.stack([s21, s11], axis=-1)
-    ], axis=-2)
-
-def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
-    """
-    Cascade two Sdd arrays using IEEE COM equations.
-
-    Reference:
-    - IEEE 802.3 Annex 93A.1.2.1, Eq. 93A-4 through Eq. 93A-7.
-
-    The physical order is:
-        x -> y
-
-    sx and sy must each have shape (N, 2, 2), using:
-        [[S11, S12],
-            [S21, S22]]
-    """
-    sx = np.asarray(sx, dtype=complex)
-    sy = np.asarray(sy, dtype=complex)
-
-    if sx.shape != sy.shape or sx.ndim != 3 or sx.shape[1:] != (2, 2):
-        raise ValueError("sx and sy must both have shape (N, 2, 2).")
-
-    x11, x12 = sx[:, 0, 0], sx[:, 0, 1]
-    x21, x22 = sx[:, 1, 0], sx[:, 1, 1]
-    y11, y12 = sy[:, 0, 0], sy[:, 0, 1]
-    y21, y22 = sy[:, 1, 0], sy[:, 1, 1]
-
-    denom = 1 - x22 * y11
-    if np.any(np.isclose(denom, 0.0)):
-        raise ZeroDivisionError("S-parameter cascade denominator is close to zero.")
-
-    z11 = x11 + (x12 * y11 * x21) / denom
-    z12 = (x12 * y12) / denom
-    z21 = (y21 * x21) / denom
-    z22 = y22 + (y21 * x22 * y12) / denom
-
-    return np.stack([
-        np.stack([z11, z12], axis=-1),
-        np.stack([z21, z22], axis=-1),
-    ], axis=-2)
+        Flow:
+        1. resample the Sdd network onto cfg.freqs inside the measured bandwidth
+        2. compute H21(f) with impedance mismatch using Eq. 93A-18
+        3. let LinkSegment.from_tf() extend the scalar transfer function to
+           cfg.f_nyq using the project's TF extension rule
+        """
+        resampled = self.resample(
+            cfg.freqs,
+            basis=basis,
+            coords=coords,
+            kind=kind,
+            dc_method=dc_method,
+            dc_sparam=dc_sparam,
+            dc_kind=dc_kind,
+            dc_coords=dc_coords,
+        )
+        H21 = resampled.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        return LinkSegment.from_tf(resampled.freqs, H21, cfg)
 
 class IEEECOMsparam(sparamModel):
     """
@@ -661,7 +748,7 @@ class IEEECOMsparam(sparamModel):
     sparamModel.
     """
     @classmethod
-    def from_shunt_capacitance(
+    def shunt_capacitance(
         cls,
         cfg: 'LinkConfig',
         capacitance: float,
@@ -679,12 +766,83 @@ class IEEECOMsparam(sparamModel):
             LinkConfig that defines the frequency grid.
         capacitance:
             Shunt capacitance in farads.
-        z0:
-            Differential-mode Sdd reference impedance. COM convention is
-            typically 100 ohm differential.
+        R0:
+            Single-ended reference resistance used by Eq. 93A-8. The internal
+            differential-mode Sdd Network uses z0 = 2 * R0.
         """
-        sdd = cls._shunt_capacitance_sdd(cfg.freqs, capacitance, R0=R0)
-        return cls.from_sdd_array(cfg.freqs, sdd, z0=z0)
+        C = float(capacitance)
+        R0 = float(R0)
+    
+        if capacitance < 0.0:
+            raise ValueError("capacitance must be non-negative.")
+    
+        y = 1j * 2 * np.pi * cfg.freqs * C        # y = jwc
+        denom = 2 + y * R0
+    
+        s11 = -(y * R0) / denom
+        s21 = 2 / denom
+    
+        sdd = np.stack([
+            np.stack([s11, s21], axis=-1),
+            np.stack([s21, s11], axis=-1),
+        ], axis=-2)
+        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
+
+    @classmethod
+    def series_inductance(cls, cfg: 'LinkConfig', inductance: float, R0: float = 50) -> 'IEEECOMsparam':
+        "Eq. 93A-9a."
+        L = float(inductance)
+        R0 = float(R0)
+
+        y = 1j * 2*np.pi * cfg.freqs * L
+        denum = 2 + y / R0
+        s11 = (y / R0) / denum
+        s21 = 2 / denum
+        sdd = np.stack([
+            np.stack([s11, s21], axis=-1),
+            np.stack([s21, s11], axis=-1)
+        ], axis=-2)
+
+        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
+
+    @classmethod
+    def pkg_trans_line(
+        cls, 
+        cfg: 'LinkConfig',
+        R0: float, 
+        zp: float, 
+        gamma0: float = 0.0,
+        a1: float = float(1.734e-3),
+        a2: float = float(1.455e-4),
+        tau: float = float(6.141e-3), 
+        Zc: float = 78.2
+    ) -> np.ndarray:
+        "Eq. 93A-9, 10, 11, 12, 13, 14."
+
+        f = cfg.freqs
+        if np.any(f < 0): 
+            raise ValueError("The definition of pkg transmission line model do not include f < 0.")
+        R0 = float(R0)
+        zp = float(zp)
+
+        gamma1 = a1 * (1 + 1j)
+        gamma2 = a2 * (1 - ( 1j * (2/np.pi) * np.log(f[f>0]/1e9) )) + 1j * 2*np.pi * tau
+        gamma2 = np.r_[0, gamma2]
+        gamma = gamma0 + gamma1 * np.sqrt(f) + gamma2 * f
+        rho = (Zc - 2*R0) / (Zc + 2*R0)
+
+        y = np.exp( -(gamma * 2*zp) )
+        y1 = np.exp( -(gamma * zp) )
+        denum = 1 - rho**2 * y
+        s11 = (rho * (1 - y)) / denum
+        s21 = (1 - rho**2) * y1 / denum
+
+        sdd = np.stack([
+            np.stack([s11, s21], axis=-1),
+            np.stack([s21, s11], axis=-1)
+        ], axis=-2)
+
+        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
 
     def cascade_com(self, other: 'sparamModel') -> 'IEEECOMsparam':
         """
@@ -778,7 +936,7 @@ class LinkSegment:
     # ============================
     # methods
     # ============================
-    def cascade(self, other: 'LinkSegment') -> 'LinkSegment':
+    def cascade_tf(self, other: 'LinkSegment') -> 'LinkSegment':
         """
         Cascade two scalar transfer-function LinkSegment objects in frequency domain.
 
@@ -793,6 +951,9 @@ class LinkSegment:
         seg = LinkSegment(self.cfg)
         seg._tf = self.validate_tf(self.tf * other.tf)
         return seg
+
+    def cascade_ir(self, other: 'LinkSegment') -> 'LinkSegment':
+        pass
 
     def find_main_delay(self, energy_window_ui: float = 1.0) -> dict[str, float | int]:
         """
@@ -1237,4 +1398,51 @@ class LinkSegment:
 
         return sr
 
+class IEEECOMFilter(LinkSegment):
+
+    @classmethod
+    def rx_noise_filter(cls, cfg: LinkConfig, fr: float) -> IEEECOMFilter:
+        "Eq. 93A-20"
+        p1 = 3.414214
+        p2 = 2.613126
+        f = cfg.freqs
+        H_r = 1.0 / (1.0 - p1*(f/fr)**2 + (f/fr)**4 + 1j*p2*(f/fr - (f/fr)**3))
+        return cls.from_tf(f_meas=f, H_meas=H_r, cfg=cfg)
+
+    @classmethod
+    def tx_ffe(cls, cfg: LinkConfig, txfir: np.ndarray, num_pre: int) -> IEEECOMFilter:
+        "Eq. 93A-21"
+        # check fir main cursor
+        if (np.argmax(np.abs(txfir)) != num_pre):
+            raise Exception("Setup error in IEEECOMFilter.tx_ffe().")
+
+        f = cfg.freqs
+        H_ffe = np.zeros_likes(f, dtype=complex)
+        for idx, c_i in enumerate(txfir):
+            H_ffe += c_i * np.exp(-1j * 2*np.pi * idx * f/cfg.fb)
+
+        return cls.from_tf(f_meas=f, H_meas=H_ffe, cfg=cfg)
+
+    @classmethod
+    def rx_equalizer(
+        cls, 
+        cfg: LinkConfig, 
+        g_DC: float, 
+        g_DC2: float,
+        f_z: float,
+        f_LF: float,
+        f_p1: float,
+        f_p2: float
+    ) -> IEEECOMFilter:
+        "Eq. 93A-22"
+        f = cfg.freqs
+        denum = (1 + 1j * f / f_p1) * (1 + 1j * f / f_p2) * (1 + 1j * f / f_LF)
+        H_ctf = (10**(g_DC/20) + 1j * f / f_z) * (10**(g_DC2/20) + 1j * f / f_LF) / denum
+        return cls.from_tf(f, H_ctf, cfg)
     
+    @classmethod
+    def rect_pulse(cls, cfg: LinkConfig, At: float) -> IEEECOMFilter:
+        "Eq. 93A-23"
+        f = cfg.freqs
+        X_f = At * cfg.bt * np.sinc(f * cfg.bt)
+        return cls.from_tf(f, X_f, cfg)
