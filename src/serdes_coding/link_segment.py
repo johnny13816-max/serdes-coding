@@ -321,7 +321,21 @@ class sparamModel:
     - input validation contract for frequency axes, Sdd, S4P, and port order
     - single-ended S4P to differential-mode Sdd conversion
     - generic Sdd two-port cascade operations
-    - conversion of a selected Sdd term to scalar LinkSegment
+    - conversion from Sdd to terminated voltage transfer H21(f), then LinkSegment
+
+    Mutation policy
+    ---------------
+    In-place methods update self.network and return self for chaining:
+    - renormalize()
+    - resample()
+    - extrapolate_to_dc()
+    - renum()
+
+    Immutable methods return a modified copy and leave self unchanged:
+    - renormalized()
+    - resampled()
+    - extrapolated_to_dc()
+    - renumbered()
 
     It should not own IEEE COM primitive model construction such as shunt
     capacitance, package transmission line, Tx package, Rx package builders, or
@@ -560,28 +574,95 @@ class sparamModel:
     # -------------------
     # public methods
     # -------------------
+    # ---- immutable / copy-returning operations ----
     def cascade(self, other: 'sparamModel') -> 'sparamModel':
         """
-        Cascade two Sdd two-port networks using scikit-rf's built-in cascade.
+        Return a new model by cascading two Sdd two-port networks.
 
         The physical order is:
             self -> other
+
+        Both models must already use the same frequency grid and reference
+        impedance. Resample / renormalize explicitly before cascade.
         """
         self.validate_compatible_sparam(other)
         cascaded_network = self.network ** other.network
-        return sparamModel.from_network(cascaded_network, mode="sdd")
+        return type(self).from_network(cascaded_network, mode="sdd", z0=cascaded_network.z0)
 
     def renormalized(self, z0_new: Union[float, np.ndarray], s_def: str | None = None) -> 'sparamModel':
         """
-        Return a new model with S-parameters renormalized to a new reference impedance.
+        Return a copy with S-parameters renormalized to a new reference impedance.
 
         This changes the S-parameter values, not only the Network.z0 metadata.
-        For real-valued SerDes reference impedances, the default scikit-rf
-        scattering definition is sufficient.
         """
-        ntwk = self.network.copy()
-        ntwk.renormalize(z0_new, s_def=s_def)
-        return type(self).from_network(ntwk, mode="sdd", z0=z0_new)
+        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        return model.renormalize(z0_new, s_def=s_def)
+
+    def resampled(
+        self,
+        freqs: np.ndarray,
+        basis: str = "s",
+        coords: str = "cart",
+        kind: str | None = None,
+        dc_method: str = "skrf",
+        dc_sparam: np.ndarray | None = None,
+        dc_kind: str = "linear",
+        dc_coords: str = "cart",
+    ) -> 'sparamModel':
+        """
+        Return a copy sampled on the requested grid within the measured span.
+
+        If the requested grid starts below the measured low-frequency point,
+        the copy first performs DC extrapolation. The returned model only keeps
+        requested points up to the measured f_stop; high-frequency S-parameter
+        extrapolation is intentionally not performed here.
+        """
+        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        return model.resample(
+            freqs,
+            basis=basis,
+            coords=coords,
+            kind=kind,
+            dc_method=dc_method,
+            dc_sparam=dc_sparam,
+            dc_kind=dc_kind,
+            dc_coords=dc_coords,
+        )
+
+    def extrapolated_to_dc(
+        self,
+        method: str = "skrf",
+        dc_sparam: np.ndarray | None = None,
+        kind: str = "linear",
+        coords: str = "cart",
+    ) -> 'sparamModel':
+        """
+        Return a copy with a DC point added when the measurement lacks DC.
+        """
+        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        return model.extrapolate_to_dc(method=method, dc_sparam=dc_sparam, kind=kind, coords=coords)
+
+    def renumbered(self, port_order: tuple[int, ...]) -> 'sparamModel':
+        """
+        Return a copy with ports reordered.
+
+        port_order gives old port indices in the desired new order. For example,
+        port_order=(1, 0) swaps a two-port Sdd network.
+        """
+        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        return model.renum(port_order)
+
+    # ---- in-place operations ----
+    def renormalize(self, z0_new: Union[float, np.ndarray], s_def: str | None = None) -> 'sparamModel':
+        """
+        Renormalize self.network to a new reference impedance in place.
+
+        This changes the S-parameter values, not only the Network.z0 metadata.
+        The method returns self for chaining.
+        """
+        self.network.renormalize(z0_new, s_def=s_def)
+        self.network = self.validate_network(self.network)
+        return self
 
     def resample(
         self,
@@ -595,34 +676,35 @@ class sparamModel:
         dc_coords: str = "cart",
     ) -> 'sparamModel':
         """
-        Return a new model sampled on the requested grid within the measured span.
+        Resample self.network in place on the requested grid within the measured span.
 
         If the requested grid starts below the measured low-frequency point,
         this method first calls extrapolate_to_dc(). After that it only keeps
         requested points up to the measured f_stop. It intentionally does not
-        extrapolate S-parameters above the measured bandwidth.
+        extrapolate S-parameters above the measured bandwidth. The method
+        returns self for chaining.
         """
         freqs = self.validate_resample_freqs(freqs)
 
-        source = self
         if freqs[0] < self.freqs[0]:
-            source = self.extrapolate_to_dc(
+            self.extrapolate_to_dc(
                 method=dc_method,
                 dc_sparam=dc_sparam,
                 kind=dc_kind,
                 coords=dc_coords,
             )
 
-        f_stop = source.freqs[-1]
+        f_stop = self.freqs[-1]
         freqs_inband = freqs[freqs <= f_stop]
         if len(freqs_inband) < 2:
             raise ValueError("resample() target grid must contain at least two in-band frequency points.")
 
-        if freqs_inband[0] < source.freqs[0]:
+        if freqs_inband[0] < self.freqs[0]:
             raise ValueError("resample() target grid starts below the available frequency span after DC handling.")
 
-        ntwk = source.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
-        return type(self).from_network(ntwk, mode="sdd", z0=ntwk.z0)
+        self.network = self.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
+        self.network = self.validate_network(self.network)
+        return self
 
     def extrapolate_to_dc(
         self,
@@ -632,23 +714,25 @@ class sparamModel:
         coords: str = "cart",
     ) -> 'sparamModel':
         """
-        Return a new model with a DC point added when the measurement lacks DC.
+        Add a DC point to self.network in place when the measurement lacks DC.
 
         method="skrf" delegates to skrf.Network.extrapolate_to_dc(). Other
         DC models from the sparam_to_sbr reference can be added here later.
+        The method returns self for chaining.
         """
         if np.isclose(self.freqs[0], 0.0):
-            return type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+            return self
 
         if method != "skrf":
             raise NotImplementedError('Only method="skrf" is implemented for DC extrapolation.')
 
-        ntwk = self.network.extrapolate_to_dc(
+        self.network = self.network.extrapolate_to_dc(
             dc_sparam=dc_sparam,
             kind=kind,
             coords=coords,
         )
-        return type(self).from_network(ntwk, mode="sdd", z0=ntwk.z0)
+        self.network = self.validate_network(self.network)
+        return self
 
     def voltage_transfer_function(
         self,
@@ -681,16 +765,26 @@ class sparamModel:
 
     def renum(self, port_order: tuple[int, ...]) -> 'sparamModel':
         """
-        Return a new model with ports reordered.
+        Reorder self.network ports in place.
 
         port_order gives old port indices in the desired new order. For example,
         port_order=(1, 0) swaps a two-port Sdd network.
+
+        Internally this maps to scikit-rf Network.renumber(from_ports, to_ports):
+            from_ports = port_order
+            to_ports = range(n_ports)
+
+        The method returns self for chaining.
         """
         port_order = self.validate_renum_port_order(port_order)
-        s_new = self.sdd[:, port_order, :][:, :, port_order]
-        z0_new = self.network.z0[:, port_order]
-        return type(self).from_sdd_array(self.freqs, s_new, z0=z0_new)
+        self.network.renumber(
+            from_ports=list(port_order),
+            to_ports=list(range(len(port_order))),
+        )
+        self.network = self.validate_network(self.network)
+        return self
     
+    # ---- derived scalar conversion ----
     def to_LinkSegment(
         self,
         cfg: 'LinkConfig',
@@ -707,13 +801,16 @@ class sparamModel:
         """
         Build a scalar LinkSegment from the terminated voltage transfer H21(f).
 
+        This method does not mutate self. It uses a temporary resampled copy in
+        S-matrix domain, then converts that copy to H21(f).
+
         Flow:
         1. resample the Sdd network onto cfg.freqs inside the measured bandwidth
         2. compute H21(f) with impedance mismatch using Eq. 93A-18
         3. let LinkSegment.from_tf() extend the scalar transfer function to
            cfg.f_nyq using the project's TF extension rule
         """
-        resampled = self.resample(
+        resampled = self.resampled(
             cfg.freqs,
             basis=basis,
             coords=coords,
