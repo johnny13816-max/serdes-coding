@@ -53,6 +53,9 @@ def resample_tf(
         if not np.all(np.diff(f_new) > 0):
             raise ValueError("freqs_new must be strictly increasing.")
 
+        # Check that the target FFT frequency axis is uniformly spaced.
+        LinkConfig.validate_uniform_freqs(f_new)
+
         if f_meas[0] > f_new[0]:
             raise ValueError("freqs_meas must include the target DC / low-frequency start.")
 
@@ -268,6 +271,8 @@ class LinkConfig:
         self.L_ui = int(self.Nfft / self.per_ui)
         self.times_ui = self.times / self.bt
 
+        self.validate_uniform_freqs(self.freqs)
+
         if (self.freqs[-1] != self.f_nyq):
             raise Exception("Error @ __post_init__")
         if (self.times[-1] != self.T_max-self.dt):
@@ -277,19 +282,38 @@ class LinkConfig:
     def validate_freqs(freqs: np.ndarray) -> np.ndarray:
         freqs = np.asarray(freqs, dtype=float)
 
+        # Check that the frequency axis is one-dimensional.
         if freqs.ndim != 1:
             raise ValueError("freqs must be a 1D array.")
 
+        # Check that the frequency axis has enough points for interpolation.
         if len(freqs) < 2:
             raise ValueError("freqs must contain at least two points.")
 
+        # Check that all frequency values are finite.
         if not np.all(np.isfinite(freqs)):
             raise ValueError("freqs contains non-finite values.")
 
+        # Check that the frequency axis is non-negative.
+        if freqs[0] < 0:
+            raise ValueError("freqs must be non-negative.")
+
+        # Check that the frequency axis is strictly increasing.
         if not np.all(np.diff(freqs) > 0):
             raise ValueError("freqs must be strictly increasing.")
 
         return freqs 
+
+    @staticmethod
+    def validate_uniform_freqs(freqs: np.ndarray, rtol: float = 1e-9, atol: float = 1e-6) -> np.ndarray:
+        freqs = LinkConfig.validate_freqs(freqs)
+        df = np.diff(freqs)
+
+        # Check that every frequency step is equal within numerical tolerance.
+        if not np.allclose(df, df[0], rtol=rtol, atol=atol):
+            raise ValueError("freqs must be uniformly spaced.")
+
+        return freqs
 
     @staticmethod
     def validate_times(times: np.ndarray) -> np.ndarray:
@@ -1514,7 +1538,7 @@ class IEEECOMFilter(LinkSegment):
             raise Exception("Setup error in IEEECOMFilter.tx_ffe().")
 
         f = cfg.freqs
-        H_ffe = np.zeros_likes(f, dtype=complex)
+        H_ffe = np.zeros_like(f, dtype=complex)
         for idx, c_i in enumerate(txfir):
             H_ffe += c_i * np.exp(-1j * 2*np.pi * idx * f/cfg.fb)
 
