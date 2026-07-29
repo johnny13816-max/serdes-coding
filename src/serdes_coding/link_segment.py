@@ -176,48 +176,6 @@ def _s4p_to_sdd(
     ], axis=-2)
 
 # ========================
-# IEEE COM helpers
-# ========================
-def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
-    """
-    Cascade two Sdd arrays using IEEE COM equations.
-
-    Reference:
-    - IEEE 802.3 Annex 93A.1.2.1, Eq. 93A-4 through Eq. 93A-7.
-
-    The physical order is:
-        x -> y
-
-    sx and sy must each have shape (N, 2, 2), using:
-        [[S11, S12],
-            [S21, S22]]
-    """
-    sx = np.asarray(sx, dtype=complex)
-    sy = np.asarray(sy, dtype=complex)
-
-    if sx.shape != sy.shape or sx.ndim != 3 or sx.shape[1:] != (2, 2):
-        raise ValueError("sx and sy must both have shape (N, 2, 2).")
-
-    x11, x12 = sx[:, 0, 0], sx[:, 0, 1]
-    x21, x22 = sx[:, 1, 0], sx[:, 1, 1]
-    y11, y12 = sy[:, 0, 0], sy[:, 0, 1]
-    y21, y22 = sy[:, 1, 0], sy[:, 1, 1]
-
-    denom = 1 - x22 * y11
-    if np.any(np.isclose(denom, 0.0)):
-        raise ZeroDivisionError("S-parameter cascade denominator is close to zero.")
-
-    z11 = x11 + (x12 * y11 * x21) / denom
-    z12 = (x12 * y12) / denom
-    z21 = (y21 * x21) / denom
-    z22 = y22 + (y21 * x22 * y12) / denom
-
-    return np.stack([
-        np.stack([z11, z12], axis=-1),
-        np.stack([z21, z22], axis=-1),
-    ], axis=-2)
-
-# ========================
 # classes
 # ========================
 
@@ -344,7 +302,7 @@ class sparamModel:
     - array / Touchstone / rf.Network ingestion
     - input validation contract for frequency axes, Sdd, S4P, and port order
     - single-ended S4P to differential-mode Sdd conversion
-    - generic Sdd two-port cascade operations
+    - generic Sdd two-port cascade operations through scikit-rf
     - conversion from Sdd to terminated voltage transfer H21(f), then LinkSegment
 
     Mutation policy
@@ -363,7 +321,8 @@ class sparamModel:
 
     It should not own IEEE COM primitive model construction such as shunt
     capacitance, package transmission line, Tx package, Rx package builders, or
-    COM-specific cascade formulas. Those belong in IEEECOMsparam.
+    IEEE COM-specific cascade formulas and primitive model builders belong in
+    com_model.py, not in this generic container.
 
     Internal storage
     ----------------
@@ -847,138 +806,6 @@ class sparamModel:
         H21 = resampled.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
         return LinkSegment.from_tf(resampled.freqs, H21, cfg)
 
-class IEEECOMsparam(sparamModel):
-    """
-    IEEE 802.3 Annex 93A COM-specific S-parameter model builder.
-
-    Class boundary
-    --------------
-    IEEECOMsparam is a specialization of sparamModel for S-parameter networks
-    that are generated from IEEE COM equations. It should own COM primitive and
-    package constructors, for example:
-    - shunt capacitance model
-    - package transmission-line model
-    - Tx package model
-    - Rx package model
-    - COM-defined Sdd cascade equations
-
-    It intentionally keeps the same internal representation as sparamModel:
-    an rf.Network storing differential-mode Sdd with shape (N, 2, 2). The child
-    class changes how models are constructed, not how S-parameters are stored.
-    Generic data ingestion and scikit-rf cascade behavior are inherited from
-    sparamModel.
-    """
-    @classmethod
-    def shunt_capacitance(
-        cls,
-        cfg: 'LinkConfig',
-        capacitance: float,
-        R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
-        """
-        Build the COM shunt capacitance Sdd two-port on cfg.freqs.
-
-        Reference:
-        - IEEE 802.3 Annex 93A.1.2.2, Eq. 93A-8.
-
-        Parameters
-        ----------
-        cfg:
-            LinkConfig that defines the frequency grid.
-        capacitance:
-            Shunt capacitance in farads.
-        R0:
-            Single-ended reference resistance used by Eq. 93A-8. The internal
-            differential-mode Sdd Network uses z0 = 2 * R0.
-        """
-        C = float(capacitance)
-        R0 = float(R0)
-    
-        if capacitance < 0.0:
-            raise ValueError("capacitance must be non-negative.")
-    
-        y = 1j * 2 * np.pi * cfg.freqs * C        # y = jwc
-        denom = 2 + y * R0
-    
-        s11 = -(y * R0) / denom
-        s21 = 2 / denom
-    
-        sdd = np.stack([
-            np.stack([s11, s21], axis=-1),
-            np.stack([s21, s11], axis=-1),
-        ], axis=-2)
-        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
-
-    @classmethod
-    def series_inductance(cls, cfg: 'LinkConfig', inductance: float, R0: float = 50) -> 'IEEECOMsparam':
-        "Eq. 93A-9a."
-        L = float(inductance)
-        R0 = float(R0)
-
-        y = 1j * 2*np.pi * cfg.freqs * L
-        denum = 2 + y / R0
-        s11 = (y / R0) / denum
-        s21 = 2 / denum
-        sdd = np.stack([
-            np.stack([s11, s21], axis=-1),
-            np.stack([s21, s11], axis=-1)
-        ], axis=-2)
-
-        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
-
-    @classmethod
-    def pkg_trans_line(
-        cls, 
-        cfg: 'LinkConfig',
-        R0: float, 
-        zp: float, 
-        gamma0: float = 0.0,
-        a1: float = float(1.734e-3),
-        a2: float = float(1.455e-4),
-        tau: float = float(6.141e-3), 
-        Zc: float = 78.2
-    ) -> np.ndarray:
-        "Eq. 93A-9, 10, 11, 12, 13, 14."
-
-        f = cfg.freqs
-        if np.any(f < 0): 
-            raise ValueError("The definition of pkg transmission line model do not include f < 0.")
-        R0 = float(R0)
-        zp = float(zp)
-
-        gamma1 = a1 * (1 + 1j)
-        gamma2 = a2 * (1 - ( 1j * (2/np.pi) * np.log(f[f>0]/1e9) )) + 1j * 2*np.pi * tau
-        gamma2 = np.r_[0, gamma2]
-        gamma = gamma0 + gamma1 * np.sqrt(f) + gamma2 * f
-        rho = (Zc - 2*R0) / (Zc + 2*R0)
-
-        y = np.exp( -(gamma * 2*zp) )
-        y1 = np.exp( -(gamma * zp) )
-        denum = 1 - rho**2 * y
-        s11 = (rho * (1 - y)) / denum
-        s21 = (1 - rho**2) * y1 / denum
-
-        sdd = np.stack([
-            np.stack([s11, s21], axis=-1),
-            np.stack([s21, s11], axis=-1)
-        ], axis=-2)
-
-        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
-
-    def cascade_com(self, other: 'sparamModel') -> 'IEEECOMsparam':
-        """
-        Cascade two Sdd two-port networks using IEEE COM equations.
-
-        Reference:
-        - IEEE 802.3 Annex 93A.1.2.1, Eq. 93A-4 through Eq. 93A-7.
-
-        The physical order is:
-            self -> other
-        """
-        self.validate_compatible_sparam(other)
-        cascaded_sdd = IEEECOM_cascade_sdd(self.sdd, other.sdd)
-        return type(self).from_sdd_array(self.freqs, cascaded_sdd, z0=self.network.z0)
-
 class LinkSegment:
     """
     Scalar channel response container on a LinkConfig grid.
@@ -992,7 +819,7 @@ class LinkSegment:
 
     It should not own two-port S-parameter storage, S4P-to-Sdd conversion,
     mixed-mode conversion, or IEEE COM package primitive construction. Those
-    belong in sparamModel / IEEECOMsparam before a scalar response is selected.
+    belong in sparamModel or com_model.py before a scalar response is selected.
     """
 
     def __init__(self, cfg: 'LinkConfig'):
@@ -1519,51 +1346,3 @@ class LinkSegment:
 
         return sr
 
-class IEEECOMFilter(LinkSegment):
-
-    @classmethod
-    def rx_noise_filter(cls, cfg: LinkConfig, fr: float) -> IEEECOMFilter:
-        "Eq. 93A-20"
-        p1 = 3.414214
-        p2 = 2.613126
-        f = cfg.freqs
-        H_r = 1.0 / (1.0 - p1*(f/fr)**2 + (f/fr)**4 + 1j*p2*(f/fr - (f/fr)**3))
-        return cls.from_tf(f_meas=f, H_meas=H_r, cfg=cfg)
-
-    @classmethod
-    def tx_ffe(cls, cfg: LinkConfig, txfir: np.ndarray, num_pre: int) -> IEEECOMFilter:
-        "Eq. 93A-21"
-        # check fir main cursor
-        if (np.argmax(np.abs(txfir)) != num_pre):
-            raise Exception("Setup error in IEEECOMFilter.tx_ffe().")
-
-        f = cfg.freqs
-        H_ffe = np.zeros_like(f, dtype=complex)
-        for idx, c_i in enumerate(txfir):
-            H_ffe += c_i * np.exp(-1j * 2*np.pi * idx * f/cfg.fb)
-
-        return cls.from_tf(f_meas=f, H_meas=H_ffe, cfg=cfg)
-
-    @classmethod
-    def rx_equalizer(
-        cls, 
-        cfg: LinkConfig, 
-        g_DC: float, 
-        g_DC2: float,
-        f_z: float,
-        f_LF: float,
-        f_p1: float,
-        f_p2: float
-    ) -> IEEECOMFilter:
-        "Eq. 93A-22"
-        f = cfg.freqs
-        denum = (1 + 1j * f / f_p1) * (1 + 1j * f / f_p2) * (1 + 1j * f / f_LF)
-        H_ctf = (10**(g_DC/20) + 1j * f / f_z) * (10**(g_DC2/20) + 1j * f / f_LF) / denum
-        return cls.from_tf(f, H_ctf, cfg)
-    
-    @classmethod
-    def rect_pulse(cls, cfg: LinkConfig, At: float) -> IEEECOMFilter:
-        "Eq. 93A-23"
-        f = cfg.freqs
-        X_f = At * cfg.bt * np.sinc(f * cfg.bt)
-        return cls.from_tf(f, X_f, cfg)

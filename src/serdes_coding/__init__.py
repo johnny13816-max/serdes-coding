@@ -5,6 +5,8 @@ from .com_model import (
     COMComputationResult,
     COMModel93A,
     COMSignalPathConfig,
+    IEEECOMFilter,
+    IEEECOMsparam,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "COMComputationResult",
     "COMModel93A",
     "COMSignalPathConfig",
+    "IEEECOMFilter",
+    "IEEECOMsparam",
 ]
