@@ -1,12 +1,62 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence
-
+from typing import Literal, Optional, Sequence
 import numpy as np
+from .link_segment import LinkConfig, LinkSegment, SparamModel
 
-from .link_segment import LinkConfig, LinkSegment, sparamModel
+def excel_to_config(excel_path: str) -> COMConfig:
+    """
+    Build COMConfig from one Excel row by direct field assignment.
 
+    Expected Excel format:
+    - first sheet
+    - one header row
+    - first data row contains values
+
+    Column names intentionally match dataclass field names so this function
+    stays simple and easy to edit.
+    """
+    import pandas as pd
+
+    row = pd.read_excel(excel_path).iloc[0]
+
+    return COMConfig(
+        filter=COMFilterConfig(
+            txfir=row["txfir"],
+            num_pre=row["num_pre"],
+            Tr=row["Tr"],
+            fr=row["fr"],
+            g_DC=row["g_DC"],
+            g_DC2=row["g_DC2"],
+            f_z=row["f_z"],
+            f_LF=row["f_LF"],
+            f_p1=row["f_p1"],
+            f_p2=row["f_p2"],
+            At=row["At"],
+        ),
+        channel=COMChannelConfig(
+            victim_s4p_path=row["victim_s4p_path"],
+            next_s4p_paths=row["next_s4p_paths"],
+            fext_s4p_paths=row["fext_s4p_paths"],
+            port_order=row["port_order"],
+            R0=row["R0"],
+            gamma_src=row["gamma_src"],
+            gamma_load=row["gamma_load"],
+        ),
+        pkg=COMPkgConfig(
+            C_d=row["C_d"],
+            L_s=row["L_s"],
+            C_b=row["C_b"],
+            z_p=row["z_p"],
+            C_p=row["C_p"],
+            enable=row["pkg_enable"],
+            R0=row["R0"],
+            Z_c=row["Z_c"],
+            z_p2=row["z_p2"],
+            Z_c2=row["Z_c2"],
+        ),
+    )
 
 def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
     """
@@ -47,8 +97,7 @@ def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
         np.stack([z21, z22], axis=-1),
     ], axis=-2)
 
-
-class IEEECOMsparam(sparamModel):
+class IEEECOMsparam(SparamModel):
     """
     IEEE 802.3 Annex 93A COM-specific S-parameter model builder.
 
@@ -61,7 +110,7 @@ class IEEECOMsparam(sparamModel):
     - COM-defined Sdd cascade equations
 
     Generic S-parameter ingestion, storage, and scikit-rf operations remain in
-    sparamModel. This class only adds spec-defined COM construction behavior.
+    SparamModel. This class only adds spec-defined COM construction behavior.
     """
 
     @classmethod
@@ -80,7 +129,7 @@ class IEEECOMsparam(sparamModel):
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines frequencies in Hz.
         capacitance:
             Shunt capacitance in farads.
         R0:
@@ -116,12 +165,12 @@ class IEEECOMsparam(sparamModel):
         Build the COM series inductance Sdd two-port on cfg.freqs.
 
         Reference:
-        - IEEE 802.3 Annex 93A.1.2.3, Eq. 93A-9a.
+        - IEEE 802.3ck Annex 93A.1.2.2a, Eq. 93A-9a.
 
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines frequencies in Hz.
         inductance:
             Series inductance in henries.
         R0:
@@ -151,6 +200,7 @@ class IEEECOMsparam(sparamModel):
         cfg: LinkConfig,
         R0: float,
         zp: float,
+        *,
         gamma0: float = 0.0,
         a1: float = float(1.734e-3),
         a2: float = float(1.455e-4),
@@ -161,32 +211,48 @@ class IEEECOMsparam(sparamModel):
         Build the COM package transmission-line Sdd two-port on cfg.freqs.
 
         Reference:
-        - IEEE 802.3 Annex 93A.1.2.4, Eq. 93A-9 through Eq. 93A-14.
+        - IEEE 802.3 Annex 93A.1.2.3, Eq. 93A-9 through Eq. 93A-14.
+        - IEEE 802.3ck Annex 93A.1.2.3 clarifies that formula frequency f is
+          in GHz.
 
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig. cfg.freqs is in Hz.
         R0:
             Single-ended reference resistance.
         zp:
             Package line length in millimeters.
         gamma0, a1, a2, tau:
-            COM propagation-coefficient model parameters.
+            COM propagation-coefficient model parameters used with formula
+            frequency f in GHz.
         Zc:
             Package differential characteristic impedance.
         """
-        f = cfg.freqs
-        if np.any(f < 0):
+        f_hz = cfg.freqs
+        if np.any(f_hz < 0):
             raise ValueError("The package transmission-line model does not include f < 0.")
 
         R0 = float(R0)
         zp = float(zp)
+        Zc = float(Zc)
 
+        if R0 <= 0.0:
+            raise ValueError("R0 must be positive.")
+        if zp < 0.0:
+            raise ValueError("zp must be non-negative.")
+        if Zc <= 0.0:
+            raise ValueError("Zc must be positive.")
+
+        f = f_hz / 1e9
+        gamma = np.full_like(f, complex(gamma0), dtype=complex)
         gamma1 = a1 * (1 + 1j)
-        gamma2 = a2 * (1 - (1j * (2 / np.pi) * np.log(f[f > 0] / 1e9))) + 1j * 2 * np.pi * tau
-        gamma2 = np.r_[0, gamma2]
-        gamma = gamma0 + gamma1 * np.sqrt(f) + gamma2 * f
+        positive = f > 0.0
+        gamma2 = (
+            a2 * (1 - (1j * (2 / np.pi) * np.log(f[positive])))
+            + 1j * 2 * np.pi * tau
+        )
+        gamma[positive] = gamma0 + gamma1 * np.sqrt(f[positive]) + gamma2 * f[positive]
         rho = (Zc - 2 * R0) / (Zc + 2 * R0)
 
         y = np.exp(-(gamma * 2 * zp))
@@ -200,9 +266,9 @@ class IEEECOMsparam(sparamModel):
             np.stack([s21, s11], axis=-1),
         ], axis=-2)
 
-        return cls.from_sdd_array(cfg.freqs, sdd, z0=2 * R0)
+        return cls.from_sdd_array(f_hz, sdd, z0=2 * R0)
 
-    def cascade_com(self, other: sparamModel) -> 'IEEECOMsparam':
+    def cascade_com(self, other: SparamModel) -> 'IEEECOMsparam':
         """
         Cascade two Sdd two-port networks using IEEE COM equations.
 
@@ -213,11 +279,32 @@ class IEEECOMsparam(sparamModel):
         ----------
         other:
             Sdd two-port physically following self.
-        """
-        self.validate_compatible_sparam(other)
-        cascaded_sdd = IEEECOM_cascade_sdd(self.sdd, other.sdd)
-        return type(self).from_sdd_array(self.freqs, cascaded_sdd, z0=self.network.z0)
 
+        Frequency-grid rule
+        -------------------
+        If the two models do not already share an identical frequency grid,
+        both are resampled onto the overlapping subset of self.freqs. This keeps
+        cascade in the measured/common S-parameter band and avoids high-frequency
+        S-parameter extrapolation.
+        """
+        if not isinstance(other, SparamModel):
+            raise TypeError("other must be an SparamModel.")
+
+        if self.sdd.shape[1:] != (2, 2) or other.sdd.shape[1:] != (2, 2):
+            raise ValueError("Both models must contain 2-port Sdd networks.")
+
+        f_start = max(self.freqs[0], other.freqs[0])
+        f_stop = min(self.freqs[-1], other.freqs[-1])
+        common_freqs = self.freqs[(self.freqs >= f_start) & (self.freqs <= f_stop)]
+        if len(common_freqs) < 2:
+            raise ValueError("No overlapping frequency grid for COM S-parameter cascade.")
+
+        left = self.resampled(common_freqs)
+        right = other.resampled(common_freqs)
+        left.validate_compatible_sparam(right)
+
+        cascaded_sdd = IEEECOM_cascade_sdd(left.sdd, right.sdd)
+        return type(self).from_sdd_array(common_freqs, cascaded_sdd, z0=left.network.z0)
 
 class IEEECOMFilter(LinkSegment):
     """
@@ -330,213 +417,380 @@ class IEEECOMFilter(LinkSegment):
         X_f = At * cfg.bt * np.sinc(f * cfg.bt)
         return cls.from_tf(f, X_f, cfg)
 
+    @classmethod
+    def transition_time_filter(cls, cfg: LinkConfig, Tr: float) -> 'IEEECOMFilter':
+        "Eq. 93A-46"
+        p1 = 1.6832
+        f = cfg.freqs
+        Tr = float(Tr)
+        H_t = np.exp(-2 * (np.pi * f * Tr / p1)**2)
+        return cls.from_tf(f, H_t, cfg=cfg)
+
+# ========================================
+# Configs (all integrated in COMConfig)
+# ========================================
 
 @dataclass
-class COMChannelInput:
+class COMPkgConfig:
     """
-    Input description for the channel path used by IEEE 802.3 Annex 93A COM.
+    COM package configuration using spec/Excel-domain units.
 
-    Parameters
-    ----------
-    freqs:
-        Frequency axis of the input S-parameter data, in Hz.
-    s4p:
-        Single-ended four-port S-parameter matrix with shape (N, 4, 4).
-    port_order:
-        Old port order interpreted as (tx_p, tx_n, rx_p, rx_n).
-    z0:
-        Single-ended reference impedance of the S4P data.
-    gamma_src:
-        Source reflection coefficient used by Eq. 93A-18.
-    gamma_load:
-        Load reflection coefficient used by Eq. 93A-18.
+    Units:
+    - C_d, C_b, C_p: pF
+    - L_s: nH
+    - z_p, z_p2: millimeters
+    - R0, Z_c, Z_c2: ohms
     """
-    freqs: np.ndarray
-    s4p: np.ndarray
-    port_order: tuple[int, int, int, int] = (0, 1, 2, 3)
-    z0: float = 50.0
-    gamma_src: complex | np.ndarray = 0.0
-    gamma_load: complex | np.ndarray = 0.0
+    C_d: float = 0.0      # unit: pF
+    L_s: float = 0.0      # unit: nH
+    C_b: float = 0.0      # unit: pF
+    z_p: float = 0.0      # unit: mm
+    C_p: float = 0.0      # unit: pF
+    enable: bool = True
+    R0: float = 50.0
+    Z_c: float = 78.2   # unit: ohm
+    z_p2: Optional[float] = None # unit: mm
+    Z_c2: float = 78.2  # unit: ohm
 
+    def __post_init__(self) -> None:
+        if self.C_d < 0.0 or self.L_s < 0.0 or self.C_b < 0.0 or self.C_p < 0.0:
+            raise ValueError("Package capacitance and inductance values must be non-negative.")
+        if self.z_p < 0.0:
+            raise ValueError("z_p must be non-negative.")
+        if self.R0 <= 0.0 or self.Z_c <= 0.0:
+            raise ValueError("R0 and Z_c must be positive.")
+        if self.z_p2 is not None and self.z_p2 < 0.0:
+            raise ValueError("z_p2 must be non-negative when provided.")
+        if self.Z_c2 <= 0.0:
+            raise ValueError("Z_c2 must be positive.")
 
 @dataclass
-class COMSignalPathConfig:
+class COMChannelConfig:
     """
-    Optional linear filters applied after the terminated channel H21(f).
+    Victim and crosstalk channel configuration using spec/Excel-domain units.
 
-    Parameters
-    ----------
-    tx_fir:
-        TX FFE taps for Eq. 93A-21. None disables the block.
-    tx_num_pre:
-        Number of pre-cursor taps before the TX FFE main cursor.
-    rx_eq:
-        CTLE parameters for Eq. 93A-22. Use keys g_DC, g_DC2, f_z, f_LF,
-        f_p1, and f_p2. None disables the block.
-    rect_pulse_amplitude:
-        Amplitude parameter At for the rectangular pulse of Eq. 93A-23. None
-        disables the block.
+    freqs and s4p are populated after Touchstone loading. Excel can directly
+    provide the path fields first.
     """
-    tx_fir: np.ndarray | None = None
-    tx_num_pre: int = 0
-    rx_eq: dict[str, float] | None = None
-    rect_pulse_amplitude: float | None = None
-
+    victim_s4p_path: Optional[str] = None
+    next_s4p_paths: Sequence[str] = ()
+    fext_s4p_paths: Sequence[str] = ()
+    port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # assume all channels shared
+    R0: float = 50.0                                        # assume all channels shared
+    gamma_src: complex | np.ndarray = 0.0                   # assume all channels shared
+    gamma_load: complex | np.ndarray = 0.0                  # assume all channels shared
 
 @dataclass
-class COMComputationResult:
+class COMFilterConfig:
     """
-    Container for intermediate and final COM calculation results.
+    COM filter configuration using spec/Excel-domain units.
 
-    Parameters
-    ----------
-    channel_sparam:
-        Differential two-port S-parameter model converted from the input S4P.
-    channel_response:
-        Terminated scalar H21(f) represented as a LinkSegment.
-    signal_path:
-        Linear signal path after optional TX/RX filtering.
-    com_db:
-        Final COM value in dB. None until 93A.1.6 and 93A.1.7 are implemented.
+    This groups parameters used to build H_txffe, H_t, H_r, and H_ctf.
     """
-    channel_sparam: sparamModel
-    channel_response: LinkSegment
-    signal_path: LinkSegment
-    com_db: float | None = None
-    notes: list[str] = field(default_factory=list)
+    c_m3: float = 0.0
+    c_m2: float = 0.0
+    c_m1: float = 0.0
+    c_1: float = 0.0
+    num_pre: int = 3
+    Tr: Optional[float] = None
+    fr: Optional[float] = None
+    g_DC: Optional[float] = None
+    g_DC2: Optional[float] = None
+    f_z: Optional[float] = None
+    f_LF: Optional[float] = None
+    f_p1: Optional[float] = None
+    f_p2: Optional[float] = None
+    A_v: float = 1.0
+    A_fe: float = 1.0
+    A_ne: float = 1.0
 
+    # derived attributes
+    c_0: float = field(init=False)
+    txfir: np.ndarray = field(init=False)
 
-class COMModel93A:
+    def __post_init__(self):
+        self.c_0 = 1.0 - abs(self.c_m3) - abs(self.c_m2) - abs(self.c_m1) - abs(self.c_1)
+        self.txfir = np.r_[self.c_m3, self.c_m2, self.c_m1, self.c_0, self.c_1]
+
+@dataclass
+class COMConfig:
+    """Top-level COM configuration grouped by function."""
+    link: LinkConfig
+    filter: COMFilterConfig
+    channel: COMChannelConfig
+    pkg: COMPkgConfig
+
+# ========================================
+# Status (all integrated in COMStatus)
+# ========================================
+
+@dataclass
+class COMCommonStatus:
+    S_tp: IEEECOMsparam
+    S_tp_next: IEEECOMsparam
+    S_rp: IEEECOMsparam
+    H_ffe: IEEECOMFilter
+    H_ffe_next: IEEECOMFilter
+    H_t: IEEECOMFilter
+    H_r: IEEECOMFilter
+    H_ctf: IEEECOMFilter
+    X_v: IEEECOMFilter
+    X_fe: IEEECOMFilter
+    X_ne: IEEECOMFilter
+
+@dataclass
+class COMPathStatus:
+    kind: Literal["victim", "next", "fext"]
+    S_ch: SparamModel
+    S_all: SparamModel      # augmented signal path
+    H_21: LinkSegment
+    H_all: LinkSegment      # voltage transfer function with filters
+    X: IEEECOMFilter
+
+@dataclass
+class COMStatus:
+    common: COMCommonStatus
+    paths: list[COMPathStatus]
+
+    @property
+    def victim(self) -> COMPathStatus:
+        return self.paths[0]
+
+    @property
+    def xtalks(self) -> list[COMPathStatus]:
+        return self.paths[1:]
+
+# -------------------
+# helpers
+# -------------------
+
+def _bulid_txpkg(link_cfg: LinkConfig, txpkg_cfg: COMPkgConfig, *, isNext: bool = False) -> IEEECOMsparam:
+    "Eq. 93A-15 and 93A-15a, 93A-16b"
+    C_d = txpkg_cfg.C_d * 1e-12
+    L_s = txpkg_cfg.L_s * 1e-9
+    C_b = txpkg_cfg.C_b * 1e-12
+    C_p = txpkg_cfg.C_p * 1e-12
+
+    S_d = IEEECOMsparam.shunt_capacitance(link_cfg, C_d, txpkg_cfg.R0)
+    S_s = IEEECOMsparam.series_inductance(link_cfg, L_s, txpkg_cfg.R0)
+    S_b = IEEECOMsparam.shunt_capacitance(link_cfg, C_b, txpkg_cfg.R0)
+    S_l = IEEECOMsparam.pkg_trans_line(link_cfg, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
+    if (txpkg_cfg.z_p2 is not None):
+        S_l2 = IEEECOMsparam.pkg_trans_line(link_cfg, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
+    S_p = IEEECOMsparam.shunt_capacitance(link_cfg, C_p, txpkg_cfg.R0)
+
+    # cascade
+    S_td = (S_d.cascade_com(S_s)).cascade_com(S_b)
+    if (txpkg_cfg.z_p2 is not None):
+        S_tp = ((S_td.cascade_com(S_l)).cascade_com(S_l2)).cascade_com(S_p)
+    else:
+        S_tp = (S_td.cascade_com(S_l)).cascade_com(S_p)
+    return S_tp
+
+def _bulid_rxpkg(link_cfg: LinkConfig, rxpkg_cfg: COMPkgConfig) -> IEEECOMsparam:
+    "Eq. 93A-16 and 93A-16a, 93A-16c"
+    C_d = rxpkg_cfg.C_d * 1e-12
+    L_s = rxpkg_cfg.L_s * 1e-9
+    C_b = rxpkg_cfg.C_b * 1e-12
+    C_p = rxpkg_cfg.C_p * 1e-12
+
+    S_p = IEEECOMsparam.shunt_capacitance(link_cfg, C_p, rxpkg_cfg.R0)
+    if (rxpkg_cfg.z_p2 is not None):
+        S_l2 = IEEECOMsparam.pkg_trans_line(link_cfg, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
+    S_l = IEEECOMsparam.pkg_trans_line(link_cfg, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
+    S_b = IEEECOMsparam.shunt_capacitance(link_cfg, C_b, rxpkg_cfg.R0)
+    S_s = IEEECOMsparam.series_inductance(link_cfg, L_s, rxpkg_cfg.R0)
+    S_d = IEEECOMsparam.shunt_capacitance(link_cfg, C_d, rxpkg_cfg.R0)
+    
+    # cascade
+    S_rd = (S_b.cascade_com(S_s)).cascade_com(S_d)
+    if (rxpkg_cfg.z_p2 is not None):
+        S_rp = ((S_p.cascade_com(S_l2)).cascade_com(S_l)).cascade_com(S_rd)
+    else:
+        S_rp = (S_p.cascade_com(S_l)).cascade_com(S_rd)
+    return S_rp
+
+def _bulid_channel_under_test(
+    link_cfg: LinkConfig,
+    channel_cfg: COMChannelConfig
+) -> list[SparamModel]:
     """
-    Orchestrator for IEEE 802.3 Annex 93A COM calculation.
+    Build resampled channel-under-test S-parameter models.
 
-    Class boundary
-    --------------
-    COMModel93A owns the calculation flow across existing lower-level objects:
-    - S4P/Sdd channel ingestion through sparamModel
-    - terminated voltage transfer H21(f) through Eq. 93A-18
-    - scalar filter cascade through LinkSegment / IEEECOMFilter
-    - later: 93A.1.6 equalizer/FOM optimization
-    - later: 93A.1.7 interference and noise amplitude distribution
+    Output order:
+    - index 0: victim channel
+    - following indices: NEXT channels, then FEXT channels, in config order
 
-    It should not reimplement S-parameter storage, FFT scaling, or PMF algebra.
-    Those remain in sparamModel, LinkSegment, and Pmf1D.
+    The returned models are resampled onto the same in-band subset of
+    link_cfg.freqs so they can be directly used by later cascade / combination
+    stages without another S-parameter-grid alignment step.
     """
+    if channel_cfg.victim_s4p_path is None:
+        raise ValueError("channel_cfg.victim_s4p_path must be provided.")
 
-    def __init__(self, cfg: LinkConfig):
-        """
-        Parameters
-        ----------
-        cfg:
-            Shared LinkConfig grid used by all LinkSegment objects in this COM
-            calculation.
-        """
-        if not isinstance(cfg, LinkConfig):
-            raise TypeError("cfg must be a LinkConfig.")
+    paths = [
+        channel_cfg.victim_s4p_path,
+        *channel_cfg.next_s4p_paths,
+        *channel_cfg.fext_s4p_paths,
+    ]
+
+    channel_models = [
+        IEEECOMsparam.from_touchstone(
+            path,
+            mode="s4p",
+            port_order=channel_cfg.port_order,
+            z0=2.0 * channel_cfg.R0,
+        )
+        for path in paths
+    ]
+
+    common_f_stop = min(channel.freqs[-1] for channel in channel_models)
+    common_freqs = link_cfg.freqs[link_cfg.freqs <= common_f_stop]
+    if len(common_freqs) < 2:
+        raise ValueError("No usable common frequency grid between link_cfg and channel S4P files.")
+
+    return [channel.resampled(common_freqs) for channel in channel_models]
+
+#%% conduct search in this class
+class COM:
+    def __init__(self, cfg: COMConfig):
         self.cfg = cfg
 
-    def channel_sparam_from_s4p(self, channel: COMChannelInput) -> sparamModel:
-        """
-        Convert the input single-ended S4P channel to a differential Sdd model.
-
-        Parameters
-        ----------
-        channel:
-            Channel S4P input and reference impedance metadata.
-        """
-        if not isinstance(channel, COMChannelInput):
-            raise TypeError("channel must be a COMChannelInput.")
-
-        return sparamModel.from_s4p_array(
-            freqs=channel.freqs,
-            s4p=channel.s4p,
-            port_order=channel.port_order,
-            z0=2.0 * channel.z0,
+    def run(self) -> COMStatus:
+        channels = _bulid_channel_under_test(self.cfg.link, self.cfg.channel)
+        return self._bulid_status(
+            link_cfg=self.cfg.link,
+            ch_cfg=self.cfg.channel,
+            pkg_cfg=self.cfg.pkg,
+            ft_cfg=self.cfg.filter,
+            channels=channels,
         )
 
-    def channel_response(self, channel: COMChannelInput) -> tuple[sparamModel, LinkSegment]:
-        """
-        Build the terminated channel voltage transfer H21(f).
-
-        Parameters
-        ----------
-        channel:
-            Channel S4P input plus Eq. 93A-18 source/load reflection
-            coefficients.
-        """
-        channel_sparam = self.channel_sparam_from_s4p(channel)
-        response = channel_sparam.to_LinkSegment(
-            cfg=self.cfg,
-            gamma_src=channel.gamma_src,
-            gamma_load=channel.gamma_load,
-        )
-        return channel_sparam, response
-
-    def signal_path(
+    # -----------------------
+    # Level-1 methods
+    # -----------------------
+    def _bulid_status(
         self,
-        channel_response: LinkSegment,
-        path_cfg: COMSignalPathConfig | None = None,
-    ) -> LinkSegment:
-        """
-        Cascade optional linear TX/RX filters onto the scalar channel response.
+        link_cfg: LinkConfig,
+        ch_cfg: COMChannelConfig,
+        pkg_cfg: COMPkgConfig,
+        ft_cfg: COMFilterConfig,
+        channels: list[SparamModel],
+    ) -> COMStatus:
+        common = self._bulid_common_status(link_cfg, pkg_cfg, ft_cfg)
 
-        Parameters
-        ----------
-        channel_response:
-            Terminated channel response H21(f) on self.cfg.
-        path_cfg:
-            Optional TX FFE, RX CTLE, and rectangular pulse settings.
-        """
-        if not isinstance(channel_response, LinkSegment):
-            raise TypeError("channel_response must be a LinkSegment.")
+        paths: list[COMPathStatus] = [
+            self._bulid_path(
+                kind="victim",
+                S_ch=channels[0],
+                common=common,
+                ch_cfg=ch_cfg,
+                link_cfg=link_cfg,
+            )
+        ]
 
-        path_cfg = path_cfg or COMSignalPathConfig()
-        signal = channel_response
+        next_count = len(ch_cfg.next_s4p_paths)
+        next_channels = channels[1 : 1 + next_count]
+        fext_channels = channels[1 + next_count :]
 
-        for filt in self._build_filters(path_cfg):
-            signal = signal.cascade_tf(filt)
+        for S_ch in next_channels:
+            paths.append(
+                self._bulid_path(
+                    kind="next",
+                    S_ch=S_ch,
+                    common=common,
+                    ch_cfg=ch_cfg,
+                    link_cfg=link_cfg,
+                )
+            )
 
-        return signal
+        for S_ch in fext_channels:
+            paths.append(
+                self._bulid_path(
+                    kind="fext",
+                    S_ch=S_ch,
+                    common=common,
+                    ch_cfg=ch_cfg,
+                    link_cfg=link_cfg,
+                )
+            )
 
-    def run(
+        return COMStatus(common=common, paths=paths)
+
+    def _bulid_common_status(
         self,
-        channel: COMChannelInput,
-        path_cfg: COMSignalPathConfig | None = None,
-    ) -> COMComputationResult:
-        """
-        Run the implemented subset of the Annex 93A COM calculation.
+        link_cfg: LinkConfig,
+        pkg_cfg: COMPkgConfig,
+        ft_cfg: COMFilterConfig,
+    ) -> COMCommonStatus:
+        S_tp = _bulid_txpkg(link_cfg, pkg_cfg, isNext=False)
+        S_tp_next = _bulid_txpkg(link_cfg, pkg_cfg, isNext=True)
+        S_rp = _bulid_rxpkg(link_cfg, pkg_cfg)
 
-        Parameters
-        ----------
-        channel:
-            Channel S4P input and termination settings.
-        path_cfg:
-            Optional linear signal-path filter settings.
-        """
-        channel_sparam, channel_response = self.channel_response(channel)
-        signal_path = self.signal_path(channel_response, path_cfg)
-
-        return COMComputationResult(
-            channel_sparam=channel_sparam,
-            channel_response=channel_response,
-            signal_path=signal_path,
-            com_db=None,
-            notes=[
-                "Full COM is not calculated yet: 93A.1.6 optimization is not implemented.",
-                "Full COM is not calculated yet: 93A.1.7 noise/interference distribution is not integrated.",
-            ],
+        H_ffe = IEEECOMFilter.tx_ffe(link_cfg, ft_cfg.txfir, ft_cfg.num_pre)
+        H_ffe_next = IEEECOMFilter.tx_ffe(link_cfg, self._next_txfir(ft_cfg), ft_cfg.num_pre)
+        H_t = IEEECOMFilter.transition_time_filter(link_cfg, ft_cfg.Tr)
+        H_r = IEEECOMFilter.rx_noise_filter(link_cfg, ft_cfg.fr)
+        H_ctf = IEEECOMFilter.rx_equalizer(
+            link_cfg,
+            ft_cfg.g_DC,
+            ft_cfg.g_DC2,
+            ft_cfg.f_z,
+            ft_cfg.f_LF,
+            ft_cfg.f_p1,
+            ft_cfg.f_p2,
         )
 
-    def _build_filters(self, path_cfg: COMSignalPathConfig) -> Sequence[LinkSegment]:
-        filters: list[LinkSegment] = []
+        return COMCommonStatus(
+            S_tp=S_tp,
+            S_tp_next=S_tp_next,
+            S_rp=S_rp,
+            H_ffe=H_ffe,
+            H_ffe_next=H_ffe_next,
+            H_t=H_t,
+            H_r=H_r,
+            H_ctf=H_ctf,
+            X_v=IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_v),
+            X_fe=IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_fe),
+            X_ne=IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_ne),
+        )
 
-        if path_cfg.tx_fir is not None:
-            filters.append(IEEECOMFilter.tx_ffe(self.cfg, path_cfg.tx_fir, path_cfg.tx_num_pre))
+    def _bulid_path(
+        self,
+        kind: Literal["victim", "next", "fext"],
+        S_ch: SparamModel,
+        common: COMCommonStatus,
+        ch_cfg: COMChannelConfig,
+        link_cfg: LinkConfig,
+    ) -> COMPathStatus:
+        S_tp = common.S_tp_next if kind == "next" else common.S_tp
+        H_ffe = common.H_ffe_next if kind == "next" else common.H_ffe
+        X = {"victim": common.X_v, "next": common.X_ne, "fext": common.X_fe}[kind]
 
-        if path_cfg.rx_eq is not None:
-            filters.append(IEEECOMFilter.rx_equalizer(self.cfg, **path_cfg.rx_eq))
+        S_all = (S_tp.cascade_com(S_ch)).cascade_com(common.S_rp)
+        H_21 = S_all.to_LinkSegment(
+            link_cfg,
+            ch_cfg.gamma_src,
+            ch_cfg.gamma_load,
+        )
+        H_all = (
+            H_21
+            .cascade_tf(H_ffe)
+            .cascade_tf(common.H_t)
+            .cascade_tf(common.H_r)
+            .cascade_tf(common.H_ctf)
+        )
 
-        if path_cfg.rect_pulse_amplitude is not None:
-            filters.append(IEEECOMFilter.rect_pulse(self.cfg, path_cfg.rect_pulse_amplitude))
+        return COMPathStatus(
+            kind=kind,
+            S_ch=S_ch,
+            S_all=S_all,
+            H_21=H_21,
+            H_all=H_all,
+            X=X,
+        )
 
-        return filters
+    def _next_txfir(self, ft_cfg: COMFilterConfig) -> np.ndarray:
+        txfir = np.zeros_like(ft_cfg.txfir, dtype=float)
+        txfir[ft_cfg.num_pre] = 1.0
+        return txfir

@@ -26,3 +26,22 @@ subproject.
 - Prefer small modules with clear numerical conventions.
 - Document FFT, S-parameter, impedance, and COM equation conventions at the API boundary.
 - Keep private PDFs, work documents, raw spec excerpts, and long-form theory notes out of this public coding repository.
+
+## Helper Placement
+
+Use this rule when deciding where to place validation helpers, conversion
+helpers, and small internal functions:
+
+- Use a module-level private helper when the function may be shared by multiple
+  classes or module-level functions, or when the operation is a pure conversion
+  that does not belong to one class instance.
+- Use a class-level private helper when the helper is used by multiple methods
+  in the same class and its meaning belongs to that class contract,
+  representation, or validation boundary.
+- Use a nested helper when the helper only supports one method and does not need
+  independent reuse or testing.
+
+Prefer choosing helper placement by semantic ownership, not only by the current
+number of call sites. For example, an S4P-to-Sdd array conversion can be a
+module-level helper even if it is initially called only by one constructor,
+because the operation itself is not tied to one object instance.

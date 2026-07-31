@@ -1,7 +1,14 @@
+from __future__ import annotations
+
 import numpy as np
-from typing import Union
+from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 from dataclasses import dataclass, field
 import skrf as rf
+
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+
+SdefT = Literal["power", "pseudo", "traveling"]
 
 # =========================
 # helper
@@ -54,7 +61,7 @@ def resample_tf(
             raise ValueError("freqs_new must be strictly increasing.")
 
         # Check that the target FFT frequency axis is uniformly spaced.
-        LinkConfig.validate_uniform_freqs(f_new)
+        LinkConfig.validate_freqs(f_new, require_uniform=True)
 
         if f_meas[0] > f_new[0]:
             raise ValueError("freqs_meas must include the target DC / low-frequency start.")
@@ -133,8 +140,95 @@ def _network_from_smatrix(
     smatrix: np.ndarray,
     z0: Union[float, np.ndarray] = 100.0,
 ) -> 'rf.Network':
-    frequency = rf.Frequency.from_f(freqs, unit="hz")
+    frequency = rf.Frequency.from_f(freqs, unit="Hz")
     return rf.Network(frequency=frequency, s=smatrix, z0=z0)
+
+def _differential_z0_from_s4p_z0(
+    z0: Union[float, np.ndarray],
+    port_order: tuple[int, int, int, int],
+) -> Union[float, np.ndarray]:
+    """
+    Derive Sdd two-port reference impedance from single-ended S4P z0.
+
+    port_order is the old S4P order mapped to:
+        (tx_p, tx_n, rx_p, rx_n)
+
+    For equal single-ended ports this reduces to 2*R0. For skrf's per-frequency
+    per-port z0 arrays, this returns a two-port array:
+        [z0_tx_p + z0_tx_n, z0_rx_p + z0_rx_n]
+    """
+    port_order = _validate_s4p_port_order(port_order)
+
+    if np.isscalar(z0):
+        return 2.0 * float(z0)
+
+    z0_array = np.asarray(z0)
+    if z0_array.ndim == 0:
+        return 2.0 * float(z0_array)
+
+    if z0_array.shape[-1] != 4:
+        raise ValueError("S4P network.z0 must be scalar or have four port impedances.")
+
+    z0_ordered = z0_array[..., port_order]
+    return np.stack(
+        [
+            z0_ordered[..., 0] + z0_ordered[..., 1],
+            z0_ordered[..., 2] + z0_ordered[..., 3],
+        ],
+        axis=-1,
+    )
+
+def _validate_s4p_port_order(port_order: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
+    if len(port_order) != 4:
+        raise ValueError("port_order must contain four zero-based port indices.")
+
+    # ensure all elements are integers
+    port_order = (
+        int(port_order[0]),
+        int(port_order[1]),
+        int(port_order[2]),
+        int(port_order[3])
+    )
+    if sorted(port_order) != [0, 1, 2, 3]:
+        raise ValueError("port_order must be a permutation of (0, 1, 2, 3).")
+
+    return port_order
+
+def _validate_s4p(s4p: np.ndarray, freqs: np.ndarray) -> np.ndarray:
+    s4p = np.asarray(s4p, dtype=complex)
+
+    if s4p.shape != (len(freqs), 4, 4):
+        raise ValueError("s4p must have shape (len(freqs), 4, 4).")
+
+    if not np.all(np.isfinite(s4p)):
+        raise ValueError("s4p contains non-finite values.")
+
+    return s4p
+
+def _renum_s4p(
+    s4p: np.ndarray,
+    port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
+) -> np.ndarray:
+    """
+    Return S4P reordered to the project's single-ended COM input order.
+
+    Parameters
+    ----------
+    s4p:
+        Single-ended 4-port S-parameter array with shape (N, 4, 4).
+    port_order:
+        Old zero-based S4P ports in desired order:
+            (tx_p, tx_n, rx_p, rx_n)
+    """
+    s4p = np.asarray(s4p, dtype=complex)
+    if s4p.ndim != 3 or s4p.shape[1:] != (4, 4):
+        raise ValueError("s4p must have shape (N, 4, 4).")
+
+    if not np.all(np.isfinite(s4p)):
+        raise ValueError("s4p contains non-finite values.")
+
+    port_order = _validate_s4p_port_order(port_order)
+    return s4p[:, port_order, :][:, :, port_order]
 
 def _s4p_to_sdd(
     s4p: np.ndarray,
@@ -144,8 +238,10 @@ def _s4p_to_sdd(
     """
     Convert single-ended S4P to differential-mode Sdd.
 
-    port_order gives (tx_p, tx_n, rx_p, rx_n). After reordering to this
-    convention, the through term is:
+    port_order gives old single-ended S4P ports in the desired COM-style order:
+        (tx_p, tx_n, rx_p, rx_n)
+
+    After reordering to this convention, the through term is:
         Sdd21 = 0.5 * (S31 - S32 - S41 + S42)
     """
     if freqs is None:
@@ -155,10 +251,9 @@ def _s4p_to_sdd(
         if not np.all(np.isfinite(s4p)):
             raise ValueError("s4p contains non-finite values.")
     else:
-        s4p = sparamModel.validate_s4p(s4p, freqs)
+        s4p = _validate_s4p(s4p, freqs)
 
-    port_order = sparamModel.validate_port_order(port_order)
-    s = s4p[:, port_order, :][:, :, port_order]
+    s = _renum_s4p(s4p, port_order)
 
     S11, S12, S13, S14 = s[:, 0, 0], s[:, 0, 1], s[:, 0, 2], s[:, 0, 3]
     S21, S22, S23, S24 = s[:, 1, 0], s[:, 1, 1], s[:, 1, 2], s[:, 1, 3]
@@ -219,9 +314,53 @@ class LinkConfig:
         self.Fs = 1.0 / self.dt
         self.f_nyq = self.Fs / 2
         if (int(self.Fs / self.target_df)%2 == 0):
-            self.Nfft = int(self.Fs / self.target_df)
+            nfft = int(self.Fs / self.target_df)
         else:
-            self.Nfft = int(self.Fs / self.target_df) + 1
+            nfft = int(self.Fs / self.target_df) + 1
+        self._set_derived_grid(nfft)
+
+    @classmethod
+    def from_Nfft(
+        cls,
+        fb: float,
+        per_ui: int,
+        Nfft: int,
+        target_df: float | None = None,
+    ) -> 'LinkConfig':
+        """
+        Build a LinkConfig directly from FFT length.
+
+        Parameters
+        ----------
+        fb:
+            Baud frequency in Hz.
+        per_ui:
+            Number of samples per UI.
+        Nfft:
+            Even FFT length. Even length is required so rfft includes a Nyquist
+            bin and LinkSegment.validate_tf() remains valid.
+        target_df:
+            Optional metadata target df. If None, use the resulting exact df.
+        """
+        cfg = cls.__new__(cls)
+        cfg.fb = fb
+        cfg.per_ui = per_ui
+        cfg.bt = 1.0 / cfg.fb
+        cfg.dt = cfg.bt / cfg.per_ui
+        cfg.Fs = 1.0 / cfg.dt
+        cfg.f_nyq = cfg.Fs / 2
+        cfg.target_df = cfg.Fs / Nfft if target_df is None else target_df
+        cfg._set_derived_grid(Nfft)
+        return cfg
+
+    def _set_derived_grid(self, Nfft: int) -> None:
+        Nfft = int(Nfft)
+        if Nfft < 2:
+            raise ValueError("Nfft must be at least 2.")
+        if Nfft % 2 != 0:
+            raise ValueError("Nfft must be even so rfft includes a Nyquist bin.")
+
+        self.Nfft = Nfft
         self.df = self.Fs / self.Nfft
         self.T_max = 1.0 / self.df
         self.freqs = np.fft.rfftfreq(self.Nfft, d=self.dt)      
@@ -229,15 +368,34 @@ class LinkConfig:
         self.L_ui = int(self.Nfft / self.per_ui)
         self.times_ui = self.times / self.bt
 
-        self.validate_uniform_freqs(self.freqs)
-
-        if (self.freqs[-1] != self.f_nyq):
-            raise Exception("Error @ __post_init__")
-        if (self.times[-1] != self.T_max-self.dt):
-            raise Exception("Error @ __post_init__")
+        self.validate_freqs(self.freqs, require_uniform=True, expected_stop=self.f_nyq)
+        self.validate_times(self.times, expected_stop=self.T_max - self.dt)
 
     @staticmethod
-    def validate_freqs(freqs: np.ndarray) -> np.ndarray:
+    def validate_freqs(
+        freqs: np.ndarray,
+        require_uniform: bool = False,
+        expected_stop: float | None = None,
+        rtol: float = 1e-12,
+        atol: float = 1e-15,
+    ) -> np.ndarray:
+        """
+        Validate a frequency axis.
+
+        Parameters
+        ----------
+        freqs:
+            Frequency axis in Hz.
+        require_uniform:
+            If True, require all frequency steps to be equal within tolerance.
+        expected_stop:
+            Optional expected last frequency value. LinkConfig uses this to
+            check that cfg.freqs ends at cfg.f_nyq.
+        rtol:
+            Relative tolerance for uniform-grid and endpoint checks.
+        atol:
+            Absolute tolerance for uniform-grid and endpoint checks.
+        """
         freqs = np.asarray(freqs, dtype=float)
 
         # Check that the frequency axis is one-dimensional.
@@ -260,21 +418,39 @@ class LinkConfig:
         if not np.all(np.diff(freqs) > 0):
             raise ValueError("freqs must be strictly increasing.")
 
-        return freqs 
+        if require_uniform:
+            df = np.diff(freqs)
+            if not np.allclose(df, df[0], rtol=rtol, atol=atol):
+                raise ValueError("freqs must be uniformly spaced.")
 
-    @staticmethod
-    def validate_uniform_freqs(freqs: np.ndarray, rtol: float = 1e-9, atol: float = 1e-6) -> np.ndarray:
-        freqs = LinkConfig.validate_freqs(freqs)
-        df = np.diff(freqs)
-
-        # Check that every frequency step is equal within numerical tolerance.
-        if not np.allclose(df, df[0], rtol=rtol, atol=atol):
-            raise ValueError("freqs must be uniformly spaced.")
+        if expected_stop is not None:
+            if not np.isclose(freqs[-1], expected_stop, rtol=rtol, atol=atol):
+                raise ValueError("freqs[-1] must equal expected_stop within numerical tolerance.")
 
         return freqs
 
     @staticmethod
-    def validate_times(times: np.ndarray) -> np.ndarray:
+    def validate_times(
+        times: np.ndarray,
+        expected_stop: float | None = None,
+        rtol: float = 1e-12,
+        atol: float = 1e-15,
+    ) -> np.ndarray:
+        """
+        Validate a time axis.
+
+        Parameters
+        ----------
+        times:
+            Time axis in seconds.
+        expected_stop:
+            Optional expected last time value. LinkConfig uses this to check
+            that cfg.times ends at cfg.T_max - cfg.dt.
+        rtol:
+            Relative tolerance for endpoint checks.
+        atol:
+            Absolute tolerance for endpoint checks.
+        """
         times = np.asarray(times, dtype=float)
 
         if times.ndim != 1:
@@ -289,15 +465,206 @@ class LinkConfig:
         if not np.all(np.diff(times) > 0):
             raise ValueError("times must be strictly increasing.")
 
+        if expected_stop is not None:
+            if not np.isclose(times[-1], expected_stop, rtol=rtol, atol=atol):
+                raise ValueError("times[-1] must equal expected_stop within numerical tolerance.")
+
         return times
 
-class sparamModel:
+@dataclass
+class SparamProcessor:
+    """
+    S-parameter to SBR preprocessing and conversion flow.
+
+    This class collects the practical issues called out by sparam_to_sbr.pdf:
+    - missing DC value
+    - causality check/fix
+    - passivity check/fix
+    - frequency grid / time-step alignment
+    - frequency-domain interpolation / extrapolation
+    - frequency-domain response to impulse response
+    - impulse/step response to SBR
+
+    First-version policy:
+    - DC fix is implemented through SparamModel.extrapolated_to_dc().
+    - Causality and passivity checks are implemented.
+    - Causality and passivity fixes are intentionally explicit
+      NotImplementedError methods because robust fixes require model fitting or
+      minimum-phase reconstruction, not simple pointwise edits.
+    """
+    cfg: LinkConfig
+    gamma_src: complex | np.ndarray = 0.0
+    gamma_load: complex | np.ndarray = 0.0
+
+    def check_dc(self, channel: SparamModel) -> dict[str, bool | float]:
+        """
+        Check whether the S-parameter model contains a DC point.
+
+        Academic rationale:
+        the DC value anchors low-frequency magnitude and phase. Missing or
+        inconsistent DC can create baseline shift and non-causal-looking time
+        responses after IFFT.
+        """
+        f0 = float(channel.freqs[0])
+        return {
+            "has_dc": bool(np.isclose(f0, 0.0)),
+            "first_frequency": f0,
+        }
+
+    def fix_dc(self, channel: SparamModel) -> SparamModel:
+        """
+        Add a DC point using scikit-rf DC extrapolation.
+
+        Academic rationale:
+        DC extrapolation is a low-frequency boundary condition. It is more
+        defensible than forcing zero because S-parameter phase and magnitude at
+        DC determine the long-time step/SBR baseline.
+        """
+        return channel.extrapolated_to_dc()
+
+    def check_passivity(self, channel: SparamModel, tol: float = 1e-6) -> dict[str, bool | float]:
+        """
+        Check passivity by the largest singular value of S(f).
+
+        Academic rationale:
+        for a passive network with consistent real reference impedance, the
+        scattering matrix should not increase incident power. This is checked by
+        max singular value <= 1.
+        """
+        singular_values = np.linalg.svd(channel.sdd, compute_uv=False)
+        max_sigma = float(np.max(singular_values))
+        return {
+            "is_passive": bool(max_sigma <= 1.0 + tol),
+            "max_singular_value": max_sigma,
+            "tol": float(tol),
+        }
+
+    def fix_passivity(self, channel: SparamModel) -> SparamModel:
+        """
+        Placeholder for passivity enforcement.
+
+        Academic rationale:
+        passivity fixing should preserve a physically realizable network, which
+        normally requires rational/vector fitting plus passivity enforcement.
+        Pointwise clipping of S-parameters is not used here because it can break
+        causality and reciprocity.
+        """
+        raise NotImplementedError("Passivity fixing requires a fitting-based enforcement method.")
+
+    def check_reciprocity(self, channel: SparamModel, tol: float = 1e-6) -> dict[str, bool | float]:
+        """
+        Check two-port reciprocity by comparing Sdd21 and Sdd12.
+
+        Academic rationale:
+        many passive interconnect channels are reciprocal. A large mismatch
+        between S21 and S12 usually indicates measurement, port-order, or data
+        processing issues.
+        """
+        max_error = float(np.max(np.abs(channel.sdd21 - channel.sdd12)))
+        return {
+            "is_reciprocal": bool(max_error <= tol),
+            "max_s12_s21_error": max_error,
+            "tol": float(tol),
+        }
+
+    def check_frequency_grid(self, channel: SparamModel) -> dict[str, bool | float | int]:
+        """
+        Report frequency-grid coverage relative to cfg.
+
+        Academic rationale:
+        SBR time resolution and time-window length are set by df and fmax after
+        resampling. The raw S-parameter grid must cover enough of cfg.freqs to
+        build a stable in-band H(f) before scalar high-frequency extension.
+        """
+        f_inband = self.cfg.freqs[self.cfg.freqs <= channel.freqs[-1]]
+        return {
+            "channel_f_start": float(channel.freqs[0]),
+            "channel_f_stop": float(channel.freqs[-1]),
+            "cfg_f_nyq": float(self.cfg.f_nyq),
+            "inband_points_on_cfg": int(len(f_inband)),
+            "covers_cfg_nyq": bool(channel.freqs[-1] >= self.cfg.f_nyq),
+        }
+
+    def resample_for_sbr(self, channel: SparamModel) -> SparamModel:
+        """
+        Resample S-parameters onto the cfg frequency grid inside channel f_stop.
+
+        Academic rationale:
+        interpolation is acceptable inside measured bandwidth. High-frequency
+        extrapolation is left to the scalar LinkSegment transfer-function stage,
+        because extrapolating a full S-matrix while preserving passivity and
+        causality is a harder physical-modeling problem.
+        """
+        return channel.resampled(self.cfg.freqs)
+
+    def to_voltage_transfer(self, channel: SparamModel) -> np.ndarray:
+        """
+        Convert the Sdd two-port to terminated voltage transfer H21(f).
+
+        Academic rationale:
+        S-parameters describe traveling-wave ratios. SBR generation needs the
+        scalar voltage transfer function seen by the source/load terminations.
+        """
+        return channel.voltage_transfer_function(
+            gamma_src=self.gamma_src,
+            gamma_load=self.gamma_load,
+        )
+
+    def frequency_to_segment(self, channel: SparamModel, dc_fix: bool = True) -> LinkSegment:
+        """
+        Convert S-parameters to a scalar LinkSegment.
+
+        Flow:
+        1. optionally add DC
+        2. resample S-parameters inside measured bandwidth
+        3. compute H21(f)
+        4. use LinkSegment.from_tf() for scalar extension and IFFT-ready data
+        """
+        working = self.fix_dc(channel) if dc_fix and not self.check_dc(channel)["has_dc"] else channel
+        working = self.resample_for_sbr(working)
+        H21 = self.to_voltage_transfer(working)
+        return LinkSegment.from_tf(working.freqs, H21, self.cfg)
+
+    def check_causality(self, channel: SparamModel, dc_fix: bool = True) -> dict[str, bool | float | int]:
+        """
+        Check time-domain warning metrics after S-parameter to H21 conversion.
+
+        Academic rationale:
+        causality violations often appear as impulse-response energy wrapped to
+        the end of the FFT time window or as delay inconsistent with phase
+        slope. This method reports LinkSegment's time-axis diagnostics.
+        """
+        segment = self.frequency_to_segment(channel, dc_fix=dc_fix)
+        return segment.debug_time_axis()
+
+    def fix_causality(self, channel: SparamModel) -> SparamModel:
+        """
+        Placeholder for causality repair.
+
+        Academic rationale:
+        causality repair should modify phase/magnitude consistently. Common
+        approaches include rational fitting or minimum-phase reconstruction from
+        a physically meaningful magnitude response.
+        """
+        raise NotImplementedError("Causality fixing requires a model- or phase-reconstruction method.")
+
+    def to_sbr(self, channel: SparamModel, dc_fix: bool = True) -> np.ndarray:
+        """
+        Convert an S-parameter channel to SBR.
+
+        Academic rationale:
+        SBR is the one-UI difference of the step response after the scalar
+        H21(f) has been converted to the project's continuous-time FFT grid.
+        """
+        return self.frequency_to_segment(channel, dc_fix=dc_fix).sbr
+
+class SparamModel:
     """
     Generic scikit-rf Network wrapper for differential S-parameter data.
 
     Class boundary
     --------------
-    sparamModel is the generic container for Sdd two-port data after any required
+    SparamModel is the generic container for Sdd two-port data after any required
     input normalization. It owns:
     - array / Touchstone / rf.Network ingestion
     - input validation contract for frequency axes, Sdd, S4P, and port order
@@ -305,19 +672,40 @@ class sparamModel:
     - generic Sdd two-port cascade operations through scikit-rf
     - conversion from Sdd to terminated voltage transfer H21(f), then LinkSegment
 
-    Mutation policy
-    ---------------
-    In-place methods update self.network and return self for chaining:
-    - renormalize()
-    - resample()
-    - extrapolate_to_dc()
-    - renum()
+    Domain wrapper contract
+    -----------------------
+    This class is intentionally more constrained than a raw skrf.Network. A
+    raw Network is a flexible numerical container; SparamModel is the project's
+    standardized S-parameter preprocessing boundary.
 
-    Immutable methods return a modified copy and leave self unchanged:
+    The object guarantees:
+    - self.network always stores a differential-mode Sdd two-port, not an S4P.
+    - S4P port ordering is handled only at construction time through
+      port_order=(tx_p, tx_n, rx_p, rx_n).
+    - After S4P-to-Sdd conversion, z0 means differential reference impedance.
+      A single-ended R0=50 ohm input should therefore become z0=100 ohm.
+    - Public transformation methods do not mutate the original object, so raw
+      measurement data and intermediate processing stages can be compared.
+    - Resampling is S-matrix-domain interpolation within the measured frequency
+      span. High-frequency extrapolation is intentionally handled later by the
+      scalar LinkSegment transfer-function path, not here.
+
+    The raw skrf.Network is still exposed as self.network for advanced
+    inspection, but normal project code should prefer the SparamModel methods so
+    the above contract remains visible and consistent.
+
+    Public mutation policy
+    ----------------------
+    Public transformation methods return a modified copy and leave self
+    unchanged:
+    - cascade()
     - renormalized()
     - resampled()
     - extrapolated_to_dc()
-    - renumbered()
+
+    There is no public in-place transformation API. Methods that wrap in-place
+    scikit-rf operations apply them to copied Networks before returning a new
+    SparamModel.
 
     It should not own IEEE COM primitive model construction such as shunt
     capacitance, package transmission line, Tx package, Rx package builders, or
@@ -338,6 +726,15 @@ class sparamModel:
     For S4P conversion, the default port order is:
         (tx_p, tx_n, rx_p, rx_n) = (0, 1, 2, 3)
     using Python zero-based indices.
+
+    Public port-order convention
+    ----------------------------
+    SparamModel intentionally exposes only the 4-port single-ended S4P order:
+        port_order = (tx_p, tx_n, rx_p, rx_n)
+
+    Once the model is constructed, self.network stores only a 2-port Sdd
+    representation. The internal Sdd port order is fixed and is not exposed as
+    a public renumbering API.
     """
 
     def __init__(
@@ -346,7 +743,7 @@ class sparamModel:
         source_type: str,
         port_order: tuple[int, int, int, int] | None = None,
     ):
-        self.network = self.validate_network(network)
+        self.network: rf.Network = self.validate_network(network)
         self.source_type = source_type
         self.port_order = port_order
 
@@ -354,9 +751,14 @@ class sparamModel:
     # constructors
     # -------------------
     @classmethod
-    def from_sdd_array(cls, freqs: np.ndarray, sdd: np.ndarray, z0: float = 100.0) -> 'sparamModel':
+    def from_sdd_array(
+        cls,
+        freqs: np.ndarray,
+        sdd: np.ndarray,
+        z0: Union[float, np.ndarray] = 100.0,
+    ) -> 'SparamModel':
         """
-        Build from a differential-mode Sdd array.
+        Build from a differential-mode 2-port Sdd array.
 
         Input contract:
         - freqs: 1D, finite, strictly increasing frequency axis in Hz
@@ -373,19 +775,20 @@ class sparamModel:
         freqs: np.ndarray,
         s4p: np.ndarray,
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: float = 100.0,
-    ) -> 'sparamModel':
+        z0: Union[float, np.ndarray] = 100.0,
+    ) -> 'SparamModel':
         """
         Build from a single-ended 4-port S-parameter array.
 
         Input contract:
         - freqs: 1D, finite, strictly increasing frequency axis in Hz
         - s4p: complex array with shape (len(freqs), 4, 4)
-        - port_order: zero-based (tx_p, tx_n, rx_p, rx_n)
+        - port_order: old zero-based S4P ports in desired order
+          (tx_p, tx_n, rx_p, rx_n)
         - z0: differential-mode reference impedance assigned after Sdd conversion
         """
         freqs = LinkConfig.validate_freqs(freqs)
-        port_order = cls.validate_port_order(port_order)
+        port_order = _validate_s4p_port_order(port_order)
         sdd = _s4p_to_sdd(s4p, port_order, freqs)
         return cls(_network_from_smatrix(freqs, sdd, z0=z0), source_type="s4p", port_order=port_order)
 
@@ -395,37 +798,46 @@ class sparamModel:
         network: 'rf.Network',
         mode: str = "auto",
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: float = 100.0,
-    ) -> 'sparamModel':
+        z0: Union[float, np.ndarray, None] = None,
+    ) -> 'SparamModel':
         """
         Build from an existing scikit-rf Network.
 
         Input contract:
         - mode="sdd": network.s must have shape (N, 2, 2)
-        - mode="single_ended_s4p": network.s must have shape (N, 4, 4)
+        - mode="s4p": network.s must have shape (N, 4, 4)
         - mode="auto": 2-port is treated as Sdd, 4-port as single-ended S4P
 
         mode:
         - "auto": 2-port is treated as Sdd, 4-port as single-ended S4P
         - "sdd": input network.s is already differential-mode Sdd
-        - "single_ended_s4p": input network.s is converted to Sdd
+        - "s4p": input network.s is single-ended 4-port data converted to Sdd
+
+        z0:
+        - None with mode="sdd": preserve network.z0
+        - None with mode="s4p": derive differential z0 from the single-ended
+          port pairs after applying port_order
+        - explicit value: use it as the internal Sdd differential reference
+          impedance
         """
 
-        if mode not in {"auto", "sdd", "single_ended_s4p"}:
-            raise ValueError('mode must be "auto", "sdd", or "single_ended_s4p".')
+        if mode not in {"auto", "sdd", "s4p"}:
+            raise ValueError('mode must be "auto", "sdd", or "s4p".')
 
         if mode == "auto":
             if network.s.shape[1:] == (2, 2):
                 mode = "sdd"
             elif network.s.shape[1:] == (4, 4):
-                mode = "single_ended_s4p"
+                mode = "s4p"
             else:
                 raise ValueError("Only 2-port Sdd and 4-port single-ended networks are supported.")
 
         if mode == "sdd":
-            return cls.from_sdd_array(network.f, network.s, z0=z0)
+            z0_sdd = network.z0 if z0 is None else z0
+            return cls.from_sdd_array(network.f, network.s, z0=z0_sdd)
 
-        return cls.from_s4p_array(network.f, network.s, port_order=port_order, z0=z0)
+        z0_sdd = _differential_z0_from_s4p_z0(network.z0, port_order) if z0 is None else z0
+        return cls.from_s4p_array(network.f, network.s, port_order=port_order, z0=z0_sdd)
 
     @classmethod
     def from_touchstone(
@@ -433,8 +845,8 @@ class sparamModel:
         path: str,
         mode: str = "auto",
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: float = 100.0,
-    ) -> 'sparamModel':
+        z0: Union[float, np.ndarray, None] = None,
+    ) -> 'SparamModel':
         ntwk = rf.Network(path)
         return cls.from_network(ntwk, mode=mode, port_order=port_order, z0=z0)
 
@@ -454,29 +866,6 @@ class sparamModel:
         return sdd
 
     @staticmethod
-    def validate_s4p(s4p: np.ndarray, freqs: np.ndarray) -> np.ndarray:
-        s4p = np.asarray(s4p, dtype=complex)
-
-        if s4p.shape != (len(freqs), 4, 4):
-            raise ValueError("s4p must have shape (len(freqs), 4, 4).")
-
-        if not np.all(np.isfinite(s4p)):
-            raise ValueError("s4p contains non-finite values.")
-
-        return s4p
-
-    @staticmethod
-    def validate_port_order(port_order: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
-        if len(port_order) != 4:
-            raise ValueError("port_order must contain four zero-based port indices.")
-
-        port_order = tuple(int(p) for p in port_order)
-        if sorted(port_order) != [0, 1, 2, 3]:
-            raise ValueError("port_order must be a permutation of (0, 1, 2, 3).")
-
-        return port_order
-
-    @staticmethod
     def validate_network(network: 'rf.Network') -> 'rf.Network':
 
         if not isinstance(network, rf.Network):
@@ -484,29 +873,29 @@ class sparamModel:
 
         sdd = np.asarray(network.s, dtype=complex)
         if sdd.ndim != 3 or sdd.shape[1:] != (2, 2):
-            raise ValueError("sparamModel.network must store Sdd with shape (N, 2, 2).")
+            raise ValueError("SparamModel.network must store Sdd with shape (N, 2, 2).")
 
         freqs = np.asarray(network.f, dtype=float)
         LinkConfig.validate_freqs(freqs)
-        sparamModel.validate_sdd(sdd, freqs)
+        SparamModel.validate_sdd(sdd, freqs)
 
         return network
 
-    def validate_compatible_sparam(self, other: 'sparamModel') -> None:
-        if not isinstance(other, sparamModel):
-            raise TypeError("other must be an sparamModel.")
+    def validate_compatible_sparam(self, other: 'SparamModel') -> None:
+        if not isinstance(other, SparamModel):
+            raise TypeError("other must be an SparamModel.")
 
         if self.sdd.shape[1:] != (2, 2) or other.sdd.shape[1:] != (2, 2):
-            raise ValueError("Both sparamModel objects must contain 2-port Sdd networks.")
+            raise ValueError("Both SparamModel objects must contain 2-port Sdd networks.")
 
         if self.sdd.shape[0] != other.sdd.shape[0]:
-            raise ValueError("Cannot cascade sparamModel objects with different frequency counts.")
+            raise ValueError("Cannot cascade SparamModel objects with different frequency counts.")
 
         if not np.allclose(self.freqs, other.freqs):
-            raise ValueError("Cannot cascade sparamModel objects with different frequency grids.")
+            raise ValueError("Cannot cascade SparamModel objects with different frequency grids.")
 
         if not np.allclose(self.network.z0, other.network.z0):
-            raise ValueError("Cannot cascade sparamModel objects with different z0.")
+            raise ValueError("Cannot cascade SparamModel objects with different z0.")
 
     def validate_resample_freqs(self, freqs: np.ndarray) -> np.ndarray:
         freqs = LinkConfig.validate_freqs(freqs)
@@ -515,17 +904,6 @@ class sparamModel:
             raise ValueError("resample() target grid is entirely below the measured frequency span.")
 
         return freqs
-
-    def validate_renum_port_order(self, port_order: tuple[int, ...]) -> tuple[int, ...]:
-        if len(port_order) != self.sdd.shape[1]:
-            raise ValueError("port_order length must match the number of ports.")
-
-        port_order = tuple(int(p) for p in port_order)
-        expected = list(range(self.sdd.shape[1]))
-        if sorted(port_order) != expected:
-            raise ValueError(f"port_order must be a permutation of {tuple(expected)}.")
-
-        return port_order
 
     # -------------------
     # proxy
@@ -557,8 +935,147 @@ class sparamModel:
     # -------------------
     # public methods
     # -------------------
+    # ---- SerDes-oriented plot helpers ----
+    def plot_IL(
+        self,
+        ax: Any = None,
+        logx: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Plot differential insertion loss IL = Sdd21 in dB.
+
+        SparamModel stores a two-port Sdd network, so the SerDes through path is
+        fixed as port[0] -> port[1]. This method intentionally does not expose
+        arbitrary S-parameter indices.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib axes.
+        logx:
+            Whether to use a logarithmic frequency axis.
+        **kwargs:
+            Additional keyword arguments passed to scikit-rf.
+        """
+        return self.network.plot_s_db(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+
+    def plot_RL(
+        self,
+        port: Literal["input", "output", "both"] = "both",
+        ax: Any = None,
+        logx: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Plot differential return loss RL in dB.
+
+        RL is interpreted from the Sdd two-port reference planes:
+        - port="input": Sdd11
+        - port="output": Sdd22
+        - port="both": Sdd11 and Sdd22
+
+        Parameters
+        ----------
+        port:
+            Which differential port reflection to plot.
+        ax:
+            Optional matplotlib axes.
+        logx:
+            Whether to use a logarithmic frequency axis.
+        **kwargs:
+            Additional keyword arguments passed to scikit-rf.
+        """
+        if port == "input":
+            return self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+        if port == "output":
+            return self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
+        if port == "both":
+            self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+            return self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
+        raise ValueError('port must be "input", "output", or "both".')
+
+    def plot_phase(
+        self,
+        ax: Any = None,
+        logx: bool = False,
+        unwrap: bool = True,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Plot through-path phase of Sdd21 in degrees.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib axes.
+        logx:
+            Whether to use a logarithmic frequency axis.
+        unwrap:
+            If True, unwrap phase before plotting. This is the SerDes default
+            because through-channel phase continuity is usually the useful view.
+        **kwargs:
+            Additional keyword arguments passed to scikit-rf.
+        """
+        plotter = self.network.plot_s_deg_unwrap if unwrap else self.network.plot_s_deg
+        return plotter(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+
+    def plot_smith(
+        self,
+        port: Literal["input", "output"] = "input",
+        ax: Any = None,
+        chart_type: str = "z",
+        draw_labels: bool = False,
+        label_axes: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        """
+        Plot input or output differential return term on a Smith chart.
+
+        Parameters
+        ----------
+        port:
+            "input" plots Sdd11; "output" plots Sdd22.
+        ax:
+            Optional matplotlib axes.
+        chart_type:
+            Smith chart type passed to scikit-rf, usually "z" or "y".
+        draw_labels:
+            Whether to draw Smith chart labels.
+        label_axes:
+            Whether to label axes.
+        **kwargs:
+            Additional keyword arguments passed to scikit-rf.
+        """
+        if port == "input":
+            m, n = 0, 0
+        elif port == "output":
+            m, n = 1, 1
+        else:
+            raise ValueError('port must be "input" or "output".')
+
+        return self.network.plot_s_smith(
+            m=m,
+            n=n,
+            ax=ax,
+            show_legend=True,
+            chart_type=chart_type,
+            draw_labels=draw_labels,
+            label_axes=label_axes,
+            **kwargs,
+        )
+
+    def plot_all(self, *args: Any, **kwargs: Any) -> Any:
+        """
+        Plot scikit-rf's default S-parameter summary view.
+
+        This delegates to Network.plot_it_all(), which draws dB, phase, Smith,
+        and complex plots in subplots.
+        """
+        return self.network.plot_it_all(*args, **kwargs)
+
     # ---- immutable / copy-returning operations ----
-    def cascade(self, other: 'sparamModel') -> 'sparamModel':
+    def cascade(self, other: 'SparamModel') -> 'SparamModel':
         """
         Return a new model by cascading two Sdd two-port networks.
 
@@ -572,14 +1089,28 @@ class sparamModel:
         cascaded_network = self.network ** other.network
         return type(self).from_network(cascaded_network, mode="sdd", z0=cascaded_network.z0)
 
-    def renormalized(self, z0_new: Union[float, np.ndarray], s_def: str | None = None) -> 'sparamModel':
+    def renormalized(self, z0_new: Union[float, np.ndarray], s_def: SdefT | None = None) -> 'SparamModel':
         """
         Return a copy with S-parameters renormalized to a new reference impedance.
 
         This changes the S-parameter values, not only the Network.z0 metadata.
+        Internally this wraps skrf.Network.renormalize(), which is an in-place
+        skrf API. SparamModel deliberately applies it to a copied Network and
+        returns a new SparamModel so the original measurement object remains
+        unchanged.
+
+        Parameters
+        ----------
+        z0_new:
+            New reference impedance for the internal Sdd two-port. In this
+            class, z0 is differential reference impedance.
+        s_def:
+            scikit-rf wave definition: "power", "pseudo", "traveling", or None.
         """
         model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
-        return model.renormalize(z0_new, s_def=s_def)
+        model.network.renormalize(cast(Any, z0_new), s_def=s_def)
+        model.network = model.validate_network(model.network)
+        return model
 
     def resampled(
         self,
@@ -591,7 +1122,7 @@ class sparamModel:
         dc_sparam: np.ndarray | None = None,
         dc_kind: str = "linear",
         dc_coords: str = "cart",
-    ) -> 'sparamModel':
+    ) -> 'SparamModel':
         """
         Return a copy sampled on the requested grid within the measured span.
 
@@ -599,18 +1130,55 @@ class sparamModel:
         the copy first performs DC extrapolation. The returned model only keeps
         requested points up to the measured f_stop; high-frequency S-parameter
         extrapolation is intentionally not performed here.
+
+        This method uses scikit-rf interpolation on a copied Network. The
+        original object remains unchanged so the raw measurement grid and the
+        COM processing grid can be compared during debugging.
+
+        Parameters
+        ----------
+        freqs:
+            Requested frequency grid in Hz. Returned points are limited to the
+            available measured span after optional DC extrapolation.
+        basis:
+            scikit-rf interpolation basis.
+        coords:
+            scikit-rf interpolation coordinate system.
+        kind:
+            scikit-rf interpolation kind.
+        dc_method:
+            DC extrapolation method. Only "skrf" is currently implemented.
+        dc_sparam:
+            Optional DC S-parameter value passed to skrf.
+        dc_kind:
+            Interpolation kind used by skrf DC extrapolation.
+        dc_coords:
+            Coordinate system used by skrf DC extrapolation.
         """
         model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
-        return model.resample(
-            freqs,
-            basis=basis,
-            coords=coords,
-            kind=kind,
-            dc_method=dc_method,
-            dc_sparam=dc_sparam,
-            dc_kind=dc_kind,
-            dc_coords=dc_coords,
-        )
+        freqs = model.validate_resample_freqs(freqs)
+
+        if freqs[0] < model.freqs[0]:
+            if dc_method != "skrf":
+                raise NotImplementedError('Only dc_method="skrf" is implemented for DC extrapolation.')
+            model.network = model.network.extrapolate_to_dc(
+                dc_sparam=dc_sparam,
+                kind=dc_kind,
+                coords=dc_coords,
+            )
+            model.network = model.validate_network(model.network)
+
+        f_stop = model.freqs[-1]
+        freqs_inband = freqs[freqs <= f_stop]
+        if len(freqs_inband) < 2:
+            raise ValueError("resampled() target grid must contain at least two in-band frequency points.")
+
+        if freqs_inband[0] < model.freqs[0]:
+            raise ValueError("resampled() target grid starts below the available frequency span after DC handling.")
+
+        model.network = model.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
+        model.network = model.validate_network(model.network)
+        return model
 
     def extrapolated_to_dc(
         self,
@@ -618,104 +1186,40 @@ class sparamModel:
         dc_sparam: np.ndarray | None = None,
         kind: str = "linear",
         coords: str = "cart",
-    ) -> 'sparamModel':
+    ) -> 'SparamModel':
         """
         Return a copy with a DC point added when the measurement lacks DC.
+
+        This wraps skrf.Network.extrapolate_to_dc() on a copied Network. It is
+        copy-returning for the same reason as renormalized(): DC handling is a
+        modeling assumption, and preserving the original measured data is useful
+        for validation and comparison.
+
+        Parameters
+        ----------
+        method:
+            DC extrapolation method. Only "skrf" is currently implemented.
+        dc_sparam:
+            Optional DC S-parameter value passed to skrf.
+        kind:
+            Interpolation kind used by skrf.
+        coords:
+            Coordinate system used by skrf.
         """
         model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
-        return model.extrapolate_to_dc(method=method, dc_sparam=dc_sparam, kind=kind, coords=coords)
-
-    def renumbered(self, port_order: tuple[int, ...]) -> 'sparamModel':
-        """
-        Return a copy with ports reordered.
-
-        port_order gives old port indices in the desired new order. For example,
-        port_order=(1, 0) swaps a two-port Sdd network.
-        """
-        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
-        return model.renum(port_order)
-
-    # ---- in-place operations ----
-    def renormalize(self, z0_new: Union[float, np.ndarray], s_def: str | None = None) -> 'sparamModel':
-        """
-        Renormalize self.network to a new reference impedance in place.
-
-        This changes the S-parameter values, not only the Network.z0 metadata.
-        The method returns self for chaining.
-        """
-        self.network.renormalize(z0_new, s_def=s_def)
-        self.network = self.validate_network(self.network)
-        return self
-
-    def resample(
-        self,
-        freqs: np.ndarray,
-        basis: str = "s",
-        coords: str = "cart",
-        kind: str | None = None,
-        dc_method: str = "skrf",
-        dc_sparam: np.ndarray | None = None,
-        dc_kind: str = "linear",
-        dc_coords: str = "cart",
-    ) -> 'sparamModel':
-        """
-        Resample self.network in place on the requested grid within the measured span.
-
-        If the requested grid starts below the measured low-frequency point,
-        this method first calls extrapolate_to_dc(). After that it only keeps
-        requested points up to the measured f_stop. It intentionally does not
-        extrapolate S-parameters above the measured bandwidth. The method
-        returns self for chaining.
-        """
-        freqs = self.validate_resample_freqs(freqs)
-
-        if freqs[0] < self.freqs[0]:
-            self.extrapolate_to_dc(
-                method=dc_method,
-                dc_sparam=dc_sparam,
-                kind=dc_kind,
-                coords=dc_coords,
-            )
-
-        f_stop = self.freqs[-1]
-        freqs_inband = freqs[freqs <= f_stop]
-        if len(freqs_inband) < 2:
-            raise ValueError("resample() target grid must contain at least two in-band frequency points.")
-
-        if freqs_inband[0] < self.freqs[0]:
-            raise ValueError("resample() target grid starts below the available frequency span after DC handling.")
-
-        self.network = self.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
-        self.network = self.validate_network(self.network)
-        return self
-
-    def extrapolate_to_dc(
-        self,
-        method: str = "skrf",
-        dc_sparam: np.ndarray | None = None,
-        kind: str = "linear",
-        coords: str = "cart",
-    ) -> 'sparamModel':
-        """
-        Add a DC point to self.network in place when the measurement lacks DC.
-
-        method="skrf" delegates to skrf.Network.extrapolate_to_dc(). Other
-        DC models from the sparam_to_sbr reference can be added here later.
-        The method returns self for chaining.
-        """
-        if np.isclose(self.freqs[0], 0.0):
-            return self
+        if np.isclose(model.freqs[0], 0.0):
+            return model
 
         if method != "skrf":
             raise NotImplementedError('Only method="skrf" is implemented for DC extrapolation.')
 
-        self.network = self.network.extrapolate_to_dc(
+        model.network = model.network.extrapolate_to_dc(
             dc_sparam=dc_sparam,
             kind=kind,
             coords=coords,
         )
-        self.network = self.validate_network(self.network)
-        return self
+        model.network = model.validate_network(model.network)
+        return model
 
     def voltage_transfer_function(
         self,
@@ -746,27 +1250,6 @@ class sparamModel:
 
         return self.sdd21 * (1 - gamma_src) * (1 + gamma_load) / denom
 
-    def renum(self, port_order: tuple[int, ...]) -> 'sparamModel':
-        """
-        Reorder self.network ports in place.
-
-        port_order gives old port indices in the desired new order. For example,
-        port_order=(1, 0) swaps a two-port Sdd network.
-
-        Internally this maps to scikit-rf Network.renumber(from_ports, to_ports):
-            from_ports = port_order
-            to_ports = range(n_ports)
-
-        The method returns self for chaining.
-        """
-        port_order = self.validate_renum_port_order(port_order)
-        self.network.renumber(
-            from_ports=list(port_order),
-            to_ports=list(range(len(port_order))),
-        )
-        self.network = self.validate_network(self.network)
-        return self
-    
     # ---- derived scalar conversion ----
     def to_LinkSegment(
         self,
@@ -819,7 +1302,7 @@ class LinkSegment:
 
     It should not own two-port S-parameter storage, S4P-to-Sdd conversion,
     mixed-mode conversion, or IEEE COM package primitive construction. Those
-    belong in sparamModel or com_model.py before a scalar response is selected.
+    belong in SparamModel or com_model.py before a scalar response is selected.
     """
 
     def __init__(self, cfg: 'LinkConfig'):
@@ -838,16 +1321,58 @@ class LinkSegment:
     # ----- constructors -----
     @classmethod
     def from_tf(cls, f_meas: np.ndarray, H_meas: np.ndarray, cfg: 'LinkConfig') -> 'LinkSegment':
+        """
+        Build a LinkSegment from scalar transfer-function samples.
+
+        Parameters
+        ----------
+        f_meas:
+            Frequency axis in Hz for H_meas.
+        H_meas:
+            Scalar transfer function samples on f_meas. If f_meas is not equal
+            to cfg.freqs, H_meas is resampled / extended onto cfg.freqs using
+            the module transfer-function resampling convention.
+        cfg:
+            LinkConfig defining the target FFT frequency and time grids.
+        """
         if not(isFreqsEqual(f_meas, cfg.freqs)):
             H_meas = resample_tf(H_meas, f_meas, cfg.freqs)
 
         seg = cls(cfg)
-        seg._tf = H_meas
+        seg._tf = seg.validate_tf(H_meas)
         return seg
 
     @classmethod
-    def from_sr(cls) -> 'LinkSegment':
-        pass
+    def from_sr(cls, sr: np.ndarray, cfg: 'LinkConfig') -> 'LinkSegment':
+        """
+        Build a LinkSegment from scalar step-response samples.
+
+        Parameters
+        ----------
+        sr:
+            Step response sampled on cfg.times.
+        cfg:
+            LinkConfig defining the response time grid and conversion rules.
+        """
+        seg = cls(cfg)
+        seg._sr = seg.validate_time_response(sr, "sr")
+        return seg
+
+    @classmethod
+    def from_ir(cls, ir: np.ndarray, cfg: 'LinkConfig') -> 'LinkSegment':
+        """
+        Build a LinkSegment from scalar impulse-response samples.
+
+        Parameters
+        ----------
+        ir:
+            Impulse response sampled on cfg.times.
+        cfg:
+            LinkConfig defining the response time grid and conversion rules.
+        """
+        seg = cls(cfg)
+        seg._ir = seg.validate_ir(ir, correct_wrap=False)
+        return seg
 
     # ----- proxy & lazy evaluation -----
     @property
@@ -884,6 +1409,343 @@ class LinkSegment:
     # ============================
     # methods
     # ============================
+    @staticmethod
+    def _plt() -> Any:
+        import matplotlib.pyplot as plt
+        return plt
+
+    def _finish_plot(self, ax: Axes, save_path: str, created_figure: bool) -> Axes:
+        """
+        Apply LinkSegment's plot output convention.
+
+        If save_path is provided, save the figure and close it. If no external
+        Axes was provided and no save_path is given, show the figure. External
+        Axes without save_path are left for the caller to manage.
+        """
+        plt = self._plt()
+        fig = ax.figure
+        fig.tight_layout()
+
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        elif created_figure:
+            plt.show()
+
+        return ax
+
+    def plot_tf(self, ax: Optional[Axes] = None, save_path: str = "") -> Axes:
+        """
+        Plot absolute transfer-function magnitude in dB versus frequency.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes. If provided, draw on this Axes and leave
+            display / close behavior to the caller unless save_path is set.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        """
+        created_figure = ax is None
+        if ax is None:
+            _, ax = self._plt().subplots()
+
+        tf = self.validate_tf(self.tf)
+        mag_db = 20 * np.log10(np.maximum(np.abs(tf), np.finfo(float).tiny))
+        ax.plot(self.cfg.freqs / 1e9, mag_db)
+        ax.set_xlabel("Frequency (GHz)")
+        ax.set_ylabel("|H(f)| (dB)")
+        ax.set_title("Transfer Function")
+        ax.set_xlim(0.0, self.cfg.fb / 1e9)
+        ax.grid(True)
+
+        return self._finish_plot(ax, save_path, created_figure)
+
+    def annotate_f(self, ax: Axes, f: Optional[Union[float, np.ndarray]] = None) -> Axes:
+        """
+        Annotate one or more frequencies on a transfer-function plot.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib Axes containing a plot_tf() result.
+        f:
+            Frequency or frequencies in Hz. If None, annotate cfg.f_nyq.
+
+        The annotated gain is:
+            20log10|H(f)| - 20log10|H(0)|
+        """
+        from matplotlib.axes import Axes as MplAxes
+
+        if not isinstance(ax, MplAxes):
+            raise TypeError("ax must be a matplotlib Axes.")
+
+        if f is None:
+            freqs_to_mark = np.array([self.cfg.f_nyq], dtype=float)
+        else:
+            freqs_to_mark = np.atleast_1d(np.asarray(f, dtype=float))
+
+        if not np.all(np.isfinite(freqs_to_mark)):
+            raise ValueError("f contains non-finite values.")
+
+        if np.any((freqs_to_mark < self.cfg.freqs[0]) | (freqs_to_mark > self.cfg.freqs[-1])):
+            raise ValueError("f must be within cfg.freqs.")
+
+        tf = self.validate_tf(self.tf)
+        mag_db = 20 * np.log10(np.maximum(np.abs(tf), np.finfo(float).tiny))
+        gain_db = mag_db - mag_db[0]
+
+        y_min, y_max = ax.get_ylim()
+        for f_hz in freqs_to_mark:
+            mag_at_f = float(np.interp(f_hz, self.cfg.freqs, mag_db))
+            gain_at_f = float(np.interp(f_hz, self.cfg.freqs, gain_db))
+            f_ghz = float(f_hz / 1e9)
+
+            ax.axvline(f_ghz, linestyle="--", color="tab:red", linewidth=1.0)
+            ax.plot(f_ghz, mag_at_f, marker="o", color="tab:red", markersize=4)
+            ax.annotate(
+                f"({f_ghz:.3f} GHz, {gain_at_f:.1f} dB)",
+                xy=(f_ghz, mag_at_f),
+                xytext=(6, 8),
+                textcoords="offset points",
+                color="tab:red",
+                fontsize=9,
+                bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "tab:red", "alpha": 0.85},
+            )
+
+        ax.set_ylim(y_min, y_max)
+        return ax
+
+    def _response_x_axis(
+        self,
+        response: np.ndarray,
+        x_unit: Literal["ui", "ns"],
+        x_origin: Literal["start", "max"],
+        origin_response: Optional[np.ndarray] = None,
+    ) -> tuple[np.ndarray, str]:
+        """
+        Build a time axis for scalar response plots.
+
+        Parameters
+        ----------
+        response:
+            Time-domain response sampled on cfg.times.
+        x_unit:
+            "ui" uses cfg.times_ui; "ns" uses cfg.times converted to ns.
+        x_origin:
+            "start" keeps cfg.times[0] as x=0; "max" shifts the largest
+            abs(origin_response) sample to x=0.
+        origin_response:
+            Optional response used only to choose the x-origin. If None, use
+            response itself.
+        """
+        response = self.validate_time_response(response, "response")
+        origin_ref = response if origin_response is None else self.validate_time_response(origin_response, "origin_response")
+        if x_unit == "ui":
+            x = self.cfg.times_ui.copy()
+            xlabel = "Time (UI)"
+        elif x_unit == "ns":
+            x = self.cfg.times * 1e9
+            xlabel = "Time (ns)"
+        else:
+            raise ValueError('x_unit must be "ui" or "ns".')
+
+        if x_origin == "start":
+            return x, xlabel
+        if x_origin == "max":
+            origin_index = int(np.argmax(np.abs(origin_ref)))
+            return x - x[origin_index], xlabel
+
+        raise ValueError('x_origin must be "start" or "max".')
+
+    def _set_response_xlim(
+        self,
+        ax: Axes,
+        x_unit: Literal["ui", "ns"],
+        x_origin: Literal["start", "max"],
+        xlim_ui: Optional[tuple[float, float]],
+    ) -> None:
+        """
+        Set a compact SerDes response window in UI or ns.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib Axes to update.
+        x_unit:
+            "ui" or "ns".
+        x_origin:
+            "start" or "max".
+        xlim_ui:
+            Optional x-limits in UI. If None, use a compact default window:
+            (-5, 20) UI for max-centered plots and (0, 20) UI for start-based
+            plots.
+        """
+        if xlim_ui is None:
+            xlim_ui = (-5.0, 20.0) if x_origin == "max" else (0.0, 20.0)
+
+        if len(xlim_ui) != 2:
+            raise ValueError("xlim_ui must contain two values: (start_ui, stop_ui).")
+
+        lo_ui = float(xlim_ui[0])
+        hi_ui = float(xlim_ui[1])
+        if not np.isfinite(lo_ui) or not np.isfinite(hi_ui) or lo_ui >= hi_ui:
+            raise ValueError("xlim_ui must be finite and strictly increasing.")
+
+        if x_unit == "ui":
+            ax.set_xlim(lo_ui, hi_ui)
+        elif x_unit == "ns":
+            ax.set_xlim(lo_ui * self.cfg.bt * 1e9, hi_ui * self.cfg.bt * 1e9)
+        else:
+            raise ValueError('x_unit must be "ui" or "ns".')
+
+    def _plot_time_response(
+        self,
+        response: np.ndarray,
+        name: str,
+        ylabel: str,
+        title: str,
+        ax: Optional[Axes],
+        save_path: str,
+        x_unit: Literal["ui", "ns"],
+        x_origin: Literal["start", "max"],
+        xlim_ui: Optional[tuple[float, float]],
+        origin_response: Optional[np.ndarray] = None,
+    ) -> Axes:
+        response = self.validate_time_response(response, name)
+        created_figure = ax is None
+        if ax is None:
+            _, ax = self._plt().subplots()
+
+        x, xlabel = self._response_x_axis(response, x_unit, x_origin, origin_response=origin_response)
+        ax.plot(x, response)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        self._set_response_xlim(ax, x_unit, x_origin, xlim_ui)
+        ax.grid(True)
+
+        return self._finish_plot(ax, save_path, created_figure)
+
+    def plot_ir(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        x_unit: Literal["ui", "ns"] = "ui",
+        x_origin: Literal["start", "max"] = "max",
+        xlim_ui: Optional[tuple[float, float]] = None,
+    ) -> Axes:
+        """
+        Plot impulse response.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes. If provided, draw on this Axes and leave
+            display / close behavior to the caller unless save_path is set.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        x_unit:
+            "ui" for UI axis or "ns" for nanosecond axis.
+        x_origin:
+            "start" keeps the original time zero; "max" shifts the largest
+            abs(ir) sample to x=0.
+        xlim_ui:
+            Optional x-limits in UI after applying x_origin. If None, use the
+            default compact window.
+        """
+        return self._plot_time_response(
+            response=self.ir,
+            name="ir",
+            ylabel="h(t)",
+            title="Impulse Response",
+            ax=ax,
+            save_path=save_path,
+            x_unit=x_unit,
+            x_origin=x_origin,
+            xlim_ui=xlim_ui,
+        )
+
+    def plot_sr(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        x_unit: Literal["ui", "ns"] = "ui",
+        x_origin: Literal["start", "max"] = "start",
+        xlim_ui: Optional[tuple[float, float]] = None,
+    ) -> Axes:
+        """
+        Plot step response.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes. If provided, draw on this Axes and leave
+            display / close behavior to the caller unless save_path is set.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        x_unit:
+            "ui" for UI axis or "ns" for nanosecond axis.
+        x_origin:
+            "start" keeps the original time zero; "max" shifts the largest
+            abs(ir) sample to x=0 so SR and IR plots use the same delay
+            reference.
+        xlim_ui:
+            Optional x-limits in UI after applying x_origin. If None, use the
+            default compact window.
+        """
+        return self._plot_time_response(
+            response=self.sr,
+            name="sr",
+            ylabel="Step response",
+            title="Step Response",
+            ax=ax,
+            save_path=save_path,
+            x_unit=x_unit,
+            x_origin=x_origin,
+            xlim_ui=xlim_ui,
+            origin_response=self.ir,
+        )
+
+    def plot_sbr(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        x_unit: Literal["ui", "ns"] = "ui",
+        x_origin: Literal["start", "max"] = "max",
+        xlim_ui: Optional[tuple[float, float]] = None,
+    ) -> Axes:
+        """
+        Plot single-bit response.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes. If provided, draw on this Axes and leave
+            display / close behavior to the caller unless save_path is set.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        x_unit:
+            "ui" for UI axis or "ns" for nanosecond axis.
+        x_origin:
+            "start" keeps the original time zero; "max" shifts the largest
+            abs(sbr) sample to x=0.
+        xlim_ui:
+            Optional x-limits in UI after applying x_origin. If None, use the
+            default compact window.
+        """
+        return self._plot_time_response(
+            response=self.sbr,
+            name="sbr",
+            ylabel="Single-bit response",
+            title="Single-Bit Response",
+            ax=ax,
+            save_path=save_path,
+            x_unit=x_unit,
+            x_origin=x_origin,
+            xlim_ui=xlim_ui,
+        )
+
     def cascade_tf(self, other: 'LinkSegment') -> 'LinkSegment':
         """
         Cascade two scalar transfer-function LinkSegment objects in frequency domain.
@@ -901,7 +1763,28 @@ class LinkSegment:
         return seg
 
     def cascade_ir(self, other: 'LinkSegment') -> 'LinkSegment':
-        pass
+        """
+        Cascade two scalar impulse responses using full linear convolution.
+
+        The continuous-time convolution integral is approximated by:
+            h_total[n] = sum_k h1[k] * h2[n-k] * cfg.dt
+
+        The full linear-convolution length is preserved. If the result length is
+        odd, one trailing zero is appended so the returned LinkConfig keeps an
+        even Nfft and therefore an explicit rfft Nyquist bin.
+        """
+        self.validate_compatible_segment(other)
+
+        ir_total = np.convolve(self.ir, other.ir) * self.cfg.dt
+        if len(ir_total) % 2 != 0:
+            ir_total = np.r_[ir_total, 0.0]
+
+        new_cfg = LinkConfig.from_Nfft(
+            fb=self.cfg.fb,
+            per_ui=self.cfg.per_ui,
+            Nfft=len(ir_total),
+        )
+        return LinkSegment.from_ir(ir_total, new_cfg)
 
     def find_main_delay(self, energy_window_ui: float = 1.0) -> dict[str, float | int]:
         """
@@ -912,10 +1795,21 @@ class LinkSegment:
         estimate. This method only reports timing; it does not shift the response.
 
         Output parameters
-        ---------------------
-            peak_index:           =argmax(abs(ir))
-            energy_window_ui:     以peak_idx為中心的energy window的UI寬度
-            centroid_index:       energy window 中的重心
+        -----------------
+        peak_index:
+            Index of max(abs(ir)).
+        peak_time / peak_time_ui:
+            Time of the peak sample in seconds / UI.
+        centroid_index:
+            Energy-weighted average index inside the local window around the
+            peak. This can be a fractional index.
+        centroid_time / centroid_time_ui:
+            Time of the local energy centroid in seconds / UI.
+        energy_window_ui:
+            Width of the local centroid window in UI.
+        energy_ratio_in_window:
+            Fraction of total impulse-response energy inside the centroid
+            window.
         """
         ir = self.ir
         mag = np.abs(ir)
@@ -1129,10 +2023,10 @@ class LinkSegment:
         """
         pair_map = {
             "tf2ir": ("tf", "ir", self.validate_tf, self.tf2ir, self.ir2tf),
-            "ir2tf": ("ir", "tf", lambda v: self.validate_time_response(v, "ir"), self.ir2tf, self.tf2ir),
+            "ir2tf": ("ir", "tf", lambda v: self.validate_ir(v, correct_wrap=False), self.ir2tf, self.tf2ir),
             "tf2sr": ("tf", "sr", self.validate_tf, self.tf2sr, self.sr2tf),
             "sr2tf": ("sr", "tf", lambda v: self.validate_time_response(v, "sr"), self.sr2tf, self.tf2sr),
-            "ir2sr": ("ir", "sr", lambda v: self.validate_time_response(v, "ir"), self.ir2sr, self.sr2ir),
+            "ir2sr": ("ir", "sr", lambda v: self.validate_ir(v, correct_wrap=False), self.ir2sr, self.sr2ir),
             "sr2ir": ("sr", "ir", lambda v: self.validate_time_response(v, "sr"), self.sr2ir, self.ir2sr),
             "sr2sbr": ("sr", "sbr", lambda v: self.validate_time_response(v, "sr"), self.sr2sbr, self.sbr2sr),
             "sbr2sr": ("sbr", "sr", lambda v: self.validate_time_response(v, "sbr"), self.sbr2sr, self.sr2sbr),
@@ -1205,6 +2099,45 @@ class LinkSegment:
 
         return x
 
+    def validate_ir(
+        self,
+        ir: np.ndarray,
+        correct_wrap: bool = False,
+        wrap_peak_after_fraction: float = 0.75,
+    ) -> np.ndarray:
+        """
+        Validate an impulse response and optionally correct circular wrap-around.
+
+        Parameters
+        ----------
+        ir:
+            Impulse response sampled on cfg.times.
+        correct_wrap:
+            If True, treat a dominant peak after wrap_peak_after_fraction*Nfft
+            as a circularly wrapped response and roll that peak to t=0.
+        wrap_peak_after_fraction:
+            Fraction of the time window after which a peak is considered wrapped.
+
+        This correction is intentionally opt-in. It is used by tf2ir(), where
+        IFFT periodicity can place a wrapped response near the end of the time
+        window. Constructors and IR-domain cascade keep the natural time
+        reference by default.
+        """
+        ir = self.validate_time_response(ir, "ir")
+
+        if not correct_wrap:
+            return ir
+
+        if not 0.0 < wrap_peak_after_fraction < 1.0:
+            raise ValueError("wrap_peak_after_fraction must be between 0 and 1.")
+
+        peak_index = int(np.argmax(np.abs(ir)))
+        wrap_threshold = int(round(wrap_peak_after_fraction * len(ir)))
+        if peak_index >= wrap_threshold:
+            return np.roll(ir, -peak_index)
+
+        return ir
+
     def validate_compatible_segment(self, other: 'LinkSegment') -> None:
         if not isinstance(other, LinkSegment):
             raise TypeError("other must be a LinkSegment.")
@@ -1235,7 +2168,8 @@ class LinkSegment:
         - ir2tf() must divide by the same cfg.Fs used here.
         """
         tf = self.validate_tf(tf)
-        return np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
+        ir = np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
+        return self.validate_ir(ir, correct_wrap=True)
 
     def ir2sr(self, ir: np.ndarray) -> np.ndarray:
         """
@@ -1246,7 +2180,7 @@ class LinkSegment:
         - sr is defined with zero prehistory: sr[n<0] = 0.
         - The inverse uses the same cfg.dt.
         """
-        ir = self.validate_time_response(ir, "ir")
+        ir = self.validate_ir(ir, correct_wrap=False)
         return np.cumsum(ir) * self.cfg.dt
 
     def tf2sr(self, tf: np.ndarray) -> np.ndarray:
@@ -1281,7 +2215,7 @@ class LinkSegment:
         - The forward FFT divides by cfg.Fs to undo tf2ir()'s continuous scaling.
         - The returned DC/Nyquist bins are forced real for rfft/irfft consistency.
         """
-        ir = self.validate_time_response(ir, "ir")
+        ir = self.validate_ir(ir, correct_wrap=False)
         tf = np.fft.rfft(ir, n=self.cfg.Nfft) / self.cfg.Fs
         tf[0] = tf[0].real + 0j
         tf[-1] = tf[-1].real + 0j
