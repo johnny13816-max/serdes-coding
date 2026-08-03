@@ -281,21 +281,21 @@ class LinkConfig:
 
     It should not own channel data, S-parameters, or response conversion logic.
     """
-    fb: float = 53.125e9                            # unit: Hz
-    per_ui: int = 64
-    target_df: float = 1e8
+    fb: float = 53.125e9                            # unit: Hz, baud/signaling frequency
+    per_ui: int = 64                                # unit: samples/UI
+    target_df: float = 1e8                          # unit: Hz, requested frequency resolution
 
     # ----- derived attributes -----
-    bt: float = field(init=False)
-    L_ui: int = field(init=False)
+    bt: float = field(init=False)                   # unit: s/UI
+    L_ui: int = field(init=False)                   # unit: UI, total time span
 
     # fft pair setup
     Nfft: int = field(init=False)                   # even points, s.t. freqs include H(f=Fs/2)
-    Fs: float = field(init=False)
-    f_nyq: float = field(init=False)
-    dt: float = field(init=False)
-    df: float = field(init=False)
-    T_max: float = field(init=False)
+    Fs: float = field(init=False)                   # unit: Hz, sampling frequency
+    f_nyq: float = field(init=False)                # unit: Hz, Nyquist frequency
+    dt: float = field(init=False)                   # unit: s, sample interval
+    df: float = field(init=False)                   # unit: Hz, exact frequency resolution
+    T_max: float = field(init=False)                # unit: s, total time span
     freqs: np.ndarray = field(init=False)           # unit: Hz, positive half side, np.arange(0,Fs/2+df,df)
     times: np.ndarray = field(init=False)           # unit: sec
     times_ui: np.ndarray = field(init=False)        # unit: UI
@@ -462,6 +462,228 @@ class LinkConfig:
                 raise ValueError("times[-1] must equal expected_stop within numerical tolerance.")
 
         return times
+
+@dataclass
+class OneSidePSD:
+    """
+    One-sided power spectral density container.
+
+    Class boundary
+    --------------
+    OneSidePSD owns scalar one-sided PSD samples S(f) on a non-negative
+    frequency axis. Internally the stored PSD is always one-sided and uses SI
+    frequency units, so integrated power is approximated by integral S(f) df.
+
+    It does not own transfer-function FFT/IFFT conversion or S-parameter
+    conversion. Filtering by an LTI response is represented by:
+        S_out(f) = S_in(f) * |H(f)|^2
+
+    The class can either preserve a measured PSD grid or return a copy aligned
+    to LinkConfig.freqs for 178A-style PSD arithmetic on a common frequency
+    grid.
+    """
+    freqs: np.ndarray                # unit: Hz, one-sided non-negative frequency axis
+    psd: np.ndarray                  # unit: quantity^2/Hz, one-sided PSD samples
+
+    def __post_init__(self) -> None:
+        self.freqs = LinkConfig.validate_freqs(self.freqs)
+        self.psd = self.validate_psd(self.psd, self.freqs)
+
+    @staticmethod
+    def validate_psd(psd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
+        """
+        Validate one-sided PSD samples.
+
+        Parameters
+        ----------
+        psd:
+            One-sided PSD samples in quantity^2/Hz.
+        freqs:
+            Frequency axis in Hz used only for shape checking.
+        """
+        psd = np.asarray(psd, dtype=float)
+        if psd.shape != freqs.shape:
+            raise ValueError("psd and freqs must have the same shape.")
+        if psd.ndim != 1:
+            raise ValueError("psd must be a 1D array.")
+        if not np.all(np.isfinite(psd)):
+            raise ValueError("psd contains non-finite values.")
+        if np.any(psd < 0.0):
+            raise ValueError("psd must be non-negative.")
+        return psd
+
+    @classmethod
+    def from_constant(cls, freqs: np.ndarray, value: float) -> 'OneSidePSD':
+        """
+        Build a flat one-sided PSD.
+
+        Parameters
+        ----------
+        freqs:
+            Frequency axis in Hz.
+        value:
+            One-sided PSD level in quantity^2/Hz.
+        """
+        freqs = LinkConfig.validate_freqs(freqs)
+        value = float(value)
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError("value must be finite and non-negative.")
+        return cls(freqs=freqs, psd=value * np.ones_like(freqs))
+
+    @classmethod
+    def from_link_config(cls, cfg: LinkConfig, value: float) -> 'OneSidePSD':
+        """
+        Build a flat one-sided PSD directly on cfg.freqs.
+
+        Parameters
+        ----------
+        cfg:
+            LinkConfig defining the target frequency grid in Hz.
+        value:
+            One-sided PSD level in quantity^2/Hz.
+        """
+        return cls.from_constant(cfg.freqs, value)
+
+    @property
+    def df(self) -> float | None:
+        """
+        Frequency spacing in Hz when the PSD grid is uniform; otherwise None.
+        """
+        steps = np.diff(self.freqs)
+        if np.allclose(steps, steps[0], rtol=1e-12, atol=1e-15):
+            return float(steps[0])
+        return None
+
+    def aligned_to(
+        self,
+        cfg: LinkConfig,
+        *,
+        out_of_band: Literal["zero", "hold", "error"] = "zero",
+    ) -> 'OneSidePSD':
+        """
+        Return a copy sampled on cfg.freqs.
+
+        Parameters
+        ----------
+        cfg:
+            LinkConfig whose cfg.freqs is the target one-sided frequency grid.
+        out_of_band:
+            Policy for cfg.freqs above the current PSD stop frequency:
+            "zero" sets out-of-band PSD to zero, "hold" keeps the last PSD
+            value, and "error" rejects extrapolation.
+
+        Notes
+        -----
+        This performs scalar interpolation/extrapolation on PSD values. It is
+        suitable for noise PSD models. It should not be used to resample
+        transfer functions with phase.
+        """
+        f_new = cfg.freqs
+        if f_new[0] < self.freqs[0]:
+            raise ValueError("Target grid starts below PSD frequency span.")
+        if f_new[-1] > self.freqs[-1] and out_of_band == "error":
+            raise ValueError("Target grid extends beyond PSD frequency span.")
+
+        psd_new = np.interp(
+            f_new,
+            self.freqs,
+            self.psd,
+            left=self.psd[0],
+            right=self.psd[-1],
+        )
+
+        if f_new[-1] > self.freqs[-1]:
+            beyond = f_new > self.freqs[-1]
+            if out_of_band == "zero":
+                psd_new[beyond] = 0.0
+            elif out_of_band == "hold":
+                psd_new[beyond] = self.psd[-1]
+            else:
+                raise ValueError('out_of_band must be "zero", "hold", or "error".')
+
+        return type(self)(freqs=f_new, psd=psd_new)
+
+    def filtered_by(self, response: 'LinkSegment') -> 'OneSidePSD':
+        """
+        Return the PSD after filtering by a LinkSegment transfer function.
+
+        Parameters
+        ----------
+        response:
+            LinkSegment whose tf is defined on the same one-sided frequency
+            grid as this PSD.
+        """
+        if not isFreqsEqual(self.freqs, response.freqs):
+            raise ValueError("PSD and LinkSegment frequency grids must match. Use aligned_to(cfg) first.")
+        return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2)
+
+    def integrated_power(self) -> float:
+        """
+        Integrate one-sided PSD over frequency.
+
+        Returns
+        -------
+        float
+            Approximate total variance/power in quantity^2.
+        """
+        return float(np.trapezoid(self.psd, self.freqs))
+
+    def plot(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Plot one-sided PSD versus frequency.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes.
+        save_path:
+            Optional output path. If provided, save and close the figure.
+        xlim:
+            Optional frequency limits in Hz.
+        label:
+            Optional curve label.
+        """
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        freqs = self.freqs
+        psd = self.psd
+        if xlim is not None:
+            lo_hz, hi_hz = float(xlim[0]), float(xlim[1])
+            if lo_hz >= hi_hz:
+                raise ValueError("xlim must be strictly increasing.")
+            mask = (freqs >= lo_hz) & (freqs <= hi_hz)
+            if not np.any(mask):
+                raise ValueError("xlim selects no PSD samples.")
+            freqs = freqs[mask]
+            psd = psd[mask]
+
+        ax.plot(freqs / 1e9, psd, label=label)
+        if label is not None:
+            ax.legend()
+        ax.set_xlabel("Frequency (GHz)")
+        ax.set_ylabel("One-sided PSD")
+        ax.set_title("One-sided PSD")
+        ax.grid(True)
+
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            fig.canvas.draw_idle()
+            plt.show()
+
+        return ax
 
 @dataclass
 class SparamProcessor:
@@ -937,10 +1159,58 @@ class SparamModel:
     # public methods
     # -------------------
     # ---- SerDes-oriented plot helpers ----
+    @staticmethod
+    def _plt() -> Any:
+        import matplotlib.pyplot as plt
+        return plt
+
+    @staticmethod
+    def _magnitude_db(response: np.ndarray) -> np.ndarray:
+        return 20 * np.log10(np.maximum(np.abs(response), np.finfo(float).tiny))
+
+    def _apply_frequency_plot_style(
+        self,
+        ax: Any,
+        xlim: Optional[tuple[float, float]] = None,
+        x_scale: Optional[float] = None,
+    ) -> Any:
+        """
+        Apply SparamModel's default frequency-plot convention.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib Axes to update.
+        xlim:
+            Optional frequency limits in Hz.
+        x_scale:
+            Multiplier from Hz to the plot x-axis unit. If None, infer the
+            scale from the scikit-rf Network frequency object.
+        """
+        if ax is None:
+            ax = self._plt().gca()
+
+        ax.grid(True)
+        if xlim is not None:
+            if len(xlim) != 2:
+                raise ValueError("xlim must contain two values: (start_hz, stop_hz).")
+            lo_hz = float(xlim[0])
+            hi_hz = float(xlim[1])
+            if not np.isfinite(lo_hz) or not np.isfinite(hi_hz) or lo_hz >= hi_hz:
+                raise ValueError("xlim must be finite and strictly increasing.")
+            if x_scale is None:
+                f_scaled = np.asarray(self.network.frequency.f_scaled, dtype=float)
+                valid = np.abs(self.freqs) > 0.0
+                x_scale = float(np.median(f_scaled[valid] / self.freqs[valid])) if np.any(valid) else 1.0
+            ax.set_xlim(lo_hz * x_scale, hi_hz * x_scale)
+
+        return ax
+
     def plot_IL(
         self,
         ax: Any = None,
         logx: bool = False,
+        xlim: Optional[tuple[float, float]] = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -956,16 +1226,21 @@ class SparamModel:
             Optional matplotlib axes.
         logx:
             Whether to use a logarithmic frequency axis.
+        xlim:
+            Optional frequency limits in Hz. The limit is converted to the
+            scikit-rf plot frequency unit automatically.
         **kwargs:
             Additional keyword arguments passed to scikit-rf.
         """
-        return self.network.plot_s_db(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+        plot_ax = self.network.plot_s_db(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+        return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
 
     def plot_RL(
         self,
         port: Literal["input", "output", "both"] = "both",
         ax: Any = None,
         logx: bool = False,
+        xlim: Optional[tuple[float, float]] = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -984,16 +1259,22 @@ class SparamModel:
             Optional matplotlib axes.
         logx:
             Whether to use a logarithmic frequency axis.
+        xlim:
+            Optional frequency limits in Hz. The limit is converted to the
+            scikit-rf plot frequency unit automatically.
         **kwargs:
             Additional keyword arguments passed to scikit-rf.
         """
         if port == "input":
-            return self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+            plot_ax = self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
         if port == "output":
-            return self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
+            plot_ax = self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
+            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
         if port == "both":
-            self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
-            return self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
+            plot_ax = self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+            plot_ax = self.network.plot_s_db(m=1, n=1, ax=plot_ax, show_legend=True, logx=logx, **kwargs)
+            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
         raise ValueError('port must be "input", "output", or "both".')
 
     def plot_phase(
@@ -1001,6 +1282,7 @@ class SparamModel:
         ax: Any = None,
         logx: bool = False,
         unwrap: bool = True,
+        xlim: Optional[tuple[float, float]] = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1015,11 +1297,55 @@ class SparamModel:
         unwrap:
             If True, unwrap phase before plotting. This is the SerDes default
             because through-channel phase continuity is usually the useful view.
+        xlim:
+            Optional frequency limits in Hz. The limit is converted to the
+            scikit-rf plot frequency unit automatically.
         **kwargs:
             Additional keyword arguments passed to scikit-rf.
         """
         plotter = self.network.plot_s_deg_unwrap if unwrap else self.network.plot_s_deg
-        return plotter(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+        plot_ax = plotter(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
+        return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
+
+    def plot_sdd(
+        self,
+        logx: bool = False,
+        xlim: Optional[tuple[float, float]] = None,
+        save_path: str = "",
+    ) -> Any:
+        """
+        Plot Sdd11, Sdd12, Sdd21, and Sdd22 magnitude in dB on one figure.
+
+        Parameters
+        ----------
+        logx:
+            Whether to use a logarithmic frequency axis.
+        xlim:
+            Optional frequency limits in Hz.
+        save_path:
+            Optional output path. If provided, save the figure and close it;
+            otherwise show the figure immediately.
+        """
+        plt = self._plt()
+        fig, ax = plt.subplots()
+        ax.plot(self.freqs, self._magnitude_db(self.sdd11), label="Sdd11")
+        ax.plot(self.freqs, self._magnitude_db(self.sdd12), label="Sdd12")
+        ax.plot(self.freqs, self._magnitude_db(self.sdd21), label="Sdd21")
+        ax.plot(self.freqs, self._magnitude_db(self.sdd22), label="Sdd22")
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("Magnitude (dB)")
+        ax.set_title("Sdd Parameters")
+        ax.legend()
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1.0)
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            plt.show()
+        return ax
 
     def plot_smith(
         self,
@@ -1055,7 +1381,7 @@ class SparamModel:
         else:
             raise ValueError('port must be "input" or "output".')
 
-        return self.network.plot_s_smith(
+        plot_ax = self.network.plot_s_smith(
             m=m,
             n=n,
             ax=ax,
@@ -1065,6 +1391,8 @@ class SparamModel:
             label_axes=label_axes,
             **kwargs,
         )
+        plot_ax.grid(True)
+        return plot_ax
 
     def plot_all(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -1073,7 +1401,10 @@ class SparamModel:
         This delegates to Network.plot_it_all(), which draws dB, phase, Smith,
         and complex plots in subplots.
         """
-        return self.network.plot_it_all(*args, **kwargs)
+        result = self.network.plot_it_all(*args, **kwargs)
+        for ax in self._plt().gcf().axes:
+            ax.grid(True)
+        return result
 
     def _debug_scalar_tf(
         self,
@@ -1139,20 +1470,22 @@ class SparamModel:
         if np.isclose(self.freqs[0], 0.0):
             freqs = self.freqs
             H = self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
+            linksegment_dc: Literal["error", "hold"] = "error"
         elif dc == "hold":
-            freqs = np.r_[0.0, self.freqs]
-            H = np.r_[self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)[0],
-                      self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)]
+            freqs = self.freqs
+            H = self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
+            linksegment_dc = "hold"
         elif dc == "skrf":
             model = self.extrapolated_to_dc()
             freqs = model.freqs
             H = model._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
+            linksegment_dc = "error"
         elif dc == "error":
             raise ValueError("SparamModel debug time plot requires DC; use dc='hold' or dc='skrf'.")
         else:
             raise ValueError('dc must be "hold", "skrf", or "error".')
 
-        return LinkSegment.from_tf(freqs, H, cfg)
+        return LinkSegment.from_tf(freqs, H, cfg, dc=linksegment_dc)
 
     def plot_ir(
         self,
@@ -1219,12 +1552,14 @@ class SparamModel:
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
         dc: Literal["hold", "skrf", "error"] = "hold",
         label: str | None = None,
+        normalize_main_cursor: bool = False,
     ) -> Axes:
         """
         Debug-plot the SBR of one S-domain scalar response.
 
-        Parameters are the same as plot_ir(). This is a diagnostic convenience
-        and does not replace the formal COM pulse/SBR path.
+        Parameters are the same as plot_ir(), with normalize_main_cursor passed
+        through to LinkSegment.plot_sbr(). This is a diagnostic convenience and
+        does not replace the formal COM pulse/SBR path.
         """
         seg = self._debug_LinkSegment(
             cfg,
@@ -1233,7 +1568,15 @@ class SparamModel:
             gamma_load=gamma_load,
             dc=dc,
         )
-        return seg.plot_sbr(ax=ax, save_path=save_path, x_unit=x_unit, x_origin=x_origin, xlim_ui=xlim_ui, label=label)
+        return seg.plot_sbr(
+            ax=ax,
+            save_path=save_path,
+            x_unit=x_unit,
+            x_origin=x_origin,
+            xlim_ui=xlim_ui,
+            label=label,
+            normalize_main_cursor=normalize_main_cursor,
+        )
 
     # ---- immutable / copy-returning operations ----
     def cascade(self, other: 'SparamModel') -> 'SparamModel':
@@ -1488,9 +1831,49 @@ class LinkSegment:
         tf[-1] = tf[-1].real + 0j
         return tf
 
+    @staticmethod
+    def _prepare_tf_dc(
+        f_meas: np.ndarray,
+        H_meas: np.ndarray,
+        dc: Literal["error", "hold"],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Prepare transfer-function samples for the LinkSegment DC contract.
+
+        Parameters
+        ----------
+        f_meas:
+            Frequency axis in Hz.
+        H_meas:
+            Scalar transfer function samples on f_meas.
+        dc:
+            Missing-DC policy. "error" raises if f_meas does not include DC.
+            "hold" prepends H(0)=H(f_min).
+        """
+        f = LinkConfig.validate_freqs(f_meas)
+        H = np.asarray(H_meas, dtype=complex)
+        if H.shape != f.shape:
+            raise ValueError("H_meas and f_meas must have the same shape.")
+
+        if np.isclose(f[0], 0.0):
+            return f, H
+
+        if dc == "error":
+            raise ValueError('f_meas must include DC. Use dc="hold" to prepend H(0)=H(f_min).')
+        if dc == "hold":
+            return np.r_[0.0, f], np.r_[H[0], H]
+
+        raise ValueError('dc must be "error" or "hold".')
+
     # ----- constructors -----
     @classmethod
-    def from_tf(cls, f_meas: np.ndarray, H_meas: np.ndarray, cfg: 'LinkConfig') -> 'LinkSegment':
+    def from_tf(
+        cls,
+        f_meas: np.ndarray,
+        H_meas: np.ndarray,
+        cfg: 'LinkConfig',
+        dc: Literal["error", "hold"] = "error",
+    ) -> 'LinkSegment':
         """
         Build a LinkSegment from scalar transfer-function samples.
 
@@ -1504,7 +1887,12 @@ class LinkSegment:
             the module transfer-function resampling convention.
         cfg:
             LinkConfig defining the target FFT frequency and time grids.
+        dc:
+            Missing-DC policy. "error" keeps the strict LinkSegment contract.
+            "hold" prepends H(0)=H(f_min) before resampling.
         """
+        f_meas, H_meas = cls._prepare_tf_dc(f_meas, H_meas, dc)
+
         if not(isFreqsEqual(f_meas, cfg.freqs)):
             H_meas = resample_tf(H_meas, f_meas, cfg.freqs)
 
@@ -1561,6 +1949,28 @@ class LinkSegment:
         return seg
 
     # ----- proxy & lazy evaluation -----
+    @property
+    def freqs(self) -> np.ndarray:
+        """
+        Frequency grid proxy in Hz.
+
+        This is the LinkSegment scalar response grid and is owned by cfg. It is
+        exposed here so downstream code can use segment.freqs without reaching
+        into segment.cfg.
+        """
+        return self.cfg.freqs
+
+    @property
+    def times(self) -> np.ndarray:
+        """
+        Time grid proxy in seconds.
+
+        This is the LinkSegment scalar response grid and is owned by cfg. It is
+        exposed here so downstream code can use segment.times without reaching
+        into segment.cfg.
+        """
+        return self.cfg.times
+
     @property
     def tf(self) -> np.ndarray:
         if (self._tf is None):
@@ -1635,13 +2045,13 @@ class LinkSegment:
         import matplotlib.pyplot as plt
         return plt
 
-    def _finish_plot(self, ax: Axes, save_path: str, created_figure: bool) -> Axes:
+    def _finish_plot(self, ax: Axes, save_path: str) -> Axes:
         """
         Apply LinkSegment's plot output convention.
 
-        If save_path is provided, save the figure and close it. If no external
-        Axes was provided and no save_path is given, show the figure. External
-        Axes without save_path are left for the caller to manage.
+        If save_path is provided, save the figure and close it. If save_path is
+        not provided, refresh and show the figure. This makes chained calls such
+        as ax = plot1(); plot2(ax=ax) visible in interactive environments.
         """
         plt = self._plt()
         fig = ax.figure
@@ -1650,12 +2060,18 @@ class LinkSegment:
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
             plt.close(fig)
-        elif created_figure:
+        else:
+            fig.canvas.draw_idle()
             plt.show()
 
         return ax
 
-    def plot_tf(self, ax: Optional[Axes] = None, save_path: str = "") -> Axes:
+    def plot_tf(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+    ) -> Axes:
         """
         Plot absolute transfer-function magnitude in dB versus frequency.
 
@@ -1666,21 +2082,41 @@ class LinkSegment:
             display / close behavior to the caller unless save_path is set.
         save_path:
             Optional output path. If provided, save the figure and close it.
+        xlim:
+            Optional frequency limits in Hz. If None, use the SerDes default
+            in-band view from 0 to cfg.fb.
         """
-        created_figure = ax is None
         if ax is None:
             _, ax = self._plt().subplots()
 
         tf = self.validate_tf(self.tf)
+        if xlim is None:
+            lo_hz = 0.0
+            hi_hz = self.cfg.fb
+        else:
+            if len(xlim) != 2:
+                raise ValueError("xlim must contain two values: (start_hz, stop_hz).")
+            lo_hz = float(xlim[0])
+            hi_hz = float(xlim[1])
+            if not np.isfinite(lo_hz) or not np.isfinite(hi_hz) or lo_hz >= hi_hz:
+                raise ValueError("xlim must be finite and strictly increasing.")
+
+        if lo_hz < self.cfg.freqs[0] or hi_hz > self.cfg.freqs[-1]:
+            raise ValueError("xlim must stay within cfg.freqs.")
+
+        mask = (self.cfg.freqs >= lo_hz) & (self.cfg.freqs <= hi_hz)
+        if not np.any(mask):
+            raise ValueError("xlim selects no frequency samples.")
+
         mag_db = 20 * np.log10(np.maximum(np.abs(tf), np.finfo(float).tiny))
-        ax.plot(self.cfg.freqs / 1e9, mag_db)
+        ax.plot(self.cfg.freqs[mask] / 1e9, mag_db[mask])
         ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("|H(f)| (dB)")
         ax.set_title("Transfer Function")
-        ax.set_xlim(0.0, self.cfg.fb / 1e9)
+        ax.set_xlim(lo_hz / 1e9, hi_hz / 1e9)
         ax.grid(True)
 
-        return self._finish_plot(ax, save_path, created_figure)
+        return self._finish_plot(ax, save_path)
 
     def annotate_f(self, ax: Axes, f: Optional[Union[float, np.ndarray]] = None) -> Axes:
         """
@@ -1835,7 +2271,6 @@ class LinkSegment:
         label: str | None = None,
     ) -> Axes:
         response = self.validate_time_response(response, name)
-        created_figure = ax is None
         if ax is None:
             _, ax = self._plt().subplots()
 
@@ -1849,7 +2284,7 @@ class LinkSegment:
         self._set_response_xlim(ax, x_unit, x_origin, xlim_ui)
         ax.grid(True)
 
-        return self._finish_plot(ax, save_path, created_figure)
+        return self._finish_plot(ax, save_path)
 
     def plot_ir(
         self,
@@ -1949,6 +2384,7 @@ class LinkSegment:
         x_origin: Literal["start", "max"] = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         label: str | None = None,
+        normalize_main_cursor: bool = False,
     ) -> Axes:
         """
         Plot single-bit response.
@@ -1971,11 +2407,23 @@ class LinkSegment:
         label:
             Optional curve label. Useful when plotting multiple responses on
             the same Axes.
+        normalize_main_cursor:
+            If True, plot sbr divided by its main cursor magnitude so cursor
+            ratios can be inspected directly.
         """
+        response = self.sbr
+        ylabel = "Single-bit response"
+        if normalize_main_cursor:
+            main = float(np.max(np.abs(response)))
+            if not np.isfinite(main) or np.isclose(main, 0.0):
+                raise ValueError("Cannot normalize SBR because the main cursor is zero or non-finite.")
+            response = response / main
+            ylabel = "Single-bit response / main cursor"
+
         return self._plot_time_response(
-            response=self.sbr,
+            response=response,
             name="sbr",
-            ylabel="Single-bit response",
+            ylabel=ylabel,
             title="Single-Bit Response",
             ax=ax,
             save_path=save_path,

@@ -130,15 +130,16 @@ def excel_to_config(excel_path: str) -> COMConfig:
     - first data row contains values
 
     Column names intentionally match the current COMConfig dataclass fields so
-    this function stays simple and easy to edit. Values are expected to already
-    use the spec/Excel-domain units documented by each config class.
+    this function stays simple and easy to edit. This helper is the unit
+    boundary: Excel/spec-style values are converted here into the internal
+    units documented by each config class.
 
     Required LinkConfig columns:
-    - fb, per_ui, target_df
+    - fb in GBd/GHz-equivalent, per_ui, target_df in GHz
 
     Required COMFilterConfig columns:
     - c_m3, c_m2, c_m1, c_1, num_pre
-    - Tr, fr, g_DC, g_DC2, f_z, f_LF, f_p1, f_p2
+    - Tr in ns, fr in GHz, g_DC, g_DC2, f_z/f_LF/f_p1/f_p2 in GHz
     - A_v, A_fe, A_ne
 
     Required COMChannelConfig columns:
@@ -146,7 +147,7 @@ def excel_to_config(excel_path: str) -> COMConfig:
     - port_order, R0, gamma_src, gamma_load
 
     Required COMPkgConfig columns:
-    - C_d, L_s, C_b, z_p, C_p, pkg_enable
+    - C_d/C_b/C_p in nF, L_s in nH, z_p in mm, C_p in nF, pkg_enable
     - R0, Z_c, z_p2, Z_c2
     """
     import ast
@@ -182,9 +183,9 @@ def excel_to_config(excel_path: str) -> COMConfig:
 
     return COMConfig(
         link=LinkConfig(
-            fb=row["fb"],
+            fb=row["fb"] * 1e9,
             per_ui=row["per_ui"],
-            target_df=row["target_df"],
+            target_df=row["target_df"] * 1e9,
         ),
         filter=COMFilterConfig(
             c_m3=row["c_m3"],
@@ -192,14 +193,14 @@ def excel_to_config(excel_path: str) -> COMConfig:
             c_m1=row["c_m1"],
             c_1=row["c_1"],
             num_pre=row["num_pre"],
-            Tr=row["Tr"],
-            fr=row["fr"],
+            Tr=row["Tr"] * 1e-9,
+            fr=row["fr"] * 1e9,
             g_DC=row["g_DC"],
             g_DC2=row["g_DC2"],
-            f_z=row["f_z"],
-            f_LF=row["f_LF"],
-            f_p1=row["f_p1"],
-            f_p2=row["f_p2"],
+            f_z=row["f_z"] * 1e9,
+            f_LF=row["f_LF"] * 1e9,
+            f_p1=row["f_p1"] * 1e9,
+            f_p2=row["f_p2"] * 1e9,
             A_v=row["A_v"],
             A_fe=row["A_fe"],
             A_ne=row["A_ne"],
@@ -214,11 +215,11 @@ def excel_to_config(excel_path: str) -> COMConfig:
             gamma_load=complex(row["gamma_load"]),
         ),
         pkg=COMPkgConfig(
-            C_d=row["C_d"],
-            L_s=row["L_s"],
-            C_b=row["C_b"],
+            C_d=row["C_d"] * 1e-9,
+            L_s=row["L_s"] * 1e-9,
+            C_b=row["C_b"] * 1e-9,
             z_p=row["z_p"],
-            C_p=row["C_p"],
+            C_p=row["C_p"] * 1e-9,
             enable=row["pkg_enable"],
             R0=row["R0"],
             Z_c=row["Z_c"],
@@ -285,40 +286,25 @@ class IEEECOMsparam(SparamModel):
     @classmethod
     def shunt_capacitance(
         cls,
-        cfg: LinkConfig,
+        freqs: np.ndarray,
         capacitance: float,
         R0: float = 50.0,
     ) -> 'IEEECOMsparam':
         """
-        Build the COM shunt capacitance Sdd two-port on cfg.freqs.
+        Build the COM shunt capacitance Sdd two-port on freqs.
 
         Reference:
         - IEEE 802.3 Annex 93A.1.2.2, Eq. 93A-8.
 
         Parameters
         ----------
-        cfg:
-            LinkConfig that defines frequencies in Hz.
+        freqs:
+            Frequency axis in Hz.
         capacitance:
-            Shunt capacitance in farads.
+            Shunt capacitance in F.
         R0:
             Single-ended reference resistance used by Eq. 93A-8. The internal
             differential-mode Sdd Network uses z0 = 2 * R0.
-        """
-        return cls.shunt_capacitance_at_freqs(cfg.freqs, capacitance, R0)
-
-    @classmethod
-    def shunt_capacitance_at_freqs(
-        cls,
-        freqs: np.ndarray,
-        capacitance: float,
-        R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
-        """
-        Build the COM shunt capacitance Sdd two-port on an explicit frequency axis.
-
-        This is used for measured-domain S-parameter cascade, where package
-        models should be sampled on the channel-under-test frequency grid.
         """
         C = float(capacitance)
         R0 = float(R0)
@@ -342,37 +328,25 @@ class IEEECOMsparam(SparamModel):
     @classmethod
     def series_inductance(
         cls,
-        cfg: LinkConfig,
+        freqs: np.ndarray,
         inductance: float,
         R0: float = 50.0,
     ) -> 'IEEECOMsparam':
         """
-        Build the COM series inductance Sdd two-port on cfg.freqs.
+        Build the COM series inductance Sdd two-port on freqs.
 
         Reference:
         - IEEE 802.3ck Annex 93A.1.2.2a, Eq. 93A-9a.
 
         Parameters
         ----------
-        cfg:
-            LinkConfig that defines frequencies in Hz.
+        freqs:
+            Frequency axis in Hz.
         inductance:
-            Series inductance in henries.
+            Series inductance in H.
         R0:
             Single-ended reference resistance used by Eq. 93A-9a. The internal
             differential-mode Sdd Network uses z0 = 2 * R0.
-        """
-        return cls.series_inductance_at_freqs(cfg.freqs, inductance, R0)
-
-    @classmethod
-    def series_inductance_at_freqs(
-        cls,
-        freqs: np.ndarray,
-        inductance: float,
-        R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
-        """
-        Build the COM series inductance Sdd two-port on an explicit frequency axis.
         """
         L = float(inductance)
         R0 = float(R0)
@@ -395,52 +369,6 @@ class IEEECOMsparam(SparamModel):
     @classmethod
     def pkg_trans_line(
         cls,
-        cfg: LinkConfig,
-        R0: float,
-        zp: float,
-        *,
-        gamma0: float = 0.0,
-        a1: float = float(1.734e-3),
-        a2: float = float(1.455e-4),
-        tau: float = float(6.141e-3),
-        Zc: float = 78.2,
-    ) -> 'IEEECOMsparam':
-        """
-        Build the COM package transmission-line Sdd two-port on cfg.freqs.
-
-        Reference:
-        - IEEE 802.3 Annex 93A.1.2.3, Eq. 93A-9 through Eq. 93A-14.
-        - IEEE 802.3ck Annex 93A.1.2.3 clarifies that formula frequency f is
-          in GHz.
-
-        Parameters
-        ----------
-        cfg:
-            LinkConfig. cfg.freqs is in Hz.
-        R0:
-            Single-ended reference resistance.
-        zp:
-            Package line length in millimeters.
-        gamma0, a1, a2, tau:
-            COM propagation-coefficient model parameters used with formula
-            frequency f in GHz.
-        Zc:
-            Package differential characteristic impedance.
-        """
-        return cls.pkg_trans_line_at_freqs(
-            cfg.freqs,
-            R0,
-            zp,
-            gamma0=gamma0,
-            a1=a1,
-            a2=a2,
-            tau=tau,
-            Zc=Zc,
-        )
-
-    @classmethod
-    def pkg_trans_line_at_freqs(
-        cls,
         freqs: np.ndarray,
         R0: float,
         zp: float,
@@ -452,9 +380,27 @@ class IEEECOMsparam(SparamModel):
         Zc: float = 78.2,
     ) -> 'IEEECOMsparam':
         """
-        Build the COM package transmission-line Sdd two-port on an explicit frequency axis.
+        Build the COM package transmission-line Sdd two-port on freqs.
 
-        Formula frequency is converted from Hz to GHz before applying Annex 93A.
+        Reference:
+        - IEEE 802.3 Annex 93A.1.2.3, Eq. 93A-9 through Eq. 93A-14.
+        - IEEE 802.3ck Annex 93A.1.2.3 clarifies that formula frequency f is
+          in GHz.
+
+        Parameters
+        ----------
+        freqs:
+            Frequency axis in Hz.
+        R0:
+            Single-ended reference resistance.
+        zp:
+            Package line length in millimeters.
+        gamma0, a1, a2, tau:
+            COM propagation-coefficient model parameters. The formula uses
+            f in GHz internally after converting from freqs in Hz; gamma0,
+            a1, a2, and tau keep the 93A units associated with Table 93A-3.
+        Zc:
+            Package differential characteristic impedance in ohm.
         """
         f_hz = LinkConfig.validate_freqs(freqs)
         if np.any(f_hz < 0):
@@ -555,7 +501,7 @@ class IEEECOMFilter(LinkSegment):
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines the frequency grid in Hz.
         fr:
             Receiver noise-filter bandwidth in Hz.
         """
@@ -576,11 +522,11 @@ class IEEECOMFilter(LinkSegment):
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines the frequency grid in Hz.
         txfir:
-            TX FFE tap coefficients.
+            TX FFE tap coefficients, dimensionless.
         num_pre:
-            Number of pre-cursor taps before the main cursor.
+            Number of pre-cursor taps before the main cursor, in taps.
         """
         if np.argmax(np.abs(txfir)) != num_pre:
             raise ValueError("TX FFE main cursor index must equal num_pre.")
@@ -612,7 +558,7 @@ class IEEECOMFilter(LinkSegment):
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines the frequency grid in Hz.
         g_DC:
             First DC gain term in dB.
         g_DC2:
@@ -636,9 +582,9 @@ class IEEECOMFilter(LinkSegment):
         Parameters
         ----------
         cfg:
-            LinkConfig that defines the frequency grid.
+            LinkConfig that defines the frequency grid in Hz.
         At:
-            Rectangular pulse amplitude.
+            Rectangular pulse amplitude in V.
         """
         f = cfg.freqs
         X_f = At * cfg.bt * np.sinc(f * cfg.bt)
@@ -646,7 +592,19 @@ class IEEECOMFilter(LinkSegment):
 
     @classmethod
     def transition_time_filter(cls, cfg: LinkConfig, Tr: float) -> 'IEEECOMFilter':
-        "Eq. 93A-46"
+        """
+        Build the transmitter transition-time filter.
+
+        Reference:
+        - IEEE 802.3 Annex 93A, Eq. 93A-46.
+
+        Parameters
+        ----------
+        cfg:
+            LinkConfig that defines the frequency grid in Hz.
+        Tr:
+            20%-80% transition time in seconds.
+        """
         p1 = 1.6832
         f = cfg.freqs
         Tr = float(Tr)
@@ -660,24 +618,25 @@ class IEEECOMFilter(LinkSegment):
 @dataclass(repr=False)
 class COMPkgConfig(_PrettyDataclass):
     """
-    COM package configuration using spec/Excel-domain units.
+    COM package configuration using internal formula units.
 
-    Units:
-    - C_d, C_b, C_p: pF
-    - L_s: nH
-    - z_p, z_p2: millimeters
-    - R0, Z_c, Z_c2: ohms
+    Unit contract:
+    - capacitance values are stored in F
+    - inductance values are stored in H
+    - package transmission-line lengths remain in mm because 93A TL equations
+      use mm with propagation coefficients defined per mm
+    - resistance/impedance values are stored in ohm
     """
-    C_d: float = 0.0      # unit: pF
-    L_s: float = 0.0      # unit: nH
-    C_b: float = 0.0      # unit: pF
-    z_p: float = 0.0      # unit: mm
-    C_p: float = 0.0      # unit: pF
-    enable: bool = True
-    R0: float = 50.0
-    Z_c: float = 78.2   # unit: ohm
-    z_p2: Optional[float] = None # unit: mm
-    Z_c2: float = 78.2  # unit: ohm
+    C_d: float = 0.0                 # unit: F, single-ended device capacitance
+    L_s: float = 0.0                 # unit: H, single-ended device series inductance
+    C_b: float = 0.0                 # unit: F, single-ended bump/interface capacitance
+    z_p: float = 0.0                 # unit: mm, package TL segment 1 length
+    C_p: float = 0.0                 # unit: F, single-ended package-to-board capacitance
+    enable: bool = True              # unit: boolean
+    R0: float = 50.0                 # unit: ohm, single-ended reference resistance
+    Z_c: float = 78.2                # unit: ohm, differential TL characteristic impedance
+    z_p2: Optional[float] = None     # unit: mm, optional package TL segment 2 length
+    Z_c2: float = 78.2               # unit: ohm, optional segment 2 differential impedance
 
     def __post_init__(self) -> None:
         if self.C_d < 0.0 or self.L_s < 0.0 or self.C_b < 0.0 or self.C_p < 0.0:
@@ -694,18 +653,18 @@ class COMPkgConfig(_PrettyDataclass):
 @dataclass(repr=False)
 class COMChannelConfig(_PrettyDataclass):
     """
-    Victim and crosstalk channel configuration using spec/Excel-domain units.
+    Victim and crosstalk channel configuration using internal formula units.
 
     freqs and s4p are populated after Touchstone loading. Excel can directly
     provide the path fields first.
     """
-    victim_s4p_path: Optional[str] = None
-    next_s4p_paths: Sequence[str] = ()
-    fext_s4p_paths: Sequence[str] = ()
-    port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # assume all channels shared
-    R0: float = 50.0                                        # assume all channels shared
-    gamma_src: complex | np.ndarray = 0.0                   # assume all channels shared
-    gamma_load: complex | np.ndarray = 0.0                  # assume all channels shared
+    victim_s4p_path: Optional[str] = None                   # unit: filesystem path
+    next_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
+    fext_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
+    port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # unit: zero-based S4P port order
+    R0: float = 50.0                                        # unit: ohm, single-ended reference resistance
+    gamma_src: complex | np.ndarray = 0.0                   # unit: dimensionless source reflection coefficient
+    gamma_load: complex | np.ndarray = 0.0                  # unit: dimensionless load reflection coefficient
 
     def align_grid(self, channels: list[SparamModel]) -> np.ndarray:
         """
@@ -862,30 +821,30 @@ class COMChannelConfig(_PrettyDataclass):
 @dataclass(repr=False)
 class COMFilterConfig(_PrettyDataclass):
     """
-    COM filter configuration using spec/Excel-domain units.
+    COM filter configuration using internal formula units.
 
     This groups parameters used to build H_txffe, H_t, H_r, and H_ctf.
     """
-    c_m3: float = 0.0
-    c_m2: float = 0.0
-    c_m1: float = 0.0
-    c_1: float = 0.0
-    num_pre: int = 3
-    Tr: Optional[float] = None
-    fr: Optional[float] = None
-    g_DC: Optional[float] = None
-    g_DC2: Optional[float] = None
-    f_z: Optional[float] = None
-    f_LF: Optional[float] = None
-    f_p1: Optional[float] = None
-    f_p2: Optional[float] = None
-    A_v: float = 1.0
-    A_fe: float = 1.0
-    A_ne: float = 1.0
+    c_m3: float = 0.0                 # unit: dimensionless, TX FFE tap c(-3)
+    c_m2: float = 0.0                 # unit: dimensionless, TX FFE tap c(-2)
+    c_m1: float = 0.0                 # unit: dimensionless, TX FFE tap c(-1)
+    c_1: float = 0.0                  # unit: dimensionless, TX FFE tap c(1)
+    num_pre: int = 3                  # unit: samples/taps, main cursor index in txfir
+    Tr: Optional[float] = None        # unit: s, 20%-80% transition time
+    fr: Optional[float] = None        # unit: Hz, receiver noise-filter 3 dB bandwidth
+    g_DC: Optional[float] = None      # unit: dB, receiver equalizer DC gain term
+    g_DC2: Optional[float] = None     # unit: dB, receiver equalizer second DC gain term
+    f_z: Optional[float] = None       # unit: Hz, receiver equalizer zero frequency
+    f_LF: Optional[float] = None      # unit: Hz, receiver equalizer low-frequency pole/zero term
+    f_p1: Optional[float] = None      # unit: Hz, receiver equalizer pole 1
+    f_p2: Optional[float] = None      # unit: Hz, receiver equalizer pole 2
+    A_v: float = 1.0                  # unit: V, victim rectangular pulse amplitude
+    A_fe: float = 1.0                 # unit: V, FEXT rectangular pulse amplitude
+    A_ne: float = 1.0                 # unit: V, NEXT rectangular pulse amplitude
 
     # derived attributes
-    c_0: float = field(init=False)
-    txfir: np.ndarray = field(init=False)
+    c_0: float = field(init=False)    # unit: dimensionless, TX FFE main cursor tap
+    txfir: np.ndarray = field(init=False) # unit: dimensionless tap vector [c(-3), c(-2), c(-1), c(0), c(1)]
 
     def __post_init__(self):
         self.c_0 = 1.0 - abs(self.c_m3) - abs(self.c_m2) - abs(self.c_m1) - abs(self.c_1)
@@ -894,14 +853,14 @@ class COMFilterConfig(_PrettyDataclass):
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
     """Top-level COM configuration grouped by function."""
-    link: LinkConfig
-    filter: COMFilterConfig
-    channel: COMChannelConfig
-    pkg: COMPkgConfig
+    link: LinkConfig                  # unit contract: Hz/s grid owned by LinkConfig
+    filter: COMFilterConfig           # unit contract: internal filter units
+    channel: COMChannelConfig         # unit contract: paths, ohm, dimensionless reflection coefficients
+    pkg: COMPkgConfig                 # unit contract: F/H/mm/ohm package parameters
 
-    dfe: COMDFEConfig
-    impairment: COMImpairmentConfig
-    L: int  # number of signal level
+    dfe: COMDFEConfig                 # unit contract: tap counts and normalized coefficients
+    impairment: COMImpairmentConfig   # unit contract: voltage/noise/jitter settings
+    L: int                            # unit: count, number of signal levels
 
 # ========================================
 # Status (all integrated in COMStatus)
@@ -965,20 +924,38 @@ class COMStatus(_PrettyDataclass):
 
 # helpers
 def _build_txpkg(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool = False) -> IEEECOMsparam:
-    "Eq. 93A-15 and 93A-15a, 93A-16b"
-    freqs = LinkConfig.validate_freqs(freqs)
-    C_d = txpkg_cfg.C_d * 1e-12
-    L_s = txpkg_cfg.L_s * 1e-9
-    C_b = txpkg_cfg.C_b * 1e-12
-    C_p = txpkg_cfg.C_p * 1e-12
+    """
+    Build the 93A TX package S-parameter model.
 
-    S_d = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_d, txpkg_cfg.R0)
-    S_s = IEEECOMsparam.series_inductance_at_freqs(freqs, L_s, txpkg_cfg.R0)
-    S_b = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_b, txpkg_cfg.R0)
-    S_l = IEEECOMsparam.pkg_trans_line_at_freqs(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
+    Reference:
+    - IEEE 802.3 Annex 93A.1.2.4, Eq. 93A-15 and Eq. 93A-15a.
+    - IEEE 802.3ck Annex 93A adds optional second TL segment Eq. 93A-16b.
+
+    Parameters
+    ----------
+    freqs:
+        Frequency axis in Hz.
+    txpkg_cfg:
+        Package config with C_d/C_b/C_p in F, L_s in H, z_p/z_p2 in mm,
+        and R0/Z_c/Z_c2 in ohm.
+    isNext:
+        Path flag for NEXT package construction. Current 93A package primitive
+        construction uses the same fields; invoking clauses may later select
+        different package parameters for NEXT.
+    """
+    freqs = LinkConfig.validate_freqs(freqs)
+    C_d = txpkg_cfg.C_d
+    L_s = txpkg_cfg.L_s
+    C_b = txpkg_cfg.C_b
+    C_p = txpkg_cfg.C_p
+
+    S_d = IEEECOMsparam.shunt_capacitance(freqs, C_d, txpkg_cfg.R0)
+    S_s = IEEECOMsparam.series_inductance(freqs, L_s, txpkg_cfg.R0)
+    S_b = IEEECOMsparam.shunt_capacitance(freqs, C_b, txpkg_cfg.R0)
+    S_l = IEEECOMsparam.pkg_trans_line(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
     if (txpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMsparam.pkg_trans_line_at_freqs(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
-    S_p = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_p, txpkg_cfg.R0)
+        S_l2 = IEEECOMsparam.pkg_trans_line(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
+    S_p = IEEECOMsparam.shunt_capacitance(freqs, C_p, txpkg_cfg.R0)
 
     # cascade
     S_td = (S_d.cascade_com(S_s)).cascade_com(S_b)
@@ -989,20 +966,34 @@ def _build_txpkg(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool = F
     return S_tp
 
 def _build_rxpkg(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMsparam:
-    "Eq. 93A-16 and 93A-16a, 93A-16c"
-    freqs = LinkConfig.validate_freqs(freqs)
-    C_d = rxpkg_cfg.C_d * 1e-12
-    L_s = rxpkg_cfg.L_s * 1e-9
-    C_b = rxpkg_cfg.C_b * 1e-12
-    C_p = rxpkg_cfg.C_p * 1e-12
+    """
+    Build the 93A RX package S-parameter model.
 
-    S_p = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_p, rxpkg_cfg.R0)
+    Reference:
+    - IEEE 802.3 Annex 93A.1.2.4, Eq. 93A-16 and Eq. 93A-16a.
+    - IEEE 802.3ck Annex 93A adds optional second TL segment Eq. 93A-16c.
+
+    Parameters
+    ----------
+    freqs:
+        Frequency axis in Hz.
+    rxpkg_cfg:
+        Package config with C_d/C_b/C_p in F, L_s in H, z_p/z_p2 in mm,
+        and R0/Z_c/Z_c2 in ohm.
+    """
+    freqs = LinkConfig.validate_freqs(freqs)
+    C_d = rxpkg_cfg.C_d
+    L_s = rxpkg_cfg.L_s
+    C_b = rxpkg_cfg.C_b
+    C_p = rxpkg_cfg.C_p
+
+    S_p = IEEECOMsparam.shunt_capacitance(freqs, C_p, rxpkg_cfg.R0)
     if (rxpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMsparam.pkg_trans_line_at_freqs(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
-    S_l = IEEECOMsparam.pkg_trans_line_at_freqs(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
-    S_b = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_b, rxpkg_cfg.R0)
-    S_s = IEEECOMsparam.series_inductance_at_freqs(freqs, L_s, rxpkg_cfg.R0)
-    S_d = IEEECOMsparam.shunt_capacitance_at_freqs(freqs, C_d, rxpkg_cfg.R0)
+        S_l2 = IEEECOMsparam.pkg_trans_line(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
+    S_l = IEEECOMsparam.pkg_trans_line(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
+    S_b = IEEECOMsparam.shunt_capacitance(freqs, C_b, rxpkg_cfg.R0)
+    S_s = IEEECOMsparam.series_inductance(freqs, L_s, rxpkg_cfg.R0)
+    S_d = IEEECOMsparam.shunt_capacitance(freqs, C_d, rxpkg_cfg.R0)
     
     # cascade
     S_rd = (S_b.cascade_com(S_s)).cascade_com(S_d)
@@ -1013,19 +1004,69 @@ def _build_rxpkg(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMsparam:
     return S_rp
 
 def _build_H_ffe(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
+    """
+    Build victim/FEXT TX FFE filter.
+
+    Parameters
+    ----------
+    link_cfg:
+        LinkConfig with frequency grid in Hz.
+    ft_cfg:
+        Filter config with dimensionless TX FFE taps.
+    """
     return IEEECOMFilter.tx_ffe(link_cfg, ft_cfg.txfir, ft_cfg.num_pre)
 
 def _build_H_ffe_next(link_cfg: LinkConfig) -> IEEECOMFilter:
+    """
+    Build NEXT TX FFE filter.
+
+    Parameters
+    ----------
+    link_cfg:
+        LinkConfig with frequency grid in Hz.
+
+    NEXT uses only the main cursor per 93A.1.4.2.
+    """
     ffe_next = np.array([0,1,0])
     return IEEECOMFilter.tx_ffe(link_cfg, ffe_next, num_pre=1)
 
 def _build_H_t(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
+    """
+    Build transmitter transition-time filter.
+
+    Parameters
+    ----------
+    link_cfg:
+        LinkConfig with frequency grid in Hz.
+    ft_cfg:
+        Filter config with Tr in seconds.
+    """
     return IEEECOMFilter.transition_time_filter(link_cfg, ft_cfg.Tr)
 
 def _build_H_r(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
+    """
+    Build receiver noise filter.
+
+    Parameters
+    ----------
+    link_cfg:
+        LinkConfig with frequency grid in Hz.
+    ft_cfg:
+        Filter config with fr in Hz.
+    """
     return IEEECOMFilter.rx_noise_filter(link_cfg, ft_cfg.fr)
 
 def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
+    """
+    Build receiver equalizer / CTF filter.
+
+    Parameters
+    ----------
+    link_cfg:
+        LinkConfig with frequency grid in Hz.
+    ft_cfg:
+        Filter config with gains in dB and pole/zero frequencies in Hz.
+    """
 
     return IEEECOMFilter.rx_equalizer(
         link_cfg, 
@@ -1245,90 +1286,227 @@ def _build_paths(
 # 93A.1.6 & 93A.1.7
 @dataclass
 class COMDFEConfig:
-    N_b: int
-    b_max: float | np.ndarray
+    N_b: int                         # unit: taps, fixed DFE tap count
+    b_max: float | np.ndarray        # unit: dimensionless, normalized fixed DFE coefficient limit
 
     # 802.3ck floating DFE optional
-    N_bg: int = 0               # number of DFE floating tap banks
-    N_bf: int = 0               # number of DFE floating taps per bank
-    N_f: Optional[int]          # DFE maximum span (including floating bank)
-    bb_max: Optional[float, np.ndarray] = None
-    bb_min: Optional[float, np.ndarray] = None
-    b_gmax: Optional[float, np.ndarray] = None
-    sigma_tmax: Optional[float] = None
-    N_ts: Optional[int] = None
-
-    dfe_mask: np.ndarray = field(init=None)
+    N_bg: int = 0                     # unit: banks, number of DFE floating tap banks
+    N_bf: int = 0                     # unit: taps/bank, number of floating taps per bank
+    N_ts: Optional[int] = None        # unit: taps, floating tap tail starting position
+    N_f: Optional[int] = None         # unit: taps, DFE maximum span including floating bank
+    bb_max: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap upper coefficient limit
+    bb_min: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap lower coefficient limit
+    b_gmax: Optional[float | np.ndarray] = None # unit: dimensionless, floating tap magnitude limit
+    sigma_tmax: Optional[float] = None # unit: dimensionless, floating tap tail RSS limit
+    
+    # derived attribution (not in spec)
+    fixed_upper: np.ndarray = field(init=False)
+    fixed_lower: np.ndarray = field(init=False)
+    float_upper: np.ndarray = field(init=False)
+    float_lower: np.ndarray = field(init=False)
 
     def __post_init__(self) -> None:
         "define the indicator mask of dfe coeff" 
-        num_fbf_taps = self.N_b if self.N_f is None else self.N_f
+        if (self.N_bg == 0):
+            self.N_ts = None
+        elif (self.N_ts is None):
+            self.N_ts = self.N_b + 1
+        elif (self.N_ts <= self.N_b): 
+            raise ValueError("COMDFEConfig.N_ts has setup error")
+        
+        if (self.N_f is None): 
+            self.N_f = self.N_b
+        elif (self.N_f < self.N_b+self.N_bg*self.N_bf):
+            raise ValueError("COMDFEConfig.N_f/N_bg/N_bf has setup error")
+        if (self.N_bg > 0):
+            if (self.N_bf <= 0):
+                raise ValueError("COMDFEConfig.N_bf has setup error")
+            if (self.N_ts is None) or (self.N_ts > self.N_f):
+                raise ValueError("COMDFEConfig.N_ts/N_f has setup error")
+            if (self.sigma_tmax is None):
+                raise ValueError("COMDFEConfig.sigma_tmax is required when floating DFE is enabled")
 
-        self.dfe_mask = np.zeros(num_fbf_taps)
-        self.dfe_mask[:self.N_b] = 1  # fix tap
-        if (self.N_ts is not None):
-            float_st_idx = self.N_ts - 1     # if N_ts: post 10 => idx = 9
+        # all bounds will be normalized to np.ndarray with len = N_f
+        if (self.bb_max is None):
+            self.fixed_upper = self.b_max * np.ones(self.N_f)
+        elif isinstance(self.bb_max, np.ndarray):
+            self.fixed_upper = np.r_[self.bb_max, np.zeros(self.N_f - len(self.bb_max))]
         else:
-            float_st_idx = self.N_b          # if N_b: post 1~8 => idx = 8
-        num_fbf_float_taps = self.N_bg * self.N_bf
-        self.dfe_mask[float_st_idx: float_st_idx+num_fbf_float_taps] = 1
+            self.fixed_upper = self.bb_max * np.ones(self.N_f)
+
+        if (self.bb_min is None):
+            self.fixed_lower = - self.b_max * np.ones(self.N_f)
+        elif isinstance(self.bb_min, np.ndarray):
+            self.fixed_lower = np.r_[self.bb_min, np.zeros(self.N_f - len(self.bb_min))]
+        else:
+            self.fixed_lower = self.bb_min * np.ones(self.N_f)
+
+        if (self.b_gmax is None):
+            self.float_upper = self.fixed_upper
+            self.float_lower = self.fixed_lower
+        elif isinstance(self.b_gmax, np.ndarray):
+            self.float_upper = np.minimum(
+                self.fixed_upper, 
+                np.r_[np.zeros(self.N_f - len(self.b_gmax)), +self.b_gmax]
+            )
+            self.float_lower = np.maximum(
+                self.fixed_lower,
+                np.r_[np.zeros(self.N_f - len(self.b_gmax)), -self.b_gmax]
+            )
+        else:
+            self.float_upper = +self.b_gmax * np.ones(self.N_f)
+            self.float_lower = -self.b_gmax * np.ones(self.N_f)
+
+def _calculate_float_dfe(h_dsamp:np.ndarray, dfe_cfg: COMDFEConfig) -> np.ndarray:
+    "post-(N_b+1) ~ post-(N_f)"
+    num_pre = np.argmax(np.abs(h_dsamp))
+    dfe_raw_float = h_dsamp[num_pre+dfe_cfg.N_b+1: num_pre+dfe_cfg.N_f+1] / h_dsamp[num_pre]
+    dfe_coeff_float = np.clip(
+        dfe_raw_float, 
+        dfe_cfg.float_lower[dfe_cfg.N_b: dfe_cfg.N_f], 
+        dfe_cfg.float_upper[dfe_cfg.N_b: dfe_cfg.N_f]
+    )
+
+    num_candid = (dfe_cfg.N_f-dfe_cfg.N_bf+1) - (dfe_cfg.N_b)     # post7~38, 4taps/bank => (38-4+1)-7+1
+    candidates = np.zeros((num_candid, dfe_cfg.N_bf))
+    RSS_candid = np.zeros(num_candid)
+    for c_idx in range(num_candid):
+        candidates[c_idx, :] = c_idx + np.arange(dfe_cfg.N_b+1, dfe_cfg.N_b+1 + dfe_cfg.N_bf)
+        RSS_candid[c_idx] = np.sum(dfe_coeff_float[c_idx: c_idx+dfe_cfg.N_bf]**2)
+
+    taps_selected = []
+    for _ in range(dfe_cfg.N_bg):
+        c_idx = np.argmax(RSS_candid)                   # choose current maximum RSS
+        taps_selected.extend(candidates[c_idx,:])
+        lo = max(0, c_idx-dfe_cfg.N_bf+1)
+        hi = min(num_candid, c_idx+dfe_cfg.N_bf)
+        RSS_candid[lo:hi] = -1                          # remove overlapped candidates
+    taps_selected = np.sort(taps_selected)
+    dfe_float_mask = np.zeros(dfe_cfg.N_f - dfe_cfg.N_b)
+    dfe_float_mask[(taps_selected-dfe_cfg.N_b-1).astype(int)] = 1
+    dfe_coeff_float = dfe_coeff_float * dfe_float_mask
+
+    dfe_coeff_float_tail = dfe_coeff_float[dfe_cfg.N_ts-dfe_cfg.N_b-1:]
+    sigma_t = np.sqrt(np.sum(dfe_coeff_float_tail**2))
+    if (sigma_t > dfe_cfg.sigma_tmax):
+        dfe_coeff_float_tail = dfe_coeff_float_tail * (dfe_cfg.sigma_tmax / sigma_t)
+        dfe_coeff_float[dfe_cfg.N_ts-dfe_cfg.N_b-1:] = dfe_coeff_float_tail.copy()
+
+    return dfe_coeff_float
 
 def _find_pos_and_dfe(
     h: np.ndarray, 
     link_cfg: LinkConfig, 
     dfe_cfg: COMDFEConfig
-) -> tuple[int, np.ndarray]:
-    "Eq. 93A-25, 93A-26"
+) -> tuple[int, int, np.ndarray, np.ndarray]:
+    """
+    Find sampling phase and DFE coefficients.
+
+    Reference:
+    - IEEE 802.3 Annex 93A.1.6, Eq. 93A-25 and Eq. 93A-26.
+
+    Parameters
+    ----------
+    h:
+        Victim pulse response in V, sampled on link_cfg time grid.
+    link_cfg:
+        LinkConfig with per_ui samples/UI and time/frequency grid in SI units.
+    dfe_cfg:
+        DFE config with tap counts and dimensionless normalized coefficient
+        limits.
+    """
+
+    def is_h_dsmp_valid(h_dsamp: np.ndarray) -> int:
+        num_pre = np.argmax(np.abs(h_dsamp))
+        if (h_dsamp[num_pre] < 0):
+            raise Exception("Polarity issue @ _find_pos_and_dfe()")
+        if (num_pre==0 or num_pre+dfe_cfg.N_f>=len(h_dsamp)):
+            raise Exception("Main cursor too close to boundary @ _find_pos_and_dfe()")
+        return num_pre
 
     M = link_cfg.per_ui
-    num_fbf_taps = dfe_cfg.N_b if dfe_cfg.N_f is None else dfe_cfg.N_f
 
+    # step 1: find sample phase by Eq. 93A-25
     errs = np.zeros(M)
+    ts_candidates = np.zeros(M, dtype=int)
     for pos in range(M):
         h_dsamp = h[pos::M]
-        h_main = h_dsamp.max()
-        num_pre = h_dsamp.argmax()
-        dfe_post1 = h_dsamp[num_pre+1] / h_main
+        num_pre = is_h_dsmp_valid(h_dsamp)
+        h_0 = h_dsamp[num_pre]
+        ts_candidates[pos] = pos + num_pre * M
+        dfe_post1 = np.clip(
+            h_dsamp[num_pre+1] / h_0, 
+            dfe_cfg.fixed_lower[0], 
+            dfe_cfg.fixed_upper[0]
+        )
         errs[pos] = h_dsamp[num_pre-1] - h_dsamp[num_pre+1] + h_dsamp[num_pre]*dfe_post1
+    min_err = np.min(abs(errs))
+    tol = max( 1e-12, 1e-9*np.max(np.abs(errs)) )   # allow numerical error
+    pos_candid = np.where(np.abs(errs) <= min_err + tol)[0]
+    peak_idx = int(np.argmax(np.abs(h)))
+    prior_pos_candid = pos_candid[ts_candidates[pos_candid] < peak_idx]
+    if len(prior_pos_candid) > 0:
+        pos = int(prior_pos_candid[np.argmax(ts_candidates[prior_pos_candid])])
+    else:
+        pos = int(pos_candid[np.argmin(np.abs(ts_candidates[pos_candid]-peak_idx))])
+    ts = int(ts_candidates[pos])
 
-    ts = np.argmin(abs(errs))
-    h_dsamp = h[ts::M]
-    num_pre = h_dsamp.argmax()
-    dfe_coeff = h_dsamp[num_pre+1: num_pre+num_fbf_taps+1] / h_dsamp[num_pre]
-    dfe_coeff = dfe_coeff * dfe_cfg.dfe_mask
+    # step 2: determine fixed taps
+    h_dsamp = h[pos::M]
+    num_pre = (ts - pos) // M
+    dfe_raw_fixed = h_dsamp[num_pre+1: num_pre+dfe_cfg.N_b+1] / h_dsamp[num_pre]
+    dfe_coeff_fixed = np.clip(
+        dfe_raw_fixed, 
+        dfe_cfg.fixed_lower[0:dfe_cfg.N_b], 
+        dfe_cfg.fixed_upper[0:dfe_cfg.N_b]
+    )
 
-    return ts, dfe_coeff
+    # step 3: determine float taps, and combine all dfe coeff as an array: (N_f,)
+    if (dfe_cfg.N_bg==0):
+        dfe_coeff = dfe_coeff_fixed
+    else:
+        dfe_coeff_float = _calculate_float_dfe(h_dsamp, dfe_cfg)    
+        dfe_coeff = np.r_[
+            dfe_coeff_fixed, 
+            np.zeros(dfe_cfg.N_b-len(dfe_coeff_fixed)),
+            dfe_coeff_float
+        ]
+
+    # step 4: calculate h_ISI
+    h_ISI = _calculate_h_ISI(h_dsamp, dfe_coeff)
+
+    return ts, pos, dfe_coeff, h_ISI
 
 @dataclass
 class COMImpairmentConfig:
-    R_LM: float
-    SNR_TX: float       # dB
-    sigma_RJ: float     # UI
-    A_DD: float         # UI
-    eta_0: float        # V^2/GHz, one-sided spectral density
-    DER_0: float
+    R_LM: float                     # unit: dimensionless, level separation mismatch ratio
+    SNR_TX: float                   # unit: dB, transmitter signal-to-noise ratio
+    sigma_RJ: float                 # unit: UI, random jitter RMS
+    A_DD: float                     # unit: UI, dual-Dirac jitter amplitude
+    eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density
+    DER_0: float                    # unit: dimensionless, target detector error ratio
 
 @dataclass
 class COMImpairmentStatus:
-    As: float
-    sigma_X: float
-    sigma_TX: float
-    h_ISI: np.ndarray
-    sigma_ISI: float
-    sigma_J: float
-    sigma_XT: float
-    sigma_N: float
+    As: float                       # unit: V, signal amplitude
+    sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
+    sigma_TX: float                 # unit: V, TX noise amplitude standard deviation
+    h_ISI: np.ndarray               # unit: V, residual ISI pulse samples
+    sigma_ISI: float                # unit: V, ISI amplitude standard deviation
+    sigma_J: float                  # unit: V, jitter-induced amplitude standard deviation
+    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
+    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
 
 def _calculate_h_ISI(h_dsamp: np.ndarray, dfe_coeff: np.ndarray) -> np.ndarray:
-    num_pre = np.argmax(h_dsamp)
+    num_pre = np.argmax(np.abs(h_dsamp))
     h_ISI = h_dsamp.copy()
     h_ISI[num_pre] = 0
     h_ISI[num_pre+1: num_pre+len(dfe_coeff)+1] -= dfe_coeff * h_dsamp[num_pre]
     return h_ISI
 
-def _calculate_h_J(h: np.ndarray, ts: int, per_ui: int):
-    h_m1 = h[ts-1:: per_ui]
-    h_p1 = h[ts+1:: per_ui]
+def _calculate_h_J(h: np.ndarray, pos: int, per_ui: int):
+    h_m1 = h[pos-1:: per_ui]
+    h_p1 = h[pos+1:: per_ui]
     h_J = (h_p1 - h_m1) / (2/per_ui)
     return h_J
 
@@ -1340,11 +1518,18 @@ def _find_pos_xtalk(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
     h_XT_dsamp = h_XT[i:: per_ui]
     return i, h_XT_dsamp
 
-def _calculate_impairments(h: np.ndarray, ts: int, dfe_coeff: np.ndarray, h_XTs: list[np.ndarray], cfg: COMConfig) -> COMImpairmentStatus:
+def _calculate_impairments(
+    h: np.ndarray,
+    ts: int,
+    pos: int,
+    dfe_coeff: np.ndarray,
+    h_XTs: list[np.ndarray],
+    cfg: COMConfig
+) -> COMImpairmentStatus:
 
     L = cfg.L
-    h_dsamp = h[ts:: cfg.link.per_ui]
-    num_pre = np.argmax(h_dsamp)
+    h_dsamp = h[pos:: cfg.link.per_ui]
+    num_pre = (ts - pos) // cfg.link.per_ui
     h_main = h_dsamp[num_pre]
     imp = cfg.impairment
 
@@ -1362,7 +1547,7 @@ def _calculate_impairments(h: np.ndarray, ts: int, dfe_coeff: np.ndarray, h_XTs:
     sigma_ISI = np.sqrt( sigma_X**2 * np.sum(h_ISI**2) )
 
     # sigma_J
-    h_J = _calculate_h_J(h, ts, cfg.link.per_ui)
+    h_J = _calculate_h_J(h, pos, cfg.link.per_ui)
     sigma_J = np.sqrt( (imp.A_DD**2+imp.sigma_RJ**2) * sigma_X**2 * np.sum(h_J**2) )
 
     # sigma_XT
@@ -1475,4 +1660,3 @@ def _smoke_test_com_path() -> COMStatus:
 
 if __name__ == "__main__":
     cfg, status =  _smoke_test_com_path()
-

@@ -12,8 +12,10 @@ dependencies = [
     "scipy",
     "scikit-rf",
     "matplotlib",
+    "pandas",
+    "openpyxl",
+    "xlrd",
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
