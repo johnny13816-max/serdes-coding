@@ -135,14 +135,6 @@ def resample_tf(
 
     return H_new
 
-def _network_from_smatrix(
-    freqs: np.ndarray,
-    smatrix: np.ndarray,
-    z0: Union[float, np.ndarray] = 100.0,
-) -> 'rf.Network':
-    frequency = rf.Frequency.from_f(freqs, unit="Hz")
-    return rf.Network(frequency=frequency, s=smatrix, z0=z0)
-
 def _differential_z0_from_s4p_z0(
     z0: Union[float, np.ndarray],
     port_order: tuple[int, int, int, int],
@@ -750,6 +742,15 @@ class SparamModel:
     # -------------------
     # constructors
     # -------------------
+    @staticmethod
+    def _network_from_smatrix(
+        freqs: np.ndarray,
+        smatrix: np.ndarray,
+        z0: Union[float, np.ndarray] = 100.0,
+    ) -> 'rf.Network':
+        frequency = rf.Frequency.from_f(freqs, unit="Hz")
+        return rf.Network(frequency=frequency, s=smatrix, z0=z0)
+
     @classmethod
     def from_sdd_array(
         cls,
@@ -767,7 +768,7 @@ class SparamModel:
         """
         freqs = LinkConfig.validate_freqs(freqs)
         sdd = cls.validate_sdd(sdd, freqs)
-        return cls(_network_from_smatrix(freqs, sdd, z0=z0), source_type="sdd")
+        return cls(cls._network_from_smatrix(freqs, sdd, z0=z0), source_type="sdd")
 
     @classmethod
     def from_s4p_array(
@@ -790,7 +791,7 @@ class SparamModel:
         freqs = LinkConfig.validate_freqs(freqs)
         port_order = _validate_s4p_port_order(port_order)
         sdd = _s4p_to_sdd(s4p, port_order, freqs)
-        return cls(_network_from_smatrix(freqs, sdd, z0=z0), source_type="s4p", port_order=port_order)
+        return cls(cls._network_from_smatrix(freqs, sdd, z0=z0), source_type="s4p", port_order=port_order)
 
     @classmethod
     def from_network(
@@ -1074,6 +1075,166 @@ class SparamModel:
         """
         return self.network.plot_it_all(*args, **kwargs)
 
+    def _debug_scalar_tf(
+        self,
+        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+    ) -> np.ndarray:
+        """
+        Select a scalar frequency response from the Sdd model for debug plots.
+
+        Parameters
+        ----------
+        response:
+            Which scalar response to inspect. "h21" uses the terminated voltage
+            transfer formula; with matched terminations it is equal to Sdd21.
+        gamma_src:
+            Source reflection coefficient used only when response="h21".
+        gamma_load:
+            Load reflection coefficient used only when response="h21".
+        """
+        if response == "sdd11":
+            return self.sdd11
+        if response == "sdd12":
+            return self.sdd12
+        if response == "sdd21":
+            return self.sdd21
+        if response == "sdd22":
+            return self.sdd22
+        if response == "h21":
+            return self.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        raise ValueError('response must be "sdd11", "sdd12", "sdd21", "sdd22", or "h21".')
+
+    def _debug_LinkSegment(
+        self,
+        cfg: 'LinkConfig',
+        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal["hold", "skrf", "error"] = "hold",
+    ) -> 'LinkSegment':
+        """
+        Convert a selected S-domain scalar response into a LinkSegment for debug.
+
+        This is intentionally a quick diagnostic path, not the formal COM
+        channel conversion. It helps inspect whether an Sdd block has suspicious
+        time-domain behavior before it is used in a full COM path.
+
+        Parameters
+        ----------
+        cfg:
+            LinkConfig defining the debug FFT/time grid.
+        response:
+            Scalar response selected from this Sdd model.
+        gamma_src:
+            Source reflection coefficient used only when response="h21".
+        gamma_load:
+            Load reflection coefficient used only when response="h21".
+        dc:
+            Missing-DC debug assumption. "hold" prepends H(0)=H(f_min), "skrf"
+            uses SparamModel.extrapolated_to_dc(), and "error" raises if DC is
+            absent.
+        """
+        if np.isclose(self.freqs[0], 0.0):
+            freqs = self.freqs
+            H = self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
+        elif dc == "hold":
+            freqs = np.r_[0.0, self.freqs]
+            H = np.r_[self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)[0],
+                      self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)]
+        elif dc == "skrf":
+            model = self.extrapolated_to_dc()
+            freqs = model.freqs
+            H = model._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
+        elif dc == "error":
+            raise ValueError("SparamModel debug time plot requires DC; use dc='hold' or dc='skrf'.")
+        else:
+            raise ValueError('dc must be "hold", "skrf", or "error".')
+
+        return LinkSegment.from_tf(freqs, H, cfg)
+
+    def plot_ir(
+        self,
+        cfg: 'LinkConfig',
+        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        x_unit: Literal["ui", "ns"] = "ui",
+        x_origin: Literal["start", "max"] = "max",
+        xlim_ui: Optional[tuple[float, float]] = None,
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal["hold", "skrf", "error"] = "hold",
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Debug-plot the time-domain IR of one S-domain scalar response.
+
+        Parameters
+        ----------
+        cfg:
+            LinkConfig defining the debug FFT/time grid.
+        response:
+            "sdd11", "sdd12", "sdd21", "sdd22", or "h21".
+        ax:
+            Optional matplotlib Axes.
+        save_path:
+            Optional output path.
+        x_unit:
+            "ui" or "ns".
+        x_origin:
+            "start" or "max".
+        xlim_ui:
+            Optional UI x-limits.
+        gamma_src:
+            Source reflection coefficient used only when response="h21".
+        gamma_load:
+            Load reflection coefficient used only when response="h21".
+        dc:
+            Missing-DC debug assumption: "hold", "skrf", or "error".
+        label:
+            Optional curve label. Useful when plotting multiple responses on
+            the same Axes.
+        """
+        seg = self._debug_LinkSegment(
+            cfg,
+            response=response,
+            gamma_src=gamma_src,
+            gamma_load=gamma_load,
+            dc=dc,
+        )
+        return seg.plot_ir(ax=ax, save_path=save_path, x_unit=x_unit, x_origin=x_origin, xlim_ui=xlim_ui, label=label)
+
+    def plot_sbr(
+        self,
+        cfg: 'LinkConfig',
+        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        x_unit: Literal["ui", "ns"] = "ui",
+        x_origin: Literal["start", "max"] = "max",
+        xlim_ui: Optional[tuple[float, float]] = None,
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal["hold", "skrf", "error"] = "hold",
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Debug-plot the SBR of one S-domain scalar response.
+
+        Parameters are the same as plot_ir(). This is a diagnostic convenience
+        and does not replace the formal COM pulse/SBR path.
+        """
+        seg = self._debug_LinkSegment(
+            cfg,
+            response=response,
+            gamma_src=gamma_src,
+            gamma_load=gamma_load,
+            dc=dc,
+        )
+        return seg.plot_sbr(ax=ax, save_path=save_path, x_unit=x_unit, x_origin=x_origin, xlim_ui=xlim_ui, label=label)
+
     # ---- immutable / copy-returning operations ----
     def cascade(self, other: 'SparamModel') -> 'SparamModel':
         """
@@ -1256,38 +1417,25 @@ class SparamModel:
         cfg: 'LinkConfig',
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
-        basis: str = "s",
-        coords: str = "cart",
-        kind: str | None = None,
-        dc_method: str = "skrf",
-        dc_sparam: np.ndarray | None = None,
-        dc_kind: str = "linear",
-        dc_coords: str = "cart",
     ) -> 'LinkSegment':
         """
         Build a scalar LinkSegment from the terminated voltage transfer H21(f).
 
-        This method does not mutate self. It uses a temporary resampled copy in
-        S-matrix domain, then converts that copy to H21(f).
+        Contract:
+        - self remains in its current S-parameter domain grid, normally the
+          aligned measured-domain grid used by COM path construction.
+        - H21(f) is computed on that S-parameter grid first.
+        - LinkSegment.from_tf() then owns scalar transfer-function resampling
+          and high-frequency extension to cfg.f_nyq.
 
         Flow:
-        1. resample the Sdd network onto cfg.freqs inside the measured bandwidth
-        2. compute H21(f) with impedance mismatch using Eq. 93A-18
-        3. let LinkSegment.from_tf() extend the scalar transfer function to
-           cfg.f_nyq using the project's TF extension rule
+        1. compute H21(f) with impedance mismatch using Eq. 93A-18 on self.freqs
+        2. build LinkSegment from scalar H21(f)
+        3. let LinkSegment.from_tf() resample / extend the scalar transfer
+           function to cfg.freqs / cfg.f_nyq using the project TF rule
         """
-        resampled = self.resampled(
-            cfg.freqs,
-            basis=basis,
-            coords=coords,
-            kind=kind,
-            dc_method=dc_method,
-            dc_sparam=dc_sparam,
-            dc_kind=dc_kind,
-            dc_coords=dc_coords,
-        )
-        H21 = resampled.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
-        return LinkSegment.from_tf(resampled.freqs, H21, cfg)
+        H21 = self.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        return LinkSegment.from_tf(self.freqs, H21, cfg)
 
 class LinkSegment:
     """
@@ -1304,6 +1452,7 @@ class LinkSegment:
     mixed-mode conversion, or IEEE COM package primitive construction. Those
     belong in SparamModel or com_model.py before a scalar response is selected.
     """
+    DEFAULT_MAIN_CURSOR_UI = 5.0
 
     def __init__(self, cfg: 'LinkConfig'):
         self.cfg = cfg
@@ -1313,10 +1462,31 @@ class LinkSegment:
 
         # time-domain response
         #   t-axis starts from 0, with step = dt = bt / per_ui
-        #   no fftshift/circular shift, the delay element should be determined before using
-        self._ir = None         # impulse response
+        #   raw_ir is the response before causality/alignment handling. aligned_ir
+        #   is the response after the LinkSegment causality/alignment contract.
+        #   For TF-originated segments, raw_ir is the direct IFFT result and
+        #   aligned_ir may be circularly shifted. For IR/SR-originated segments,
+        #   raw_ir and aligned_ir are identical after passing causality checks.
+        self._raw_ir = None
+        self._aligned_ir = None
+        self._ir = None         # impulse response alias kept for compatibility
         self._sr = None         # step response
         self._sbr = None        # single-bit response
+
+    @staticmethod
+    def _force_real_rfft_edges(tf: np.ndarray) -> np.ndarray:
+        """
+        Force DC and Nyquist bins to be real for the LinkSegment rfft contract.
+
+        LinkSegment stores one-sided transfer functions for real-valued time
+        responses. With even cfg.Nfft, the DC and Nyquist bins are self-conjugate
+        frequency points, so their imaginary parts are not valid degrees of
+        freedom in the rfft/irfft representation.
+        """
+        tf = np.asarray(tf, dtype=complex).copy()
+        tf[0] = tf[0].real + 0j
+        tf[-1] = tf[-1].real + 0j
+        return tf
 
     # ----- constructors -----
     @classmethod
@@ -1339,6 +1509,7 @@ class LinkSegment:
             H_meas = resample_tf(H_meas, f_meas, cfg.freqs)
 
         seg = cls(cfg)
+        H_meas = seg._force_real_rfft_edges(H_meas)
         seg._tf = seg.validate_tf(H_meas)
         return seg
 
@@ -1353,9 +1524,17 @@ class LinkSegment:
             Step response sampled on cfg.times.
         cfg:
             LinkConfig defining the response time grid and conversion rules.
+
+        Contract:
+            raw_ir is computed from sr before causality checking. If the check
+            passes, aligned_ir is assigned to the same response. No automatic
+            circular shift is applied to SR-originated data.
         """
         seg = cls(cfg)
         seg._sr = seg.validate_time_response(sr, "sr")
+        seg._raw_ir = seg.sr2ir(seg._sr)
+        seg._aligned_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="sr")
+        seg._ir = seg._aligned_ir
         return seg
 
     @classmethod
@@ -1369,36 +1548,78 @@ class LinkSegment:
             Impulse response sampled on cfg.times.
         cfg:
             LinkConfig defining the response time grid and conversion rules.
+
+        Contract:
+            raw_ir is the input impulse response before causality checking. If
+            the check passes, aligned_ir is assigned to the same response. No
+            automatic circular shift is applied to IR-originated data.
         """
         seg = cls(cfg)
-        seg._ir = seg.validate_ir(ir, correct_wrap=False)
+        seg._raw_ir = seg.validate_ir(ir, correct_wrap=False)
+        seg._aligned_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="ir")
+        seg._ir = seg._aligned_ir
         return seg
 
     # ----- proxy & lazy evaluation -----
     @property
     def tf(self) -> np.ndarray:
         if (self._tf is None):
-            assert self._sr is not None
-            self._tf = self.sr2tf(self._sr)
+            assert self._raw_ir is not None or self._sr is not None
+            self._tf = self.ir2tf()
         return self._tf
 
     @property
     def sr(self) -> np.ndarray:
         if (self._sr is None):
-            assert self._tf is not None
-            self._sr = self.tf2sr(self._tf)
+            if (self._tf is not None):
+                self._sr = self.tf2sr(self._tf)
+            else:
+                self._sr = self.ir2sr(self.ir)
         return self._sr
 
     @property
     def ir(self) -> np.ndarray:
-        if (self._ir is None):
+        if (self._aligned_ir is None):
             if (self._tf is not None):
-                self._ir = self.tf2ir(self._tf)
+                self._raw_ir, self._aligned_ir = self.tf2ir(self._tf)
             elif (self._sr is not None):
-                self._ir = self.sr2ir(self._sr)
+                self._raw_ir = self.sr2ir(self._sr)
+                self._aligned_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
             else:
                 raise Exception("Error @ calling LinkSegment.ir ...")
-        return self._ir
+        self._ir = self._aligned_ir
+        return self._aligned_ir
+
+    @property
+    def raw_ir(self) -> np.ndarray:
+        """
+        Impulse response before LinkSegment causality/alignment handling.
+
+        For TF-originated segments this is the direct continuous-scaled IFFT
+        result. For IR/SR-originated segments this is the input-domain impulse
+        response before the causality check; after a passing check it is
+        identical to aligned_ir.
+        """
+        if (self._raw_ir is None):
+            if (self._tf is not None):
+                self._raw_ir, self._aligned_ir = self.tf2ir(self._tf)
+            elif (self._sr is not None):
+                self._raw_ir = self.sr2ir(self._sr)
+                self._aligned_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
+            else:
+                raise Exception("Error @ calling LinkSegment.raw_ir ...")
+        return self._raw_ir
+
+    @property
+    def aligned_ir(self) -> np.ndarray:
+        """
+        Causal analysis impulse response.
+
+        For TF-originated segments this is raw_ir circularly aligned so the main
+        cursor is placed at LinkSegment's internal target location. For IR/SR
+        originated segments this is the validated input-domain impulse response.
+        """
+        return self.ir
 
     @property
     def sbr(self) -> np.ndarray:
@@ -1611,6 +1832,7 @@ class LinkSegment:
         x_origin: Literal["start", "max"],
         xlim_ui: Optional[tuple[float, float]],
         origin_response: Optional[np.ndarray] = None,
+        label: str | None = None,
     ) -> Axes:
         response = self.validate_time_response(response, name)
         created_figure = ax is None
@@ -1618,7 +1840,9 @@ class LinkSegment:
             _, ax = self._plt().subplots()
 
         x, xlabel = self._response_x_axis(response, x_unit, x_origin, origin_response=origin_response)
-        ax.plot(x, response)
+        ax.plot(x, response, label=label)
+        if label is not None:
+            ax.legend()
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -1634,6 +1858,7 @@ class LinkSegment:
         x_unit: Literal["ui", "ns"] = "ui",
         x_origin: Literal["start", "max"] = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
+        label: str | None = None,
     ) -> Axes:
         """
         Plot impulse response.
@@ -1653,6 +1878,9 @@ class LinkSegment:
         xlim_ui:
             Optional x-limits in UI after applying x_origin. If None, use the
             default compact window.
+        label:
+            Optional curve label. Useful when plotting multiple responses on
+            the same Axes.
         """
         return self._plot_time_response(
             response=self.ir,
@@ -1664,6 +1892,7 @@ class LinkSegment:
             x_unit=x_unit,
             x_origin=x_origin,
             xlim_ui=xlim_ui,
+            label=label,
         )
 
     def plot_sr(
@@ -1673,6 +1902,7 @@ class LinkSegment:
         x_unit: Literal["ui", "ns"] = "ui",
         x_origin: Literal["start", "max"] = "start",
         xlim_ui: Optional[tuple[float, float]] = None,
+        label: str | None = None,
     ) -> Axes:
         """
         Plot step response.
@@ -1693,6 +1923,9 @@ class LinkSegment:
         xlim_ui:
             Optional x-limits in UI after applying x_origin. If None, use the
             default compact window.
+        label:
+            Optional curve label. Useful when plotting multiple responses on
+            the same Axes.
         """
         return self._plot_time_response(
             response=self.sr,
@@ -1705,6 +1938,7 @@ class LinkSegment:
             x_origin=x_origin,
             xlim_ui=xlim_ui,
             origin_response=self.ir,
+            label=label,
         )
 
     def plot_sbr(
@@ -1714,6 +1948,7 @@ class LinkSegment:
         x_unit: Literal["ui", "ns"] = "ui",
         x_origin: Literal["start", "max"] = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
+        label: str | None = None,
     ) -> Axes:
         """
         Plot single-bit response.
@@ -1733,6 +1968,9 @@ class LinkSegment:
         xlim_ui:
             Optional x-limits in UI after applying x_origin. If None, use the
             default compact window.
+        label:
+            Optional curve label. Useful when plotting multiple responses on
+            the same Axes.
         """
         return self._plot_time_response(
             response=self.sbr,
@@ -1744,6 +1982,7 @@ class LinkSegment:
             x_unit=x_unit,
             x_origin=x_origin,
             xlim_ui=xlim_ui,
+            label=label,
         )
 
     def cascade_tf(self, other: 'LinkSegment') -> 'LinkSegment':
@@ -2008,10 +2247,13 @@ class LinkSegment:
         Supported pairs:
         - "tf2ir" and "ir2tf"
           Reversible when tf is on cfg.freqs, has real DC/Nyquist bins, and the
-          inverse path uses the same cfg.Nfft/cfg.Fs scaling convention.
+          inverse path uses the same cfg.Nfft/cfg.Fs scaling convention. This
+          debug pair uses raw_ir, not aligned_ir, because aligned_ir includes a
+          circular time-reference shift.
         - "tf2sr" and "sr2tf"
-          Reversible under the same tf constraints plus the step-response
-          initial condition sr[n<0] = 0 used by sr2ir().
+          Reversible only through the raw response path. The instance-owned
+          sr property is an aligned analysis response and is not the object used
+          for this round-trip check.
         - "ir2sr" and "sr2ir"
           Reversible for finite cfg.times-length arrays when sr2ir() uses the
           same left boundary condition sr[-1 before t=0] = 0.
@@ -2022,10 +2264,10 @@ class LinkSegment:
         If x is None, the source representation is taken from this instance.
         """
         pair_map = {
-            "tf2ir": ("tf", "ir", self.validate_tf, self.tf2ir, self.ir2tf),
-            "ir2tf": ("ir", "tf", lambda v: self.validate_ir(v, correct_wrap=False), self.ir2tf, self.tf2ir),
-            "tf2sr": ("tf", "sr", self.validate_tf, self.tf2sr, self.sr2tf),
-            "sr2tf": ("sr", "tf", lambda v: self.validate_time_response(v, "sr"), self.sr2tf, self.tf2sr),
+            "tf2ir": ("tf", "raw_ir", self.validate_tf, lambda v: self.tf2ir(v)[0], self.ir2tf),
+            "ir2tf": ("ir", "tf", lambda v: self.validate_ir(v, correct_wrap=False), self.ir2tf, lambda v: self.tf2ir(v)[0]),
+            "tf2sr": ("tf", "sr", self.validate_tf, lambda v: self.ir2sr(self.tf2ir(v)[0]), self.sr2tf),
+            "sr2tf": ("sr", "tf", lambda v: self.validate_time_response(v, "sr"), self.sr2tf, lambda v: self.ir2sr(self.tf2ir(v)[0])),
             "ir2sr": ("ir", "sr", lambda v: self.validate_ir(v, correct_wrap=False), self.ir2sr, self.sr2ir),
             "sr2ir": ("sr", "ir", lambda v: self.validate_time_response(v, "sr"), self.sr2ir, self.ir2sr),
             "sr2sbr": ("sr", "sbr", lambda v: self.validate_time_response(v, "sr"), self.sr2sbr, self.sbr2sr),
@@ -2138,6 +2380,102 @@ class LinkSegment:
 
         return ir
 
+    def validate_ir_from_time_domain(
+        self,
+        ir: np.ndarray,
+        source_name: str = "ir",
+        tail_ui: float = 1.0,
+        tail_energy_tol: float = 1e-6,
+        wrap_peak_after_fraction: float = 0.75,
+    ) -> np.ndarray:
+        """
+        Validate an IR supplied directly in time domain.
+
+        Parameters
+        ----------
+        ir:
+            Impulse response sampled on cfg.times.
+        source_name:
+            Name used in error messages, typically "ir" or "sr".
+        tail_ui:
+            Tail window used to detect circular wrap-around.
+        tail_energy_tol:
+            Maximum allowed energy ratio in the tail window.
+        wrap_peak_after_fraction:
+            If the largest |ir| sample occurs after this fraction of the record,
+            the response is treated as wrapped.
+
+        Contract:
+        from_ir() and from_sr() inputs must already be causal in cfg.times. If
+        the response appears wrapped, LinkSegment raises instead of silently
+        shifting it.
+        """
+        ir = self.validate_ir(ir, correct_wrap=False)
+
+        if not 0.0 < wrap_peak_after_fraction < 1.0:
+            raise ValueError("wrap_peak_after_fraction must be between 0 and 1.")
+        if tail_ui <= 0.0:
+            raise ValueError("tail_ui must be positive.")
+        if tail_energy_tol < 0.0:
+            raise ValueError("tail_energy_tol must be non-negative.")
+
+        mag = np.abs(ir)
+        energy = mag**2
+        total_energy = float(np.sum(energy))
+        if total_energy <= 0.0:
+            raise ValueError(f"{source_name} impulse-response energy is zero.")
+
+        peak_index = int(np.argmax(mag))
+        wrap_threshold = int(round(wrap_peak_after_fraction * len(ir)))
+        if peak_index >= wrap_threshold:
+            raise ValueError(
+                f"{source_name} appears circularly wrapped: main peak index "
+                f"{peak_index} is after {wrap_peak_after_fraction:.2f} of the record."
+            )
+
+        tail_len = max(1, int(round(tail_ui * self.cfg.per_ui)))
+        tail_len = min(tail_len, len(ir))
+        tail_energy_ratio = float(np.sum(energy[-tail_len:]) / total_energy)
+        if tail_energy_ratio > tail_energy_tol:
+            raise ValueError(
+                f"{source_name} appears to contain wrapped or truncated tail energy: "
+                f"tail_energy_ratio={tail_energy_ratio:.3e} exceeds {tail_energy_tol:.3e}."
+            )
+
+        return ir
+
+    def align_ir_to_main_cursor(
+        self,
+        ir: np.ndarray,
+        target_main_cursor_ui: float | None = None,
+    ) -> np.ndarray:
+        """
+        Circularly align an IFFT impulse response for causal time-domain analysis.
+
+        Parameters
+        ----------
+        ir:
+            Direct IFFT impulse response sampled on cfg.times.
+        target_main_cursor_ui:
+            Desired main-cursor location after alignment, in UI from cfg.times[0].
+
+        The operation is a circular roll. It preserves sample values but changes
+        the time reference, so it should not be used for tf <-> ir round-trip
+        checks. The raw unshifted IR must be used for that purpose.
+        """
+        ir = self.validate_ir(ir, correct_wrap=False)
+        if target_main_cursor_ui is None:
+            target_main_cursor_ui = self.DEFAULT_MAIN_CURSOR_UI
+        if target_main_cursor_ui < 0.0:
+            raise ValueError("target_main_cursor_ui must be non-negative.")
+
+        target_index = int(round(target_main_cursor_ui * self.cfg.per_ui))
+        if target_index >= len(ir):
+            raise ValueError("target_main_cursor_ui is outside the LinkConfig time window.")
+
+        peak_index = int(np.argmax(np.abs(ir)))
+        return np.roll(ir, target_index - peak_index)
+
     def validate_compatible_segment(self, other: 'LinkSegment') -> None:
         if not isinstance(other, LinkSegment):
             raise TypeError("other must be a LinkSegment.")
@@ -2155,21 +2493,35 @@ class LinkSegment:
     # response transformation
     # ---------------------------
     # tf -> ir -> sr
-    def tf2ir(self, tf: np.ndarray) -> np.ndarray:
+    def tf2ir(
+        self,
+        tf: np.ndarray,
+        target_main_cursor_ui: float | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Convert one-sided continuous-domain transfer function samples to impulse response.
+        Convert TF to both raw and aligned impulse responses.
 
-        NumPy irfft returns the DFT-normalized sequence. Multiplying by cfg.Fs converts
-        the inverse sum into a continuous inverse Fourier integral approximation.
+        Parameters
+        ----------
+        tf:
+            One-sided transfer function sampled on cfg.freqs.
+        target_main_cursor_ui:
+            Main-cursor location for aligned_ir, in UI from cfg.times[0].
 
-        Round-trip boundary condition with ir2tf():
-        - tf must be sampled on cfg.freqs.
-        - tf[0] and tf[-1] must be real so irfft represents a real time response.
-        - ir2tf() must divide by the same cfg.Fs used here.
+        Returns
+        -------
+        raw_ir:
+            Direct continuous-scaled IFFT result before causality/alignment
+            handling. Use this for tf <-> ir round-trip validation.
+        aligned_ir:
+            Circularly aligned analysis view with the main cursor moved to
+            target_main_cursor_ui.
         """
         tf = self.validate_tf(tf)
-        ir = np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
-        return self.validate_ir(ir, correct_wrap=True)
+        raw_ir = np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
+        raw_ir = self.validate_ir(raw_ir, correct_wrap=False)
+        aligned_ir = self.align_ir_to_main_cursor(raw_ir, target_main_cursor_ui=target_main_cursor_ui)
+        return raw_ir, aligned_ir
 
     def ir2sr(self, ir: np.ndarray) -> np.ndarray:
         """
@@ -2191,7 +2543,7 @@ class LinkSegment:
         - Requires the tf2ir/ir2tf and ir2sr/sr2ir boundary conditions.
         - In particular, sr2tf() treats the sample before t=0 as zero.
         """
-        return self.ir2sr(self.tf2ir(tf))
+        return self.ir2sr(self.tf2ir(tf)[1])
 
     # sr -> ir -> tf
     def sr2ir(self, sr: np.ndarray) -> np.ndarray:
@@ -2206,15 +2558,18 @@ class LinkSegment:
         sr = self.validate_time_response(sr, "sr")
         return np.diff(np.r_[0, sr]) / self.cfg.dt
 
-    def ir2tf(self, ir: np.ndarray) -> np.ndarray:
+    def ir2tf(self, ir: np.ndarray | None = None) -> np.ndarray:
         """
         Convert continuous-scaled impulse response samples back to one-sided TF samples.
 
         Round-trip boundary condition with tf2ir():
         - ir must be cfg.times-length and continuous-scaled.
+        - If ir is None, use this instance's raw_ir, not aligned_ir.
         - The forward FFT divides by cfg.Fs to undo tf2ir()'s continuous scaling.
         - The returned DC/Nyquist bins are forced real for rfft/irfft consistency.
         """
+        if ir is None:
+            ir = self.raw_ir
         ir = self.validate_ir(ir, correct_wrap=False)
         tf = np.fft.rfft(ir, n=self.cfg.Nfft) / self.cfg.Fs
         tf[0] = tf[0].real + 0j
@@ -2279,4 +2634,3 @@ class LinkSegment:
                 sr[n] += sr[n - D]
 
         return sr
-
