@@ -1,14 +1,30 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Union, cast
 from dataclasses import dataclass, field
 import skrf as rf
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
-SdefT = Literal["power", "pseudo", "traveling"]
+SdefT = str
+
+# Python 3.7 compatibility copy.
+# Literal[...] annotations from the main project file are intentionally replaced
+# by plain str annotations because typing.Literal is not available in Python
+# 3.7.3.
+#
+# Allowed string values:
+# - SdefT / s_def: "power", "pseudo", "traveling", or None where documented.
+# - OneSidePSD.aligned_to(dc): "error", "hold".
+# - SparamModel.plot_RL(port): "input", "output", "both".
+# - SparamModel.plot_smith(port): "input", "output".
+# - SparamModel debug response: "sdd11", "sdd12", "sdd21", "sdd22", "h21".
+# - SparamModel debug dc: "hold", "skrf", "error".
+# - LinkSegment.from_tf(dc) / _prepare_tf_dc(dc): "error", "hold".
+# - LinkSegment plot x_unit: "ui", "ns".
+# - LinkSegment plot x_origin: "start", "max".
 
 # =========================
 # helper
@@ -643,7 +659,7 @@ class OneSidePSD:
         self,
         cfg: LinkConfig,
         *,
-        dc: Literal["error", "hold"] = "error",
+        dc: str = "error",
     ) -> 'OneSidePSD':
         """
         Return a copy sampled on cfg.freqs.
@@ -1315,7 +1331,7 @@ class SparamModel:
 
     def plot_RL(
         self,
-        port: Literal["input", "output", "both"] = "both",
+        port: str = "both",
         ax: Any = None,
         logx: bool = False,
         xlim: Optional[tuple[float, float]] = None,
@@ -1427,7 +1443,7 @@ class SparamModel:
 
     def plot_smith(
         self,
-        port: Literal["input", "output"] = "input",
+        port: str = "input",
         ax: Any = None,
         chart_type: str = "z",
         draw_labels: bool = False,
@@ -1486,7 +1502,7 @@ class SparamModel:
 
     def _debug_scalar_tf(
         self,
-        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        response: str = "sdd21",
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
     ) -> np.ndarray:
@@ -1518,10 +1534,10 @@ class SparamModel:
     def _debug_LinkSegment(
         self,
         cfg: 'LinkConfig',
-        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        response: str = "sdd21",
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
-        dc: Literal["hold", "skrf", "error"] = "hold",
+        dc: str = "hold",
     ) -> 'LinkSegment':
         """
         Convert a selected S-domain scalar response into a LinkSegment for debug.
@@ -1548,7 +1564,7 @@ class SparamModel:
         if np.isclose(self.freqs[0], 0.0):
             freqs = self.freqs
             H = self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
-            linksegment_dc: Literal["error", "hold"] = "error"
+            linksegment_dc: str = "error"
         elif dc == "hold":
             freqs = self.freqs
             H = self._debug_scalar_tf(response, gamma_src=gamma_src, gamma_load=gamma_load)
@@ -1568,15 +1584,15 @@ class SparamModel:
     def plot_ir(
         self,
         cfg: 'LinkConfig',
-        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        response: str = "sdd21",
         ax: Optional[Axes] = None,
         save_path: str = "",
-        x_unit: Literal["ui", "ns"] = "ui",
-        x_origin: Literal["start", "max"] = "max",
+        x_unit: str = "ui",
+        x_origin: str = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
-        dc: Literal["hold", "skrf", "error"] = "hold",
+        dc: str = "hold",
         label: str | None = None,
     ) -> Axes:
         """
@@ -1620,15 +1636,15 @@ class SparamModel:
     def plot_sbr(
         self,
         cfg: 'LinkConfig',
-        response: Literal["sdd11", "sdd12", "sdd21", "sdd22", "h21"] = "sdd21",
+        response: str = "sdd21",
         ax: Optional[Axes] = None,
         save_path: str = "",
-        x_unit: Literal["ui", "ns"] = "ui",
-        x_origin: Literal["start", "max"] = "max",
+        x_unit: str = "ui",
+        x_origin: str = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
-        dc: Literal["hold", "skrf", "error"] = "hold",
+        dc: str = "hold",
         label: str | None = None,
         normalize_main_cursor: bool = False,
     ) -> Axes:
@@ -1913,7 +1929,7 @@ class LinkSegment:
     def _prepare_tf_dc(
         f_meas: np.ndarray,
         H_meas: np.ndarray,
-        dc: Literal["error", "hold"],
+        dc: str,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
         Prepare transfer-function samples for the LinkSegment DC contract.
@@ -1950,7 +1966,7 @@ class LinkSegment:
         f_meas: np.ndarray,
         H_meas: np.ndarray,
         cfg: 'LinkConfig',
-        dc: Literal["error", "hold"] = "error",
+        dc: str = "error",
     ) -> 'LinkSegment':
         """
         Build a LinkSegment from scalar transfer-function samples.
@@ -2254,8 +2270,8 @@ class LinkSegment:
     def _response_x_axis(
         self,
         response: np.ndarray,
-        x_unit: Literal["ui", "ns"],
-        x_origin: Literal["start", "max"],
+        x_unit: str,
+        x_origin: str,
         origin_response: Optional[np.ndarray] = None,
     ) -> tuple[np.ndarray, str]:
         """
@@ -2296,8 +2312,8 @@ class LinkSegment:
     def _set_response_xlim(
         self,
         ax: Axes,
-        x_unit: Literal["ui", "ns"],
-        x_origin: Literal["start", "max"],
+        x_unit: str,
+        x_origin: str,
         xlim_ui: Optional[tuple[float, float]],
     ) -> None:
         """
@@ -2342,8 +2358,8 @@ class LinkSegment:
         title: str,
         ax: Optional[Axes],
         save_path: str,
-        x_unit: Literal["ui", "ns"],
-        x_origin: Literal["start", "max"],
+        x_unit: str,
+        x_origin: str,
         xlim_ui: Optional[tuple[float, float]],
         origin_response: Optional[np.ndarray] = None,
         label: str | None = None,
@@ -2368,8 +2384,8 @@ class LinkSegment:
         self,
         ax: Optional[Axes] = None,
         save_path: str = "",
-        x_unit: Literal["ui", "ns"] = "ui",
-        x_origin: Literal["start", "max"] = "max",
+        x_unit: str = "ui",
+        x_origin: str = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         label: str | None = None,
     ) -> Axes:
@@ -2412,8 +2428,8 @@ class LinkSegment:
         self,
         ax: Optional[Axes] = None,
         save_path: str = "",
-        x_unit: Literal["ui", "ns"] = "ui",
-        x_origin: Literal["start", "max"] = "start",
+        x_unit: str = "ui",
+        x_origin: str = "start",
         xlim_ui: Optional[tuple[float, float]] = None,
         label: str | None = None,
     ) -> Axes:
@@ -2458,8 +2474,8 @@ class LinkSegment:
         self,
         ax: Optional[Axes] = None,
         save_path: str = "",
-        x_unit: Literal["ui", "ns"] = "ui",
-        x_origin: Literal["start", "max"] = "max",
+        x_unit: str = "ui",
+        x_origin: str = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         label: str | None = None,
         normalize_main_cursor: bool = False,
@@ -3160,3 +3176,4 @@ class LinkSegment:
                 sr[n] += sr[n - D]
 
         return sr
+
