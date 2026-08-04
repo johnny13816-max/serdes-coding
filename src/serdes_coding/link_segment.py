@@ -478,16 +478,19 @@ class OneSidePSD:
     conversion. Filtering by an LTI response is represented by:
         S_out(f) = S_in(f) * |H(f)|^2
 
-    The class can either preserve a measured PSD grid or return a copy aligned
-    to LinkConfig.freqs for 178A-style PSD arithmetic on a common frequency
-    grid.
+    The class can either preserve an arbitrary PSD grid or return a copy
+    aligned to LinkConfig.freqs for 178A-style PSD arithmetic on a common
+    frequency grid. The ifftable flag is True only when the PSD is known to be
+    on a LinkConfig-compatible rfft grid.
     """
     freqs: np.ndarray                # unit: Hz, one-sided non-negative frequency axis
     psd: np.ndarray                  # unit: quantity^2/Hz, one-sided PSD samples
+    ifftable: bool = False           # True when freqs are aligned to a LinkConfig rfft grid
 
     def __post_init__(self) -> None:
         self.freqs = LinkConfig.validate_freqs(self.freqs)
         self.psd = self.validate_psd(self.psd, self.freqs)
+        self.ifftable = bool(self.ifftable or self.is_ifftable_freqs(self.freqs))
 
     @staticmethod
     def validate_psd(psd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
@@ -512,37 +515,21 @@ class OneSidePSD:
             raise ValueError("psd must be non-negative.")
         return psd
 
-    @classmethod
-    def from_constant(cls, freqs: np.ndarray, value: float) -> 'OneSidePSD':
+    @staticmethod
+    def is_ifftable_freqs(freqs: np.ndarray) -> bool:
         """
-        Build a flat one-sided PSD.
+        Check whether freqs are compatible with a one-sided rfft/irfft grid.
 
-        Parameters
-        ----------
-        freqs:
-            Frequency axis in Hz.
-        value:
-            One-sided PSD level in quantity^2/Hz.
+        This is a grid-shape check only. It confirms DC is present and the
+        spacing is uniform; it does not prove the axis was produced by a
+        specific LinkConfig instance.
         """
-        freqs = LinkConfig.validate_freqs(freqs)
-        value = float(value)
-        if not np.isfinite(value) or value < 0.0:
-            raise ValueError("value must be finite and non-negative.")
-        return cls(freqs=freqs, psd=value * np.ones_like(freqs))
-
-    @classmethod
-    def from_link_config(cls, cfg: LinkConfig, value: float) -> 'OneSidePSD':
-        """
-        Build a flat one-sided PSD directly on cfg.freqs.
-
-        Parameters
-        ----------
-        cfg:
-            LinkConfig defining the target frequency grid in Hz.
-        value:
-            One-sided PSD level in quantity^2/Hz.
-        """
-        return cls.from_constant(cfg.freqs, value)
+        try:
+            LinkConfig.validate_freqs(freqs, require_uniform=True)
+        except ValueError:
+            return False
+        freqs = np.asarray(freqs, dtype=float)
+        return bool(len(freqs) >= 2 and np.isclose(freqs[0], 0.0))
 
     @classmethod
     def from_sigma(
@@ -550,7 +537,7 @@ class OneSidePSD:
         freqs: np.ndarray,
         sigma: float,
         f_start: float = 0.0,
-        f_stop: Optional[float] = None,
+        f_stop: float = np.inf,
     ) -> 'OneSidePSD':
         """
         Build a flat band-limited one-sided PSD from RMS amplitude.
@@ -565,16 +552,21 @@ class OneSidePSD:
         f_start:
             Start frequency of the flat PSD band in Hz.
         f_stop:
-            Stop frequency of the flat PSD band in Hz. If None, use freqs[-1].
+            Stop frequency of the flat PSD band in Hz. Values beyond freqs[-1]
+            naturally do not contribute on this grid.
         """
         freqs = LinkConfig.validate_freqs(freqs)
         sigma = float(sigma)
         f_start = float(f_start)
-        f_stop = float(freqs[-1] if f_stop is None else f_stop)
+        f_stop = float(f_stop)
         if not np.isfinite(sigma) or sigma < 0.0:
             raise ValueError("sigma must be finite and non-negative.")
-        if not np.isfinite(f_start) or not np.isfinite(f_stop) or f_start >= f_stop:
-            raise ValueError("f_start and f_stop must be finite and strictly increasing.")
+        if not np.isfinite(f_start) or f_start < 0.0:
+            raise ValueError("f_start must be finite and non-negative.")
+        if not np.isfinite(f_stop) and not np.isinf(f_stop):
+            raise ValueError("f_stop must be finite or np.inf.")
+        if f_start >= f_stop:
+            raise ValueError("f_start and f_stop must be strictly increasing.")
 
         shape = np.zeros_like(freqs)
         in_band = (freqs >= f_start) & (freqs <= f_stop)
@@ -589,45 +581,25 @@ class OneSidePSD:
         return cls(freqs=freqs, psd=(sigma**2 / band_area) * shape)
 
     @classmethod
-    def adc_qnoise(
+    def from_func(
         cls,
         freqs: np.ndarray,
-        delta: float,
-        fs_adc: float,
-        f_start: float = 0.0,
-        f_stop: Optional[float] = None,
+        func: Any,
     ) -> 'OneSidePSD':
         """
-        Build ideal ADC quantization-noise PSD.
+        Build a one-sided PSD from a scalar frequency-domain model.
 
         Parameters
         ----------
         freqs:
             Frequency axis in Hz.
-        delta:
-            ADC quantization step in quantity units.
-        fs_adc:
-            ADC sampling frequency in Hz.
-        f_start:
-            Start frequency of the quantization-noise band in Hz.
-        f_stop:
-            Stop frequency of the quantization-noise band in Hz. If None, use
-            fs_adc/2.
+        func:
+            Callable that accepts freqs in Hz and returns PSD samples in
+            quantity^2/Hz.
         """
-        delta = float(delta)
-        fs_adc = float(fs_adc)
-        if not np.isfinite(delta) or delta < 0.0:
-            raise ValueError("delta must be finite and non-negative.")
-        if not np.isfinite(fs_adc) or fs_adc <= 0.0:
-            raise ValueError("fs_adc must be finite and positive.")
-
-        sigma_q = delta / np.sqrt(12.0)
-        return cls.from_sigma(
-            freqs=freqs,
-            sigma=sigma_q,
-            f_start=f_start,
-            f_stop=fs_adc / 2.0 if f_stop is None else f_stop,
-        )
+        freqs = LinkConfig.validate_freqs(freqs)
+        psd = np.asarray(func(freqs), dtype=float)
+        return cls(freqs=freqs, psd=psd)
 
     @property
     def df(self) -> float | None:
@@ -678,7 +650,7 @@ class OneSidePSD:
             right=0.0,
         )
 
-        return type(self)(freqs=f_new, psd=psd_new)
+        return type(self)(freqs=f_new, psd=psd_new, ifftable=True)
 
     def filtered_by(self, response: 'LinkSegment') -> 'OneSidePSD':
         """
@@ -692,7 +664,7 @@ class OneSidePSD:
         """
         if not isFreqsEqual(self.freqs, response.freqs):
             raise ValueError("PSD and LinkSegment frequency grids must match. Use aligned_to(cfg, dc=...) first.")
-        return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2)
+        return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2, ifftable=self.ifftable)
 
     def to_sigma(self) -> float:
         """
