@@ -13,12 +13,17 @@ from .com_model import (
     COMPMFRuntimeConfig,
     COMPMFStatus,
     COMPath,
+    COMSearchCandidate,
+    COMSearchConfig,
+    COMSearchRow,
+    COMSearchStatus,
     COMSharedPath,
     COMPkgConfig,
     COMStatus,
     IEEECOMFilter,
     IEEECOMsparam,
     excel_to_config,
+    excel_to_search_config,
 )
 from .link_segment import SparamModel
 
@@ -35,6 +40,10 @@ __all__ = [
     "COMPMFRuntimeConfig",
     "COMPMFStatus",
     "COMPath",
+    "COMSearchCandidate",
+    "COMSearchConfig",
+    "COMSearchRow",
+    "COMSearchStatus",
     "COMSharedPath",
     "COMPkgConfig",
     "COMStatus",
@@ -42,4 +51,5 @@ __all__ = [
     "IEEECOMsparam",
     "SparamModel",
     "excel_to_config",
+    "excel_to_search_config",
 ]

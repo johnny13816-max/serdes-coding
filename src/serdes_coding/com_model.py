@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
+from itertools import product
 from pathlib import Path
 import sys
 from typing import Literal, Optional, Sequence
@@ -124,111 +125,193 @@ class _PrettyDataclass:
 
 def excel_to_config(excel_path: str) -> COMConfig:
     """
-    Build COMConfig from one Excel row by direct field assignment.
+    Build COMConfig from a PyChOpMarg-style Excel config table.
 
-    Expected Excel format:
-    - first sheet
-    - one header row
-    - first data row contains values
-
-    Column names intentionally match the current COMConfig dataclass fields so
-    this function stays simple and easy to edit. This helper is the unit
-    boundary: Excel/spec-style values are converted here into the internal
-    units documented by each config class.
-
-    Required LinkConfig columns:
-    - fb in GBd/GHz-equivalent, per_ui, target_df in GHz
-
-    Required COMFilterConfig columns:
-    - c_m3, c_m2, c_m1, c_1, num_pre
-    - Tr in ns, fr in GHz, g_DC, g_DC2, f_z/f_LF/f_p1/f_p2 in GHz
-    - A_v, A_fe, A_ne
-
-    Required COMChannelConfig columns:
-    - victim_s4p_path, next_s4p_paths, fext_s4p_paths
-    - port_order, R0, gamma_src, gamma_load
-
-    Required COMPkgConfig columns:
-    - C_d/C_b/C_p in nF, L_s in nH, z_p in mm, C_p in nF, pkg_enable
-    - R0, Z_c, z_p2, Z_c2
+    This helper reads the reference Excel table under Parameter/Setting/Units
+    blocks. Range-valued fields keep the first value as the scalar default;
+    use excel_to_search_config() to recover the search-space vectors.
     """
-    import ast
     import pandas as pd
 
-    row = pd.read_excel(excel_path).iloc[0]
+    excel_path_obj = Path(excel_path)
+    table = _read_excel_parameter_table(excel_path_obj)
+    project_root = Path(__file__).resolve().parents[2]
+    chnl_dir = project_root / "reference_data" / "pychopmarg_example2" / "chnl_data"
 
-    next_s4p_paths = row["next_s4p_paths"]
-    if pd.isna(next_s4p_paths):
-        next_s4p_paths = ()
-    elif isinstance(next_s4p_paths, str):
-        next_s4p_paths = tuple(ast.literal_eval(next_s4p_paths))
-    else:
-        next_s4p_paths = tuple(next_s4p_paths)
+    f_b = _scalar_setting(table, "f_b") * 1e9
+    per_ui = int(_scalar_setting(table, "M"))
+    target_df = _scalar_setting(table, "Delta_f") * 1e9
+    z_p_idx = int(_scalar_setting(table, "z_p select")) - 1
 
-    fext_s4p_paths = row["fext_s4p_paths"]
-    if pd.isna(fext_s4p_paths):
-        fext_s4p_paths = ()
-    elif isinstance(fext_s4p_paths, str):
-        fext_s4p_paths = tuple(ast.literal_eval(fext_s4p_paths))
-    else:
-        fext_s4p_paths = tuple(fext_s4p_paths)
+    C_d = _matrix_setting(table, "C_d") * 1e-9
+    L_s = _matrix_setting(table, "L_s") * 1e-9
+    C_b = _matrix_setting(table, "C_b") * 1e-9
+    C_p = _matrix_setting(table, "C_p") * 1e-9
+    z_p_tx = _vector_setting(table, "z_p (TX)")
+    z_p_rx = _vector_setting(table, "z_p (RX)")
+    package_Z_c = _matrix_setting(table, "package_Z_c")
 
-    port_order = row["port_order"]
-    if isinstance(port_order, str):
-        port_order = tuple(ast.literal_eval(port_order))
-    else:
-        port_order = tuple(port_order)
-
-    z_p2 = row["z_p2"]
-    if pd.isna(z_p2):
-        z_p2 = None
+    port_order = tuple(int(x) - 1 for x in _vector_setting(table, "Port Order"))
+    if len(port_order) != 4:
+        raise ValueError("Port Order must contain exactly four ports.")
 
     return COMConfig(
         link=LinkConfig(
-            fb=row["fb"] * 1e9,
-            per_ui=row["per_ui"],
-            target_df=row["target_df"] * 1e9,
+            fb=f_b,
+            per_ui=per_ui,
+            target_df=target_df,
         ),
         filter=COMFilterConfig(
-            c_m3=row["c_m3"],
-            c_m2=row["c_m2"],
-            c_m1=row["c_m1"],
-            c_1=row["c_1"],
-            num_pre=row["num_pre"],
-            Tr=row["Tr"] * 1e-9,
-            fr=row["fr"] * 1e9,
-            g_DC=row["g_DC"],
-            g_DC2=row["g_DC2"],
-            f_z=row["f_z"] * 1e9,
-            f_LF=row["f_LF"] * 1e9,
-            f_p1=row["f_p1"] * 1e9,
-            f_p2=row["f_p2"] * 1e9,
-            A_v=row["A_v"],
-            A_fe=row["A_fe"],
-            A_ne=row["A_ne"],
+            c_m3=0.0,
+            c_m2=0.0,
+            c_m1=0.0,
+            c_1=0.0,
+            num_pre=int(_scalar_setting(table, "ffe_pre_tap_len")) - 2,
+            Tr=_scalar_setting(table, "T_r") * 1e-9,
+            fr=_scalar_setting(table, "f_r") * f_b,
+            g_DC=_first_setting(table, "g_DC"),
+            g_DC2=_first_setting(table, "g_DC_HP"),
+            f_z=_scalar_setting(table, "f_z") * 1e9,
+            f_LF=_scalar_setting(table, "f_HP_PZ") * 1e9,
+            f_p1=_scalar_setting(table, "f_p1") * 1e9,
+            f_p2=_scalar_setting(table, "f_p2") * 1e9,
+            A_v=_scalar_setting(table, "A_v"),
+            A_fe=_scalar_setting(table, "A_fe"),
+            A_ne=_scalar_setting(table, "A_ne"),
         ),
         channel=COMChannelConfig(
-            victim_s4p_path=row["victim_s4p_path"],
-            next_s4p_paths=next_s4p_paths,
-            fext_s4p_paths=fext_s4p_paths,
+            victim_s4p_path=str(chnl_dir / "example2_THRU.s4p"),
+            next_s4p_paths=(
+                str(chnl_dir / "example2_NEXT1.s4p"),
+                str(chnl_dir / "example2_NEXT2.s4p"),
+                str(chnl_dir / "example2_NEXT3.s4p"),
+            ),
+            fext_s4p_paths=(
+                str(chnl_dir / "example2_FEXT1.s4p"),
+                str(chnl_dir / "example2_FEXT2.s4p"),
+            ),
             port_order=port_order,
-            R0=row["R0"],
-            gamma_src=complex(row["gamma_src"]),
-            gamma_load=complex(row["gamma_load"]),
+            R0=_scalar_setting(table, "R_0"),
+            gamma_src=0.0,
+            gamma_load=0.0,
         ),
         pkg=COMPkgConfig(
-            C_d=row["C_d"] * 1e-9,
-            L_s=row["L_s"] * 1e-9,
-            C_b=row["C_b"] * 1e-9,
-            z_p=row["z_p"],
-            C_p=row["C_p"] * 1e-9,
-            enable=row["pkg_enable"],
-            R0=row["R0"],
-            Z_c=row["Z_c"],
-            z_p2=z_p2,
-            Z_c2=row["Z_c2"],
+            C_d=float(C_d[0, 0]),
+            L_s=float(L_s[0, 0]),
+            C_b=float(C_b[0]),
+            z_p=float(z_p_tx[z_p_idx]),
+            C_p=float(C_p[0]),
+            enable=bool(_scalar_setting(table, "INC_PACKAGE")),
+            R0=_scalar_setting(table, "R_0"),
+            Z_c=float(package_Z_c[0, 0]),
+            z_p2=None,
+            Z_c2=float(package_Z_c[0, 1]) if package_Z_c.shape[1] > 1 else float(package_Z_c[0, 0]),
         ),
+        dfe=COMDFEConfig(
+            N_b=int(_scalar_setting(table, "N_b")),
+            b_max=_scalar_setting(table, "b_max(1)"),
+        ),
+        impairment=COMImpairmentConfig(
+            R_LM=_scalar_setting(table, "R_LM"),
+            SNR_TX=_scalar_setting(table, "SNR_TX"),
+            sigma_RJ=_scalar_setting(table, "sigma_RJ"),
+            A_DD=_scalar_setting(table, "A_DD"),
+            eta_0=_scalar_setting(table, "eta_0") / 1e9,
+        ),
+        L=int(_scalar_setting(table, "L")),
+        DER_0=_scalar_setting(table, "DER_0"),
     )
+
+def excel_to_search_config(excel_path: str) -> 'COMSearchConfig':
+    """
+    Build COMSearchConfig from the range-valued fields in the reference Excel.
+
+    The returned search config follows 93A.1.6 variable equalizer parameters.
+    """
+    table = _read_excel_parameter_table(Path(excel_path))
+    return COMSearchConfig(
+        c_m2_values=_sequence_setting(table, "c(-2)"),
+        c_m1_values=_sequence_setting(table, "c(-1)"),
+        c_1_values=_sequence_setting(table, "c(1)"),
+        g_DC_values=_sequence_setting(table, "g_DC"),
+        g_DC2_values=_sequence_setting(table, "g_DC_HP"),
+    )
+
+def _read_excel_parameter_table(excel_path: Path) -> dict[str, object]:
+    import pandas as pd
+
+    df = pd.read_excel(excel_path, sheet_name="COM_Settings", header=None)
+    table: dict[str, object] = {}
+    for start_col in (0, 5, 9):
+        block = df.iloc[:, start_col:start_col + 3]
+        for _, row in block.iterrows():
+            param = row.iloc[0]
+            setting = row.iloc[1]
+            if pd.isna(param) or str(param).strip() in {
+                "Parameter",
+                "Table 93A-1 parameters",
+                "I/O control",
+                "Table 93A–2 parameters",
+                "Table 92–12 parameters",
+                "Operational control",
+                "Receiver testing",
+                "Non standard control options",
+            }:
+                continue
+            table[str(param).strip()] = setting
+    return table
+
+def _matlab_array(value: object) -> np.ndarray:
+    if isinstance(value, (int, float, np.integer, np.floating)):
+        return np.asarray([float(value)], dtype=float)
+    if not isinstance(value, str):
+        return np.asarray(value, dtype=float)
+
+    text = value.strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1].strip()
+
+    rows = []
+    for row_text in text.split(";"):
+        row_text = row_text.strip()
+        if not row_text:
+            continue
+        parts = row_text.replace(",", " ").split()
+        if len(parts) == 1 and ":" in parts[0]:
+            lo, step, hi = [float(x) for x in parts[0].split(":")]
+            n = int(round((hi - lo) / step)) + 1
+            values = lo + step * np.arange(n)
+            values[np.isclose(values, 0.0, atol=1e-15)] = 0.0
+            rows.append(values)
+        else:
+            rows.append(np.asarray([float(x) for x in parts], dtype=float))
+
+    if len(rows) == 0:
+        raise ValueError(f"Cannot parse MATLAB-style array: {value!r}")
+    if len(rows) == 1:
+        return rows[0]
+    return np.vstack(rows)
+
+def _sequence_setting(table: dict[str, object], name: str) -> np.ndarray:
+    return np.ravel(_matlab_array(table[name])).astype(float)
+
+def _first_setting(table: dict[str, object], name: str) -> float:
+    return float(_sequence_setting(table, name)[0])
+
+def _scalar_setting(table: dict[str, object], name: str) -> float:
+    arr = _sequence_setting(table, name)
+    if len(arr) != 1:
+        raise ValueError(f"{name} must be scalar, got {table[name]!r}.")
+    return float(arr[0])
+
+def _vector_setting(table: dict[str, object], name: str) -> np.ndarray:
+    return _sequence_setting(table, name)
+
+def _matrix_setting(table: dict[str, object], name: str) -> np.ndarray:
+    arr = _matlab_array(table[name])
+    if arr.ndim == 1:
+        return arr
+    return arr.astype(float)
 
 def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
     """
@@ -1035,6 +1118,73 @@ class COMConfig(_PrettyDataclass):
     DER_0: float                    # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
 
+@dataclass(repr=False)
+class COMSearchConfig(_PrettyDataclass):
+    """
+    Search-space configuration for 93A.1.6 variable equalizer parameters.
+
+    None means "use the scalar value already stored in COMConfig.filter".
+    Values are combined by Cartesian product in COM.run(search=...).
+    """
+    c_m2_values: Optional[Sequence[float]] = None # unit: dimensionless, TX FFE tap c(-2)
+    c_m1_values: Optional[Sequence[float]] = None # unit: dimensionless, TX FFE tap c(-1)
+    c_1_values: Optional[Sequence[float]] = None  # unit: dimensionless, TX FFE tap c(1)
+    g_DC_values: Optional[Sequence[float]] = None # unit: dB, CTLE DC gain
+    g_DC2_values: Optional[Sequence[float]] = None # unit: dB, CTLE second DC gain
+    keep_top_n: int = 10              # unit: count, number of successful summary rows to retain
+    keep_all_rows: bool = False       # if True, retain every candidate summary row
+    continue_on_error: bool = False   # if True, failed candidates become error rows
+
+    def __post_init__(self) -> None:
+        self.keep_top_n = int(self.keep_top_n)
+        if self.keep_top_n <= 0:
+            raise ValueError("COMSearchConfig.keep_top_n must be positive.")
+
+    @staticmethod
+    def _values_or_default(
+        values: Optional[Sequence[float]],
+        default: Optional[float],
+        name: str,
+    ) -> np.ndarray:
+        if values is None:
+            if default is None:
+                raise ValueError(f"{name} has no search values and no COMConfig.filter default value.")
+            values = (default,)
+
+        arr = np.asarray(values, dtype=float)
+        if arr.ndim != 1 or len(arr) == 0:
+            raise ValueError(f"{name} search values must be a non-empty 1D sequence.")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"{name} search values must be finite.")
+        return arr
+
+    def candidates(self, ft_cfg: COMFilterConfig) -> list['COMSearchCandidate']:
+        c_m2 = self._values_or_default(self.c_m2_values, ft_cfg.c_m2, "c_m2")
+        c_m1 = self._values_or_default(self.c_m1_values, ft_cfg.c_m1, "c_m1")
+        c_1 = self._values_or_default(self.c_1_values, ft_cfg.c_1, "c_1")
+        g_DC = self._values_or_default(self.g_DC_values, ft_cfg.g_DC, "g_DC")
+        g_DC2 = self._values_or_default(self.g_DC2_values, ft_cfg.g_DC2, "g_DC2")
+
+        return [
+            COMSearchCandidate(
+                c_m2=float(items[0]),
+                c_m1=float(items[1]),
+                c_1=float(items[2]),
+                g_DC=float(items[3]),
+                g_DC2=float(items[4]),
+            )
+            for items in product(c_m2, c_m1, c_1, g_DC, g_DC2)
+        ]
+
+@dataclass(repr=False)
+class COMSearchCandidate(_PrettyDataclass):
+    """One concrete 93A.1.6 variable equalizer candidate."""
+    c_m2: float                       # unit: dimensionless, TX FFE tap c(-2)
+    c_m1: float                       # unit: dimensionless, TX FFE tap c(-1)
+    c_1: float                        # unit: dimensionless, TX FFE tap c(1)
+    g_DC: float                       # unit: dB, CTLE DC gain
+    g_DC2: float                      # unit: dB, CTLE second DC gain
+
 # ========================================
 # Status (all integrated in COMStatus)
 # ========================================
@@ -1128,6 +1278,7 @@ class COMStatus(_PrettyDataclass):
     dfe: Optional['COMDFEStatus'] = None
     impairment: Optional['COMImpairmentStatus'] = None
     pmf: Optional['COMPMFStatus'] = None
+    FOM: Optional[float] = None        # unit: dB, 93A.1.6 figure of merit
 
     @property
     def victim(self) -> COMPath:
@@ -1136,6 +1287,42 @@ class COMStatus(_PrettyDataclass):
     @property
     def xtalks(self) -> list[COMPath]:
         return self.paths[1:]
+
+@dataclass(repr=False)
+class COMSearchRow(_PrettyDataclass):
+    """Lightweight summary of one COM search candidate."""
+    idx: int                          # unit: count, candidate index
+    candidate: COMSearchCandidate
+    FOM: float                        # unit: dB, 93A.1.6 figure of merit
+    As: Optional[float] = None         # unit: V
+    sigma_ISI: Optional[float] = None  # unit: V
+    sigma_J: Optional[float] = None    # unit: V
+    sigma_XT: Optional[float] = None   # unit: V
+    sigma_N: Optional[float] = None    # unit: V
+    sigma_TX: Optional[float] = None   # unit: V
+    ts: Optional[int] = None           # unit: sample index
+    pos: Optional[int] = None          # unit: sample phase
+    status: Literal["ok", "error"] = "ok"
+    error: Optional[str] = None
+
+@dataclass(repr=False)
+class COMSearchStatus(_PrettyDataclass):
+    """
+    Search result for COM.run(search=...).
+
+    Only the FOM winner is recomputed with the full PMF/COM pipeline. The rows
+    field stores lightweight candidate summaries, not full COMStatus objects.
+    """
+    best: COMStatus
+    best_row: COMSearchRow
+    rows: list[COMSearchRow]
+    num_candidates: int
+    num_success: int
+    num_error: int
+
+    @property
+    def COM(self) -> Optional[float]:
+        return None if self.best.pmf is None else self.best.pmf.COM
 
 # ======================================
 # class helpers
@@ -1676,29 +1863,97 @@ def _build_pmf_XT_all(
     p_XT.name = "XT_all"
     return p_XT
 
+def _calculate_FOM(imp_status: COMImpairmentStatus) -> float:
+    """
+    Calculate the 93A.1.6 FOM from signal amplitude and RSS impairments.
+
+    This metric is used only to select the best variable equalizer candidate.
+    The final COM still comes from the 93A.1.7 PMF calculation.
+    """
+    As = abs(float(imp_status.As))
+    var_total = (
+        imp_status.sigma_TX**2
+        + imp_status.sigma_ISI**2
+        + imp_status.sigma_J**2
+        + imp_status.sigma_XT**2
+        + imp_status.sigma_N**2
+    )
+    if As <= 0.0 or var_total <= 0.0:
+        return float("-inf")
+    return float(10 * np.log10(As**2 / var_total))
+
+def _config_with_search_candidate(cfg: COMConfig, candidate: COMSearchCandidate) -> COMConfig:
+    """Return a COMConfig copy with one search candidate applied to filter config."""
+    ft_cfg = cfg.filter
+    new_filter = replace(
+        ft_cfg,
+        c_m2=candidate.c_m2,
+        c_m1=candidate.c_m1,
+        c_1=candidate.c_1,
+        g_DC=candidate.g_DC,
+        g_DC2=candidate.g_DC2,
+    )
+    return replace(cfg, filter=new_filter)
+
+def _search_row_from_status(
+    idx: int,
+    candidate: COMSearchCandidate,
+    status: COMStatus,
+) -> COMSearchRow:
+    if status.dfe is None or status.impairment is None or status.FOM is None:
+        raise ValueError("Search candidate status must include DFE, impairment, and FOM.")
+
+    imp = status.impairment
+    dfe = status.dfe
+    return COMSearchRow(
+        idx=idx,
+        candidate=candidate,
+        FOM=status.FOM,
+        As=imp.As,
+        sigma_ISI=imp.sigma_ISI,
+        sigma_J=imp.sigma_J,
+        sigma_XT=imp.sigma_XT,
+        sigma_N=imp.sigma_N,
+        sigma_TX=imp.sigma_TX,
+        ts=dfe.ts,
+        pos=dfe.pos,
+    )
+
+def _select_search_rows(rows: list[COMSearchRow], search: COMSearchConfig) -> list[COMSearchRow]:
+    """Keep all rows or the top-N successful rows according to search config."""
+    if search.keep_all_rows:
+        return rows
+    ok_rows = [row for row in rows if row.status == "ok"]
+    ok_rows.sort(key=lambda row: row.FOM, reverse=True)
+    return ok_rows[:search.keep_top_n]
+
 #%% conduct search in this class
 class COM:
     def __init__(self, cfg: COMConfig):
         self.cfg = cfg
-        self.status: Optional[COMStatus] = None
+        self.status: Optional[COMStatus | COMSearchStatus] = None
 
-    def run(self) -> COMStatus:
+    def run(self, search: Optional[COMSearchConfig] = None) -> COMStatus | COMSearchStatus:
         """
-        Run COM for the current scalar configuration.
+        Run COM for the current configuration.
 
-        This method is intentionally kept as the public entry point. Today it
-        runs one concrete COMConfig point. When the COM search space is added,
-        run() should own the sweep and delegate each candidate to _run_once().
+        If search is None, run one concrete COMConfig point and return a full
+        COMStatus. If search is provided, sweep the Cartesian product of the
+        search values using 93A.1.6 FOM, then compute full PMF/COM only for the
+        best-FOM candidate.
         """
-        self.status = self._run_once()
+        if search is None:
+            self.status = self._run_once(calculate_pmf=True)
+        else:
+            self.status = self._run_search(search)
         return self.status
 
-    def _run_once(self) -> COMStatus:
+    def _run_once(self, *, calculate_pmf: bool = True) -> COMStatus:
         """
         Run one concrete COMConfig point without sweeping tunable parameters.
 
         This is the debug-friendly single-candidate pipeline:
-        paths -> DFE/sample phase -> impairments -> PMF/COM.
+        paths -> DFE/sample phase -> impairments -> FOM -> optional PMF/COM.
         """
         paths = self.build_all_paths()
         dfe_status = self.find_pos_and_dfe(h=paths[0].pulse.ir)
@@ -1707,8 +1962,53 @@ class COM:
             dfe_status=dfe_status,
             h_XTs=[path.pulse.ir for path in paths[1:]],
         )
-        pmf_status = self.calculate_COM(imp_status)
-        return COMStatus(paths=paths, dfe=dfe_status, impairment=imp_status, pmf=pmf_status)
+        FOM = _calculate_FOM(imp_status)
+        pmf_status = self.calculate_COM(imp_status) if calculate_pmf else None
+        return COMStatus(paths=paths, dfe=dfe_status, impairment=imp_status, pmf=pmf_status, FOM=FOM)
+
+    def _run_search(self, search: COMSearchConfig) -> COMSearchStatus:
+        candidates = search.candidates(self.cfg.filter)
+        rows: list[COMSearchRow] = []
+        best_row: Optional[COMSearchRow] = None
+        best_cfg: Optional[COMConfig] = None
+        num_error = 0
+
+        for idx, candidate in enumerate(candidates):
+            candidate_cfg = _config_with_search_candidate(self.cfg, candidate)
+            try:
+                candidate_status = COM(candidate_cfg)._run_once(calculate_pmf=False)
+                row = _search_row_from_status(idx, candidate, candidate_status)
+            except Exception as exc:
+                if not search.continue_on_error:
+                    raise
+                num_error += 1
+                row = COMSearchRow(
+                    idx=idx,
+                    candidate=candidate,
+                    FOM=float("-inf"),
+                    status="error",
+                    error=str(exc),
+                )
+                rows.append(row)
+                continue
+
+            rows.append(row)
+            if best_row is None or row.FOM > best_row.FOM:
+                best_row = row
+                best_cfg = candidate_cfg
+
+        if best_row is None or best_cfg is None:
+            raise RuntimeError("COM search did not produce any successful candidate.")
+
+        best_status = COM(best_cfg)._run_once(calculate_pmf=True)
+        return COMSearchStatus(
+            best=best_status,
+            best_row=best_row,
+            rows=_select_search_rows(rows, search),
+            num_candidates=len(candidates),
+            num_success=len(candidates) - num_error,
+            num_error=num_error,
+        )
 
     # ------------------
     # proxy
@@ -1716,6 +2016,8 @@ class COM:
     def _require_status(self) -> COMStatus:
         if self.status is None:
             raise RuntimeError("COM status is not available. Run COM.run() first.")
+        if isinstance(self.status, COMSearchStatus):
+            return self.status.best
         return self.status
 
     @property
@@ -1949,73 +2251,18 @@ class COM:
         )
 
 
-def _smoke_test_com_path() -> COMStatus:
+def _smoke_test_com_path() -> tuple[COMConfig, COMStatus]:
     """
-    Run a small end-to-end COMPath smoke test with bundled reference channels.
+    Run an end-to-end COMPath smoke test with bundled reference Excel/channels.
 
     This is not a COM-correlation test. It only checks that the current pipeline
-    can build channel-under-test S-parameters, package/filter blocks, per-path
-    voltage transfer functions, and pulse responses without shape/contract
-    errors.
+    can load the reference Excel, build channel-under-test S-parameters,
+    package/filter blocks, per-path voltage transfer functions, pulse
+    responses, and PMF/COM without shape/contract errors.
     """
     project_root = Path(__file__).resolve().parents[2]
-    chnl_dir = project_root / "reference_data" / "pychopmarg_example2" / "chnl_data"
-
-    cfg = COMConfig(
-        link=LinkConfig(fb=53.125e9, per_ui=64, target_df=1e7),
-        filter=COMFilterConfig(
-            c_m3=0.0,
-            c_m2=0.0,
-            c_m1=0.0,
-            c_1=0.0,
-            num_pre=3,
-            Tr=1e-12,
-            fr=40e9,
-            g_DC=0.0,
-            g_DC2=0.0,
-            f_z=10e9,
-            f_LF=1e9,
-            f_p1=30e9,
-            f_p2=80e9,
-            A_v=1.0,
-            A_fe=0.5,
-            A_ne=0.25,
-        ),
-        channel=COMChannelConfig(
-            victim_s4p_path=str(chnl_dir / "example2_THRU.s4p"),
-            next_s4p_paths=(str(chnl_dir / "example2_NEXT1.s4p"),),
-            fext_s4p_paths=(str(chnl_dir / "example2_FEXT1.s4p"),),
-            port_order=(0, 2, 1, 3),
-            R0=50.0,
-            gamma_src=0.0,
-            gamma_load=0.0,
-        ),
-        pkg=COMPkgConfig(
-            C_d=0.0,
-            L_s=0.0,
-            C_b=0.0,
-            z_p=0.0,
-            C_p=0.0,
-            enable=True,
-            R0=50.0,
-            Z_c=78.2,
-            z_p2=None,
-            Z_c2=78.2,
-        ),
-        dfe=COMDFEConfig(
-            N_b=5,
-            b_max=0.5,
-        ),
-        impairment=COMImpairmentConfig(
-            R_LM=0.95,
-            SNR_TX=30.0,
-            sigma_RJ=0.01,
-            A_DD=0.01,
-            eta_0=1e-18,
-        ),
-        L=4,
-        DER_0=1e-5,
-    )
+    cfg_path = project_root / "reference_data" / "pychopmarg_example2" / "config" / "config_com_ieee8023dj_PyChOpMarg_vs_MATLAB.xls"
+    cfg = excel_to_config(str(cfg_path))
 
     status = COM(cfg).run()
 
