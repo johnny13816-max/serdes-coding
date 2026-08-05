@@ -581,6 +581,28 @@ class OneSidePSD:
         return cls(freqs=freqs, psd=(sigma**2 / band_area) * shape)
 
     @classmethod
+    def from_constant(
+        cls,
+        freqs: np.ndarray,
+        psd_value: float,
+    ) -> 'OneSidePSD':
+        """
+        Build a flat one-sided PSD from a constant PSD density.
+
+        Parameters
+        ----------
+        freqs:
+            Frequency axis in Hz.
+        psd_value:
+            Constant one-sided PSD density in quantity^2/Hz.
+        """
+        freqs = LinkConfig.validate_freqs(freqs)
+        psd_value = float(psd_value)
+        if not np.isfinite(psd_value) or psd_value < 0.0:
+            raise ValueError("psd_value must be finite and non-negative.")
+        return cls(freqs=freqs, psd=psd_value * np.ones_like(freqs, dtype=float))
+
+    @classmethod
     def from_func(
         cls,
         freqs: np.ndarray,

@@ -10,7 +10,7 @@ def fir_filtered_pmf(
     fir: np.ndarray,
     *,
     keep_mass: float = float(1-1e-5),
-    tap_rel_th: float = 0.0,
+    tap_abs_th: float = 0.0,
     max_taps: Optional[int] = None,
     name: Optional[str] = None
 ) -> Pmf1D:
@@ -25,8 +25,8 @@ def fir_filtered_pmf(
         1D FIR tap coefficients.
     keep_mass:
         Target probability mass kept after optional truncation.
-    tap_rel_th:
-        Relative tap threshold versus the largest absolute tap.
+    tap_abs_th:
+        Absolute tap threshold. Keep taps with abs(tap) >= tap_abs_th.
     max_taps:
         Maximum number of strongest taps to keep.
     name:
@@ -72,7 +72,7 @@ def _truncate_keep_mass(p: Pmf1D, *, keep_mass: float) -> Pmf1D:
 def _prune_fir_coeff(
     fir: np.ndarray,
     *,
-    tap_rel_th: float = 0.0,
+    tap_abs_th: float = 0.0,
     max_taps: Optional[int] = None
 ) -> np.ndarray:
     """
@@ -82,8 +82,8 @@ def _prune_fir_coeff(
     ----------
     fir:
         1D FIR tap coefficients.
-    tap_rel_th:
-        Keep taps with abs(tap) >= tap_rel_th * max(abs(fir)).
+    tap_abs_th:
+        Absolute tap threshold. Keep taps with abs(tap) >= tap_abs_th.
     max_taps:
         Maximum number of strongest taps to keep.
     """
@@ -98,9 +98,9 @@ def _prune_fir_coeff(
     if not np.all(np.isfinite(fir)):
         raise ValueError("fir contains non-finite values.")
 
-    tap_rel_th = float(tap_rel_th)
-    if not np.isfinite(tap_rel_th) or tap_rel_th < 0:
-        raise ValueError("tap_rel_th must be finite and non-negative.")
+    tap_abs_th = float(tap_abs_th)
+    if not np.isfinite(tap_abs_th) or tap_abs_th < 0:
+        raise ValueError("tap_abs_th must be finite and non-negative.")
 
     if max_taps is not None:
         if not isinstance(max_taps, (int, np.integer)) or max_taps <= 0:
@@ -111,7 +111,7 @@ def _prune_fir_coeff(
     if max_abs == 0.0:
         return np.array([], dtype=float)
 
-    keep = np.abs(fir) >= tap_rel_th * max_abs
+    keep = np.abs(fir) >= tap_abs_th
 
     if max_taps is not None and np.count_nonzero(keep) > max_taps:
         kept_indices = np.flatnonzero(keep)
@@ -544,7 +544,7 @@ class Pmf1D:
 
     def shift_x(self, idx_shift: int) -> 'Pmf1D':
         """
-        Shift the x grid in place by idx_shift samples and return self.
+        Return a copy with the x grid shifted by idx_shift samples.
 
         Probability mass values are unchanged. Only st_idx / x_st move:
             Y = X + idx_shift * dx
@@ -555,78 +555,93 @@ class Pmf1D:
             Integer number of grid samples to shift.
         """
         idx_shift = self._validate_st_idx(idx_shift)
-        self.st_idx += idx_shift
-        self.x_st = self.st_idx * self.dx
-        return self
+        return Pmf1D(
+            dx=self.dx,
+            st_idx=self.st_idx + idx_shift,
+            pmf=self.pmf.copy(),
+            unit=self.unit,
+            name=self.name,
+        )
 
-    def scale_x(self, scale: float) -> 'Pmf1D':
+    def scale_x(
+        self,
+        scale: float,
+        *,
+        keep_dx: bool = False,
+        dx_ref: Optional[float] = None,
+    ) -> 'Pmf1D':
         """
-        Scale the x axis in place and return self.
+        Return a copy with the x axis scaled.
 
         This models:
             Y = scale * X
 
-        This is pure x-axis scaling. No projection to a shared grid is
-        performed.
+        By default this is pure x-axis scaling and dx changes by abs(scale).
+        With keep_dx=True, probability mass is projected onto dx_ref so the
+        output remains on a shared grid. This is the FIR-friendly mode.
 
         Parameters
         ----------
         scale:
             X-axis scale factor. Negative values mirror the distribution.
-        """
-        scale = self._validate_scale(scale)
-
-        if scale == 0.0:
-            self.dx = self.dx
-            self.st_idx = 0
-            self.x_st = 0.0
-            self.pmf = np.array([np.sum(self.pmf)], dtype=float)
-            return self
-
-        if scale < 0.0:
-            self.st_idx = -(self.st_idx + len(self.pmf) - 1)
-            self.pmf = self.pmf[::-1].copy()
-
-        self.dx *= abs(scale)
-        self.x_st = self.st_idx * self.dx
-        self.pmf = self._validate_pmf(self.pmf)
-        return self
-
-    def scale_x_to_grid(self, scale: float, dx_ref: float) -> 'Pmf1D':
-        """
-        Scale X and project the result to dx_ref in place.
-
-        This is the FIR-friendly operation:
-            1. Y = scale * X
-            2. deposit Y's probability mass onto a shared dx_ref grid
-
-        Parameters
-        ----------
-        scale:
-            X-axis scale factor.
+        keep_dx:
+            If True, deposit scaled probability mass onto dx_ref.
         dx_ref:
-            Shared target grid spacing after scaling.
+            Shared target grid spacing when keep_dx=True. Defaults to current
+            self.dx.
         """
         scale = self._validate_scale(scale)
-        dx_ref = self._validate_dx(dx_ref)
+
+        if keep_dx:
+            dx_ref = self.dx if dx_ref is None else self._validate_dx(dx_ref)
+
+            if scale == 0.0:
+                return Pmf1D(
+                    dx=dx_ref,
+                    st_idx=0,
+                    pmf=np.array([np.sum(self.pmf)], dtype=float),
+                    unit=self.unit,
+                    name=self.name,
+                )
+
+            st_idx, pmf = self.snap_to_grid(scale * self.x, self.pmf, dx_ref)
+            return Pmf1D(
+                dx=dx_ref,
+                st_idx=st_idx,
+                pmf=self._validate_pmf(pmf),
+                unit=self.unit,
+                name=self.name,
+            )
+
+        if dx_ref is not None:
+            raise ValueError("dx_ref is only used when keep_dx=True.")
 
         if scale == 0.0:
-            self.dx = dx_ref
-            self.st_idx = 0
-            self.x_st = 0.0
-            self.pmf = np.array([np.sum(self.pmf)], dtype=float)
-            return self
+            return Pmf1D(
+                dx=self.dx,
+                st_idx=0,
+                pmf=np.array([np.sum(self.pmf)], dtype=float),
+                unit=self.unit,
+                name=self.name,
+            )
 
-        st_idx, pmf = self.snap_to_grid(scale * self.x, self.pmf, dx_ref)
-        self.dx = dx_ref
-        self.st_idx = st_idx
-        self.x_st = self.st_idx * self.dx
-        self.pmf = self._validate_pmf(pmf)
-        return self
+        st_idx = self.st_idx
+        pmf = self.pmf.copy()
+        if scale < 0.0:
+            st_idx = -(self.st_idx + len(self.pmf) - 1)
+            pmf = pmf[::-1].copy()
+
+        return Pmf1D(
+            dx=self.dx * abs(scale),
+            st_idx=st_idx,
+            pmf=self._validate_pmf(pmf),
+            unit=self.unit,
+            name=self.name,
+        )
 
     def resample_dx(self, dx_new: float, *, name: Optional[str]=None) -> 'Pmf1D':
         """
-        Project self to a new x-grid spacing in place and return self.
+        Return a copy projected to a new x-grid spacing.
 
         This keeps the same random variable and only changes the PMF
         representation grid. Probability mass at each existing x location is
@@ -641,13 +656,13 @@ class Pmf1D:
         """
         dx_new = self._validate_dx(dx_new)
         st_idx, pmf = self.snap_to_grid(self.x, self.pmf, dx_new)
-        self.dx = dx_new
-        self.st_idx = st_idx
-        self.x_st = self.st_idx * self.dx
-        self.pmf = self._validate_pmf(pmf)
-        if name is not None:
-            self.name = name
-        return self
+        return Pmf1D(
+            dx=dx_new,
+            st_idx=st_idx,
+            pmf=self._validate_pmf(pmf),
+            unit=self.unit,
+            name=self.name if name is None else name,
+        )
 
     def fir_filter(
         self,
@@ -655,15 +670,15 @@ class Pmf1D:
         *,
         keep_mass: float = float(1-1e-5),
         dx_ref: Optional[float] = None,
-        tap_rel_th: float = 0.0,
+        tap_abs_th: float = 0.0,
         max_taps: Optional[int] = None,
         name: Optional[str] = None,
     ) -> 'Pmf1D':
         """
-        Apply FIR filtering to this PMF in place and return self.
+        Return the FIR-filtered PMF.
 
-        If self represents the symbol distribution X, this method replaces it
-        with the distribution of:
+        If self represents the symbol distribution X, this method returns the
+        distribution of:
             Y = sum_i fir[i] * X_i
 
         The X_i are treated as independent random variables with the original
@@ -678,14 +693,14 @@ class Pmf1D:
             Probability mass to keep after each convolution.
         dx_ref:
             Shared grid spacing for each tap contribution. Defaults to self.dx.
-        tap_rel_th:
-            Relative tap threshold versus the largest absolute tap.
+        tap_abs_th:
+            Absolute tap threshold. Keep taps with abs(tap) >= tap_abs_th.
         max_taps:
             Maximum number of strongest taps to keep.
         name:
             Optional name override after filtering.
         """
-        coeff = _prune_fir_coeff(fir, tap_rel_th=tap_rel_th, max_taps=max_taps)
+        coeff = _prune_fir_coeff(fir, tap_abs_th=tap_abs_th, max_taps=max_taps)
         dx_ref = self.dx if dx_ref is None else self._validate_dx(dx_ref)
 
         if len(coeff) == 0:
@@ -703,7 +718,7 @@ class Pmf1D:
             out_pmf = np.array([1.0], dtype=float)
 
             for c in coeff:
-                term = base.copy().scale_x_to_grid(c, dx_ref)
+                term = base.copy().scale_x(c, keep_dx=True, dx_ref=dx_ref)
                 out_pmf = np.convolve(out_pmf, term.pmf)
                 out_st_idx += term.st_idx
 
@@ -721,20 +736,14 @@ class Pmf1D:
                 name=self.name if name is None else name,
             )
 
-        self.dx = filtered.dx
-        self.st_idx = filtered.st_idx
-        self.x_st = filtered.x_st
-        self.pmf = filtered.pmf
-        self.unit = filtered.unit
-        self.name = filtered.name
-        return self
+        return filtered
 
     def combine(self, other: 'Pmf1D', *, name: Optional[str]=None) -> 'Pmf1D':
         """
-        Combine another independent PMF into self by convolution.
+        Return the convolution with another independent PMF.
 
-        If self represents X and other represents Y, this method replaces self
-        with the distribution of:
+        If self represents X and other represents Y, this method returns the
+        distribution of:
             Z = X + Y
 
         Both PMFs must already use the same dx. Use resample_dx() explicitly
@@ -756,9 +765,10 @@ class Pmf1D:
         if self.unit and other.unit and self.unit != other.unit:
             raise ValueError("Cannot combine PMFs with different non-empty units.")
 
-        self.pmf = self._validate_pmf(np.convolve(self.pmf, other.pmf))
-        self.st_idx += other.st_idx
-        self.x_st = self.st_idx * self.dx
-        if name is not None:
-            self.name = name
-        return self
+        return Pmf1D(
+            dx=self.dx,
+            st_idx=self.st_idx + other.st_idx,
+            pmf=self._validate_pmf(np.convolve(self.pmf, other.pmf)),
+            unit=self.unit or other.unit,
+            name=self.name if name is None else name,
+        )

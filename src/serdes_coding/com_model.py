@@ -7,10 +7,12 @@ from typing import Literal, Optional, Sequence
 import numpy as np
 
 try:
-    from .link_segment import LinkConfig, LinkSegment, SparamModel
+    from .link_segment import LinkConfig, LinkSegment, OneSidePSD, SparamModel
+    from .pmf_handler import Pmf1D
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from serdes_coding.link_segment import LinkConfig, LinkSegment, SparamModel
+    from serdes_coding.link_segment import LinkConfig, LinkSegment, OneSidePSD, SparamModel
+    from serdes_coding.pmf_handler import Pmf1D
 
 
 class _PrettyDataclass:
@@ -851,6 +853,175 @@ class COMFilterConfig(_PrettyDataclass):
         self.txfir = np.r_[self.c_m3, self.c_m2, self.c_m1, self.c_0, self.c_1]
 
 @dataclass(repr=False)
+class COMDFEConfig(_PrettyDataclass):
+    N_b: int                         # unit: taps, fixed DFE tap count
+    b_max: float | np.ndarray        # unit: dimensionless, normalized fixed DFE coefficient limit
+
+    # 802.3ck floating DFE optional
+    N_bg: int = 0                     # unit: banks, number of DFE floating tap banks
+    N_bf: int = 0                     # unit: taps/bank, number of floating taps per bank
+    N_ts: Optional[int] = None        # unit: taps, floating tap tail starting position
+    N_f: Optional[int] = None         # unit: taps, DFE maximum span including floating bank
+    bb_max: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap upper coefficient limit
+    bb_min: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap lower coefficient limit
+    b_gmax: Optional[float | np.ndarray] = None # unit: dimensionless, floating tap magnitude limit
+    sigma_tmax: Optional[float] = None # unit: dimensionless, floating tap tail RSS limit
+    
+    # derived attribution (not in spec)
+    fixed_upper: np.ndarray = field(init=False)
+    fixed_lower: np.ndarray = field(init=False)
+    float_upper: np.ndarray = field(init=False)
+    float_lower: np.ndarray = field(init=False)
+
+    def __post_init__(self) -> None:
+        "define the indicator mask of dfe coeff" 
+        if (self.N_b < 0):
+            raise ValueError("COMDFEConfig.N_b must be non-negative")
+
+        if (self.N_bg == 0):
+            self.N_ts = None
+        elif (self.N_ts is None):
+            self.N_ts = self.N_b + 1
+        elif (self.N_ts <= self.N_b): 
+            raise ValueError("COMDFEConfig.N_ts has setup error")
+        
+        if (self.N_f is None): 
+            self.N_f = self.N_b
+        elif (self.N_f < self.N_b+self.N_bg*self.N_bf):
+            raise ValueError("COMDFEConfig.N_f/N_bg/N_bf has setup error")
+        if (self.N_bg > 0):
+            if (self.N_bf <= 0):
+                raise ValueError("COMDFEConfig.N_bf has setup error")
+            if (self.N_ts is None) or (self.N_ts > self.N_f):
+                raise ValueError("COMDFEConfig.N_ts/N_f has setup error")
+            if (self.sigma_tmax is None):
+                raise ValueError("COMDFEConfig.sigma_tmax is required when floating DFE is enabled")
+
+        # all bounds will be normalized to np.ndarray with len = N_f
+        if (self.N_f == 0):
+            self.fixed_upper = np.zeros(0)
+            self.fixed_lower = np.zeros(0)
+            self.float_upper = np.zeros(0)
+            self.float_lower = np.zeros(0)
+            return
+
+        if (self.bb_max is None):
+            self.fixed_upper = self.b_max * np.ones(self.N_f)
+        elif isinstance(self.bb_max, np.ndarray):
+            self.fixed_upper = np.r_[self.bb_max, np.zeros(self.N_f - len(self.bb_max))]
+        else:
+            self.fixed_upper = self.bb_max * np.ones(self.N_f)
+
+        if (self.bb_min is None):
+            self.fixed_lower = - self.b_max * np.ones(self.N_f)
+        elif isinstance(self.bb_min, np.ndarray):
+            self.fixed_lower = np.r_[self.bb_min, np.zeros(self.N_f - len(self.bb_min))]
+        else:
+            self.fixed_lower = self.bb_min * np.ones(self.N_f)
+
+        if (self.b_gmax is None):
+            self.float_upper = self.fixed_upper
+            self.float_lower = self.fixed_lower
+        elif isinstance(self.b_gmax, np.ndarray):
+            self.float_upper = np.minimum(
+                self.fixed_upper, 
+                np.r_[np.zeros(self.N_f - len(self.b_gmax)), +self.b_gmax]
+            )
+            self.float_lower = np.maximum(
+                self.fixed_lower,
+                np.r_[np.zeros(self.N_f - len(self.b_gmax)), -self.b_gmax]
+            )
+        else:
+            self.float_upper = +self.b_gmax * np.ones(self.N_f)
+            self.float_lower = -self.b_gmax * np.ones(self.N_f)
+
+@dataclass(repr=False)
+class COMImpairmentConfig(_PrettyDataclass):
+    R_LM: float                     # unit: dimensionless, level separation mismatch ratio
+    SNR_TX: float                   # unit: dB, transmitter signal-to-noise ratio
+    sigma_RJ: float                 # unit: UI, random jitter RMS
+    A_DD: float                     # unit: UI, dual-Dirac jitter amplitude
+    eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density
+
+@dataclass(repr=False)
+class COMPMFConfig(_PrettyDataclass):
+    """
+    PMF-domain configuration for 93A.1.7 interference/noise distributions.
+
+    This config owns only amplitude-axis and PMF numerical controls. It does
+    not own channel construction, DFE selection, or impairment statistics.
+    """
+    dy_override: Optional[float] = None # unit: V, explicit PMF amplitude grid step; if None derive from As
+    dy_rel_As: float = 1e-3           # unit: dimensionless, default dy limit = 0.1% of As (from spec)
+    dy_abs_max: float = 0.01e-3       # unit: V, default dy absolute limit = 0.01 mV (from spec)
+    tap_abs_th_override: Optional[float] = None # unit: V, explicit tap threshold; if None derive from As
+    tap_rel_As: float = 1e-3          # unit: dimensionless, ignore pulse terms below 0.1% of As (from spec)
+    keep_mass: float = 1.0            # unit: probability, optional PMF truncation target
+    gaussian_n_sigma: float = 8.0     # unit: sigma, half span for Gaussian PMF construction
+
+    def __post_init__(self) -> None:
+        if self.dy_override is not None:
+            self.dy_override = float(self.dy_override)
+            if not np.isfinite(self.dy_override) or self.dy_override <= 0.0:
+                raise ValueError("COMPMFConfig.dy_override must be finite and positive.")
+
+        if self.tap_abs_th_override is not None:
+            self.tap_abs_th_override = float(self.tap_abs_th_override)
+            if not np.isfinite(self.tap_abs_th_override) or self.tap_abs_th_override < 0.0:
+                raise ValueError("COMPMFConfig.tap_abs_th_override must be finite and non-negative.")
+
+        for name in ("dy_rel_As", "dy_abs_max", "tap_rel_As", "gaussian_n_sigma"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"COMPMFConfig.{name} must be finite and positive.")
+            setattr(self, name, value)
+
+        self.keep_mass = float(self.keep_mass)
+        if not np.isfinite(self.keep_mass) or self.keep_mass <= 0.0 or self.keep_mass > 1.0:
+            raise ValueError("COMPMFConfig.keep_mass must be finite and in (0, 1].")
+
+    def resolve(self, As: float) -> 'COMPMFRuntimeConfig':
+        As_abs = abs(float(As))
+        if not np.isfinite(As_abs) or As_abs <= 0.0:
+            raise ValueError("As must be finite and positive to resolve COMPMFConfig.")
+
+        dy = self.dy_override if self.dy_override is not None else min(self.dy_abs_max, self.dy_rel_As * As_abs)
+        tap_abs_th = (
+            self.tap_abs_th_override
+            if self.tap_abs_th_override is not None
+            else self.tap_rel_As * As_abs
+        )
+        return COMPMFRuntimeConfig(
+            dy=dy,
+            tap_abs_th=tap_abs_th,
+            keep_mass=self.keep_mass,
+            gaussian_n_sigma=self.gaussian_n_sigma,
+        )
+
+@dataclass(repr=False)
+class COMPMFRuntimeConfig(_PrettyDataclass):
+    """Resolved PMF numerical settings for one COM run."""
+    dy: float                         # unit: V, resolved PMF amplitude grid step
+    tap_abs_th: float                 # unit: V, resolved absolute tap threshold
+    keep_mass: float                  # unit: probability
+    gaussian_n_sigma: float           # unit: sigma
+
+    def __post_init__(self) -> None:
+        for name in ("dy", "gaussian_n_sigma"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"COMPMFRuntimeConfig.{name} must be finite and positive.")
+            setattr(self, name, value)
+
+        self.tap_abs_th = float(self.tap_abs_th)
+        if not np.isfinite(self.tap_abs_th) or self.tap_abs_th < 0.0:
+            raise ValueError("COMPMFRuntimeConfig.tap_abs_th must be finite and non-negative.")
+
+        self.keep_mass = float(self.keep_mass)
+        if not np.isfinite(self.keep_mass) or self.keep_mass <= 0.0 or self.keep_mass > 1.0:
+            raise ValueError("COMPMFRuntimeConfig.keep_mass must be finite and in (0, 1].")
+
+@dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
     """Top-level COM configuration grouped by function."""
     link: LinkConfig                  # unit contract: Hz/s grid owned by LinkConfig
@@ -861,6 +1032,8 @@ class COMConfig(_PrettyDataclass):
     dfe: COMDFEConfig                 # unit contract: tap counts and normalized coefficients
     impairment: COMImpairmentConfig   # unit contract: voltage/noise/jitter settings
     L: int                            # unit: count, number of signal levels
+    DER_0: float                    # unit: dimensionless, target detector error ratio
+    pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
 
 # ========================================
 # Status (all integrated in COMStatus)
@@ -909,10 +1082,52 @@ class COMPath(_PrettyDataclass):
     @property
     def H_ctf(self) -> IEEECOMFilter:
         return self.shared.H_ctf
+
+@dataclass(repr=False)
+class COMDFEStatus(_PrettyDataclass):
+    ts: int                         # unit: sample index on cfg.times
+    pos: int                        # unit: sample phase index, 0 <= pos < per_ui
+    dfe_coeff: np.ndarray           # unit: dimensionless, b(1)..b(N)
+    h_ISI: np.ndarray               # unit: V, sampled residual ISI response
+
+@dataclass(repr=False)
+class COMImpairmentStatus(_PrettyDataclass):
+    As: float                       # unit: V, signal amplitude
+    sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
+    sigma_TX: float                 # unit: V, TX noise amplitude standard deviation
+    h_ISI: np.ndarray               # unit: V, residual ISI pulse samples
+    sigma_ISI: float                # unit: V, ISI amplitude standard deviation
+    h_J: np.ndarray
+    sigma_J: float                  # unit: V, jitter-induced amplitude standard deviation
+    h_XTs_dsamp: list[np.ndarray]
+    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
+    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
+
+@dataclass(repr=False)
+class COMPMFStatus(_PrettyDataclass):
+    """
+    PMF-domain intermediate and final results for 93A.1.7.
+
+    Each PMF is represented on a quantized amplitude axis by Pmf1D. Fields may
+    stay None while the PMF pipeline is being built step by step.
+    """
+    dy: float                          # unit: V, amplitude grid step used for PMF quantization
+    tap_abs_th: float                   # unit: V, absolute tap threshold used for PMF construction
+    p_ISI: Optional[Pmf1D] = None      # ISI distribution from h_ISI(n), Eq. 93A-40
+    p_G: Optional[Pmf1D] = None # Gaussian noise distribution, Eq. 93A-42
+    p_DD: Optional[Pmf1D] = None # dual-Dirac jitter distribution
+    p_XT: Optional[Pmf1D] = None # combined crosstalk distribution, Eq. 93A-44
+    p_combined: Optional[Pmf1D] = None # combined interference and noise distribution, Eq. 93A-45
+    y0: Optional[float] = None         # unit: V, CDF inverse at DER_0
+    A_ni: Optional[float] = None       # unit: V, noise/interference amplitude = abs(y0)
+    COM: Optional[float] = None        # unit: dB, final COM = 20log10(As/A_ni)
     
 @dataclass(repr=False)
 class COMStatus(_PrettyDataclass):
     paths: list[COMPath]
+    dfe: Optional['COMDFEStatus'] = None
+    impairment: Optional['COMImpairmentStatus'] = None
+    pmf: Optional['COMPMFStatus'] = None
 
     @property
     def victim(self) -> COMPath:
@@ -922,7 +1137,10 @@ class COMStatus(_PrettyDataclass):
     def xtalks(self) -> list[COMPath]:
         return self.paths[1:]
 
-# helpers
+# ======================================
+# class helpers
+# ======================================
+
 def _build_txpkg(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool = False) -> IEEECOMsparam:
     """
     Build the 93A TX package S-parameter model.
@@ -1283,80 +1501,6 @@ def _build_paths(
 
     return paths
 
-# 93A.1.6 & 93A.1.7
-@dataclass
-class COMDFEConfig:
-    N_b: int                         # unit: taps, fixed DFE tap count
-    b_max: float | np.ndarray        # unit: dimensionless, normalized fixed DFE coefficient limit
-
-    # 802.3ck floating DFE optional
-    N_bg: int = 0                     # unit: banks, number of DFE floating tap banks
-    N_bf: int = 0                     # unit: taps/bank, number of floating taps per bank
-    N_ts: Optional[int] = None        # unit: taps, floating tap tail starting position
-    N_f: Optional[int] = None         # unit: taps, DFE maximum span including floating bank
-    bb_max: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap upper coefficient limit
-    bb_min: Optional[float | np.ndarray] = None # unit: dimensionless, per-tap lower coefficient limit
-    b_gmax: Optional[float | np.ndarray] = None # unit: dimensionless, floating tap magnitude limit
-    sigma_tmax: Optional[float] = None # unit: dimensionless, floating tap tail RSS limit
-    
-    # derived attribution (not in spec)
-    fixed_upper: np.ndarray = field(init=False)
-    fixed_lower: np.ndarray = field(init=False)
-    float_upper: np.ndarray = field(init=False)
-    float_lower: np.ndarray = field(init=False)
-
-    def __post_init__(self) -> None:
-        "define the indicator mask of dfe coeff" 
-        if (self.N_bg == 0):
-            self.N_ts = None
-        elif (self.N_ts is None):
-            self.N_ts = self.N_b + 1
-        elif (self.N_ts <= self.N_b): 
-            raise ValueError("COMDFEConfig.N_ts has setup error")
-        
-        if (self.N_f is None): 
-            self.N_f = self.N_b
-        elif (self.N_f < self.N_b+self.N_bg*self.N_bf):
-            raise ValueError("COMDFEConfig.N_f/N_bg/N_bf has setup error")
-        if (self.N_bg > 0):
-            if (self.N_bf <= 0):
-                raise ValueError("COMDFEConfig.N_bf has setup error")
-            if (self.N_ts is None) or (self.N_ts > self.N_f):
-                raise ValueError("COMDFEConfig.N_ts/N_f has setup error")
-            if (self.sigma_tmax is None):
-                raise ValueError("COMDFEConfig.sigma_tmax is required when floating DFE is enabled")
-
-        # all bounds will be normalized to np.ndarray with len = N_f
-        if (self.bb_max is None):
-            self.fixed_upper = self.b_max * np.ones(self.N_f)
-        elif isinstance(self.bb_max, np.ndarray):
-            self.fixed_upper = np.r_[self.bb_max, np.zeros(self.N_f - len(self.bb_max))]
-        else:
-            self.fixed_upper = self.bb_max * np.ones(self.N_f)
-
-        if (self.bb_min is None):
-            self.fixed_lower = - self.b_max * np.ones(self.N_f)
-        elif isinstance(self.bb_min, np.ndarray):
-            self.fixed_lower = np.r_[self.bb_min, np.zeros(self.N_f - len(self.bb_min))]
-        else:
-            self.fixed_lower = self.bb_min * np.ones(self.N_f)
-
-        if (self.b_gmax is None):
-            self.float_upper = self.fixed_upper
-            self.float_lower = self.fixed_lower
-        elif isinstance(self.b_gmax, np.ndarray):
-            self.float_upper = np.minimum(
-                self.fixed_upper, 
-                np.r_[np.zeros(self.N_f - len(self.b_gmax)), +self.b_gmax]
-            )
-            self.float_lower = np.maximum(
-                self.fixed_lower,
-                np.r_[np.zeros(self.N_f - len(self.b_gmax)), -self.b_gmax]
-            )
-        else:
-            self.float_upper = +self.b_gmax * np.ones(self.N_f)
-            self.float_lower = -self.b_gmax * np.ones(self.N_f)
-
 def _calculate_float_dfe(h_dsamp:np.ndarray, dfe_cfg: COMDFEConfig) -> np.ndarray:
     "post-(N_b+1) ~ post-(N_f)"
     num_pre = np.argmax(np.abs(h_dsamp))
@@ -1394,109 +1538,6 @@ def _calculate_float_dfe(h_dsamp:np.ndarray, dfe_cfg: COMDFEConfig) -> np.ndarra
 
     return dfe_coeff_float
 
-def _find_pos_and_dfe(
-    h: np.ndarray, 
-    link_cfg: LinkConfig, 
-    dfe_cfg: COMDFEConfig
-) -> tuple[int, int, np.ndarray, np.ndarray]:
-    """
-    Find sampling phase and DFE coefficients.
-
-    Reference:
-    - IEEE 802.3 Annex 93A.1.6, Eq. 93A-25 and Eq. 93A-26.
-
-    Parameters
-    ----------
-    h:
-        Victim pulse response in V, sampled on link_cfg time grid.
-    link_cfg:
-        LinkConfig with per_ui samples/UI and time/frequency grid in SI units.
-    dfe_cfg:
-        DFE config with tap counts and dimensionless normalized coefficient
-        limits.
-    """
-
-    def is_h_dsmp_valid(h_dsamp: np.ndarray) -> int:
-        num_pre = np.argmax(np.abs(h_dsamp))
-        if (h_dsamp[num_pre] < 0):
-            raise Exception("Polarity issue @ _find_pos_and_dfe()")
-        if (num_pre==0 or num_pre+dfe_cfg.N_f>=len(h_dsamp)):
-            raise Exception("Main cursor too close to boundary @ _find_pos_and_dfe()")
-        return num_pre
-
-    M = link_cfg.per_ui
-
-    # step 1: find sample phase by Eq. 93A-25
-    errs = np.zeros(M)
-    ts_candidates = np.zeros(M, dtype=int)
-    for pos in range(M):
-        h_dsamp = h[pos::M]
-        num_pre = is_h_dsmp_valid(h_dsamp)
-        h_0 = h_dsamp[num_pre]
-        ts_candidates[pos] = pos + num_pre * M
-        dfe_post1 = np.clip(
-            h_dsamp[num_pre+1] / h_0, 
-            dfe_cfg.fixed_lower[0], 
-            dfe_cfg.fixed_upper[0]
-        )
-        errs[pos] = h_dsamp[num_pre-1] - h_dsamp[num_pre+1] + h_dsamp[num_pre]*dfe_post1
-    min_err = np.min(abs(errs))
-    tol = max( 1e-12, 1e-9*np.max(np.abs(errs)) )   # allow numerical error
-    pos_candid = np.where(np.abs(errs) <= min_err + tol)[0]
-    peak_idx = int(np.argmax(np.abs(h)))
-    prior_pos_candid = pos_candid[ts_candidates[pos_candid] < peak_idx]
-    if len(prior_pos_candid) > 0:
-        pos = int(prior_pos_candid[np.argmax(ts_candidates[prior_pos_candid])])
-    else:
-        pos = int(pos_candid[np.argmin(np.abs(ts_candidates[pos_candid]-peak_idx))])
-    ts = int(ts_candidates[pos])
-
-    # step 2: determine fixed taps
-    h_dsamp = h[pos::M]
-    num_pre = (ts - pos) // M
-    dfe_raw_fixed = h_dsamp[num_pre+1: num_pre+dfe_cfg.N_b+1] / h_dsamp[num_pre]
-    dfe_coeff_fixed = np.clip(
-        dfe_raw_fixed, 
-        dfe_cfg.fixed_lower[0:dfe_cfg.N_b], 
-        dfe_cfg.fixed_upper[0:dfe_cfg.N_b]
-    )
-
-    # step 3: determine float taps, and combine all dfe coeff as an array: (N_f,)
-    if (dfe_cfg.N_bg==0):
-        dfe_coeff = dfe_coeff_fixed
-    else:
-        dfe_coeff_float = _calculate_float_dfe(h_dsamp, dfe_cfg)    
-        dfe_coeff = np.r_[
-            dfe_coeff_fixed, 
-            np.zeros(dfe_cfg.N_b-len(dfe_coeff_fixed)),
-            dfe_coeff_float
-        ]
-
-    # step 4: calculate h_ISI
-    h_ISI = _calculate_h_ISI(h_dsamp, dfe_coeff)
-
-    return ts, pos, dfe_coeff, h_ISI
-
-@dataclass
-class COMImpairmentConfig:
-    R_LM: float                     # unit: dimensionless, level separation mismatch ratio
-    SNR_TX: float                   # unit: dB, transmitter signal-to-noise ratio
-    sigma_RJ: float                 # unit: UI, random jitter RMS
-    A_DD: float                     # unit: UI, dual-Dirac jitter amplitude
-    eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density
-    DER_0: float                    # unit: dimensionless, target detector error ratio
-
-@dataclass
-class COMImpairmentStatus:
-    As: float                       # unit: V, signal amplitude
-    sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
-    sigma_TX: float                 # unit: V, TX noise amplitude standard deviation
-    h_ISI: np.ndarray               # unit: V, residual ISI pulse samples
-    sigma_ISI: float                # unit: V, ISI amplitude standard deviation
-    sigma_J: float                  # unit: V, jitter-induced amplitude standard deviation
-    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
-    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
-
 def _calculate_h_ISI(h_dsamp: np.ndarray, dfe_coeff: np.ndarray) -> np.ndarray:
     num_pre = np.argmax(np.abs(h_dsamp))
     h_ISI = h_dsamp.copy()
@@ -1504,9 +1545,78 @@ def _calculate_h_ISI(h_dsamp: np.ndarray, dfe_coeff: np.ndarray) -> np.ndarray:
     h_ISI[num_pre+1: num_pre+len(dfe_coeff)+1] -= dfe_coeff * h_dsamp[num_pre]
     return h_ISI
 
-def _calculate_h_J(h: np.ndarray, pos: int, per_ui: int):
-    h_m1 = h[pos-1:: per_ui]
-    h_p1 = h[pos+1:: per_ui]
+def _find_sampling_phase_93a(
+    h: np.ndarray,
+    link_cfg: LinkConfig,
+    dfe_cfg: COMDFEConfig,
+) -> tuple[int, int]:
+    """
+    Find sampling instant and phase by IEEE 802.3 Annex 93A Eq. 93A-25.
+
+    Returns
+    -------
+    tuple[int, int]
+        (ts, pos), where ts is the sample index on link_cfg.times and pos is
+        the sample phase index in [0, link_cfg.per_ui).
+    """
+    def is_h_dsmp_valid(h_dsamp: np.ndarray) -> int:
+        num_pre = np.argmax(np.abs(h_dsamp))
+        if (h_dsamp[num_pre] < 0):
+            raise Exception("Polarity issue @ _find_sampling_phase_93a()")
+        if (num_pre == 0 or num_pre + dfe_cfg.N_f >= len(h_dsamp)):
+            raise Exception("Main cursor too close to boundary @ _find_sampling_phase_93a()")
+        return num_pre
+
+    M = link_cfg.per_ui
+    errs = np.zeros(M)
+    ts_candidates = np.zeros(M, dtype=int)
+
+    for pos in range(M):
+        h_dsamp = h[pos::M]
+        num_pre = is_h_dsmp_valid(h_dsamp)
+        h_0 = h_dsamp[num_pre]
+        ts_candidates[pos] = pos + num_pre * M
+        if (dfe_cfg.N_b == 0):
+            dfe_post1 = 0.0
+        else:
+            dfe_post1 = np.clip(
+                h_dsamp[num_pre+1] / h_0,
+                dfe_cfg.fixed_lower[0],
+                dfe_cfg.fixed_upper[0],
+            )
+        errs[pos] = h_dsamp[num_pre-1] - h_dsamp[num_pre+1] + h_dsamp[num_pre] * dfe_post1
+
+    min_err = np.min(abs(errs))
+    tol = max(1e-12, 1e-9 * np.max(np.abs(errs)))   # allow numerical error
+    pos_candid = np.where(np.abs(errs) <= min_err + tol)[0]
+    peak_idx = int(np.argmax(np.abs(h)))
+    prior_pos_candid = pos_candid[ts_candidates[pos_candid] < peak_idx]
+    if len(prior_pos_candid) > 0:
+        pos = int(prior_pos_candid[np.argmax(ts_candidates[prior_pos_candid])])
+    else:
+        pos = int(pos_candid[np.argmin(np.abs(ts_candidates[pos_candid] - peak_idx))])
+    ts = int(ts_candidates[pos])
+    return ts, pos
+
+def _calculate_h_J(h: np.ndarray, ts: int, per_ui: int) -> np.ndarray:
+    """
+    Calculate sampled jitter sensitivity using the selected sampling instant.
+
+    The finite difference is evaluated at samples with the same phase as ts:
+        h_J[n] = (h[t_s+nT_b+dt] - h[t_s+nT_b-dt]) / (2/M)
+
+    Boundary samples that cannot provide both +/- one oversampled point are
+    skipped instead of relying on Python negative indexing.
+    """
+    pos = int(ts) % per_ui
+    center_idx = np.arange(pos, len(h), per_ui)
+    valid = (center_idx > 0) & (center_idx < len(h) - 1)
+    center_idx = center_idx[valid]
+    if len(center_idx) == 0:
+        raise ValueError("No valid samples for h_J finite difference.")
+
+    h_m1 = h[center_idx - 1]
+    h_p1 = h[center_idx + 1]
     h_J = (h_p1 - h_m1) / (2/per_ui)
     return h_J
 
@@ -1518,61 +1628,135 @@ def _find_pos_xtalk(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
     h_XT_dsamp = h_XT[i:: per_ui]
     return i, h_XT_dsamp
 
-def _calculate_impairments(
-    h: np.ndarray,
-    ts: int,
-    pos: int,
-    dfe_coeff: np.ndarray,
-    h_XTs: list[np.ndarray],
-    cfg: COMConfig
-) -> COMImpairmentStatus:
+def _build_pmf_interference(
+    p_sig: Pmf1D, 
+    h: np.ndarray, 
+    pmf_cfg: COMPMFRuntimeConfig, 
+    name: Optional[str] = None
+) -> Pmf1D:
+    "Eq. 93A-39"
+    return p_sig.copy().fir_filter(
+        fir = h,
+        keep_mass = pmf_cfg.keep_mass,
+        dx_ref = pmf_cfg.dy,
+        tap_abs_th = pmf_cfg.tap_abs_th,
+        max_taps = None,
+        name = name
+    )
 
-    L = cfg.L
-    h_dsamp = h[pos:: cfg.link.per_ui]
-    num_pre = (ts - pos) // cfg.link.per_ui
-    h_main = h_dsamp[num_pre]
-    imp = cfg.impairment
+def _build_pmf_G(imp_stat: COMImpairmentStatus, imp_cfg: COMImpairmentConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
+    "Eq. 93A-41 and 93A-42"
+    sigma_G = np.sqrt( 
+        imp_stat.sigma_TX**2 + imp_stat.sigma_N**2 +
+        imp_cfg.sigma_RJ**2 * imp_stat.sigma_X**2 * np.sum(imp_stat.h_J**2) 
+    )
+    return Pmf1D.gaussian(
+        mu=0,
+        sigma=sigma_G,
+        dx=pmf_cfg.dy,
+        n_sigma=pmf_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="Noise"
+    )
 
-    # As
-    As = imp.R_LM * h_main / (L - 1)
-
-    # sigma_x
-    sigma_X = np.sqrt( (L**2 - 1) / (3 * (L-1)**2) )
-
-    # sigma_TX
-    sigma_TX = np.sqrt( h_main**2 * 10*np.log10(imp.SNR_TX/10) )
-
-    # sigma_ISI
-    h_ISI = _calculate_h_ISI(h_dsamp, dfe_coeff)
-    sigma_ISI = np.sqrt( sigma_X**2 * np.sum(h_ISI**2) )
-
-    # sigma_J
-    h_J = _calculate_h_J(h, pos, cfg.link.per_ui)
-    sigma_J = np.sqrt( (imp.A_DD**2+imp.sigma_RJ**2) * sigma_X**2 * np.sum(h_J**2) )
-
-    # sigma_XT
-    var_XT = 0
+def _build_pmf_XT_all(
+    p_sig: Pmf1D, 
+    h_XTs: list[np.ndarray], 
+    pmf_cfg: COMPMFRuntimeConfig, 
+) -> Pmf1D:
+    p_XT = Pmf1D.multi_dirac(np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy, unit="volt", name="XT_all")
     for h_XT in h_XTs:
-        i, h_XT_dsamp = _find_pos_xtalk(h_XT, cfg.link.per_ui) 
-        var_XT += sigma_X**2 * np.sum(h_XT_dsamp**2)
-    sigma_XT = np.sqrt( var_XT )
-
-    # sigma_N
-    
-
-@dataclass
-class COMPMFConfig:
-    pass
+        p_XT_new = _build_pmf_interference(
+            p_sig, 
+            h_XT, 
+            pmf_cfg,
+            name="XT",
+        )
+        p_XT = p_XT.combine(p_XT_new, name="XT_all")
+    p_XT.name = "XT_all"
+    return p_XT
 
 #%% conduct search in this class
 class COM:
     def __init__(self, cfg: COMConfig):
         self.cfg = cfg
+        self.status: Optional[COMStatus] = None
 
     def run(self) -> COMStatus:
-        return COMStatus(paths=self.build_all_paths())
+        """
+        Run COM for the current scalar configuration.
 
-    # LV-1
+        This method is intentionally kept as the public entry point. Today it
+        runs one concrete COMConfig point. When the COM search space is added,
+        run() should own the sweep and delegate each candidate to _run_once().
+        """
+        self.status = self._run_once()
+        return self.status
+
+    def _run_once(self) -> COMStatus:
+        """
+        Run one concrete COMConfig point without sweeping tunable parameters.
+
+        This is the debug-friendly single-candidate pipeline:
+        paths -> DFE/sample phase -> impairments -> PMF/COM.
+        """
+        paths = self.build_all_paths()
+        dfe_status = self.find_pos_and_dfe(h=paths[0].pulse.ir)
+        imp_status = self.calculate_impairments(
+            h=paths[0].pulse.ir,
+            dfe_status=dfe_status,
+            h_XTs=[path.pulse.ir for path in paths[1:]],
+        )
+        pmf_status = self.calculate_COM(imp_status)
+        return COMStatus(paths=paths, dfe=dfe_status, impairment=imp_status, pmf=pmf_status)
+
+    # ------------------
+    # proxy
+    # ------------------
+    def _require_status(self) -> COMStatus:
+        if self.status is None:
+            raise RuntimeError("COM status is not available. Run COM.run() first.")
+        return self.status
+
+    @property
+    def per_ui(self) -> int:
+        return self.cfg.link.per_ui
+
+    @property
+    def paths(self) -> list[COMPath]:
+        return self._require_status().paths
+
+    @property
+    def victim(self) -> COMPath:
+        return self._require_status().victim
+
+    @property
+    def xtalks(self) -> list[COMPath]:
+        return self._require_status().xtalks
+
+    @property
+    def h(self) -> np.ndarray:
+        """Victim pulse response h^(0)(t), as status.victim.pulse.ir."""
+        return self.victim.pulse.ir
+
+    @property
+    def h_XT(self) -> list[np.ndarray]:
+        """Crosstalk pulse responses h^(k)(t), k > 0."""
+        return [path.pulse.ir for path in self.xtalks]
+
+    @property
+    def dfe_status(self) -> Optional[COMDFEStatus]:
+        return self._require_status().dfe
+
+    @property
+    def impairment_status(self) -> Optional[COMImpairmentStatus]:
+        return self._require_status().impairment
+
+    @property
+    def pmf_status(self) -> Optional[COMPMFStatus]:
+        return self._require_status().pmf
+
+    # LV-1 methods
     def build_all_paths(self) -> list[COMPath]:
         """
         Build all COM paths.
@@ -1585,6 +1769,185 @@ class COM:
         channels = _build_channel_under_test(self.cfg.channel)
         shared = _build_shared_path(self.cfg, channels[0].freqs)
         return _build_paths(self.cfg, shared, channels)
+
+    def find_pos_and_dfe(self, h: np.ndarray) -> COMDFEStatus:
+        """
+        Find sampling phase and DFE coefficients.
+
+        Reference:
+        - IEEE 802.3 Annex 93A.1.6, Eq. 93A-25 and Eq. 93A-26.
+
+        Parameters
+        ----------
+        h:
+            Victim pulse response in V, sampled on self.cfg.link time grid.
+
+        Uses
+        ----
+        self.cfg.link:
+            LinkConfig with per_ui samples/UI and time/frequency grid in SI units.
+        self.cfg.dfe:
+            DFE config with tap counts and dimensionless normalized coefficient limits.
+        """
+        link_cfg = self.cfg.link
+        dfe_cfg = self.cfg.dfe
+
+        M = link_cfg.per_ui
+
+        # step 1: find sample phase by Eq. 93A-25
+        ts, pos = _find_sampling_phase_93a(h, link_cfg, dfe_cfg)
+
+        # step 2: determine fixed taps
+        h_dsamp = h[pos::M]
+        num_pre = (ts - pos) // M
+        dfe_raw_fixed = h_dsamp[num_pre+1: num_pre+dfe_cfg.N_b+1] / h_dsamp[num_pre]
+        dfe_coeff_fixed = np.clip(
+            dfe_raw_fixed, 
+            dfe_cfg.fixed_lower[0:dfe_cfg.N_b], 
+            dfe_cfg.fixed_upper[0:dfe_cfg.N_b]
+        )
+
+        # step 3: determine float taps, and combine all dfe coeff as an array: (N_f,)
+        if (dfe_cfg.N_bg==0):
+            dfe_coeff = dfe_coeff_fixed
+        else:
+            dfe_coeff_float = _calculate_float_dfe(h_dsamp, dfe_cfg)    
+            dfe_coeff = np.r_[
+                dfe_coeff_fixed, 
+                np.zeros(dfe_cfg.N_b-len(dfe_coeff_fixed)),
+                dfe_coeff_float
+            ]
+
+        # step 4: calculate h_ISI
+        h_ISI = _calculate_h_ISI(h_dsamp, dfe_coeff)
+
+        return COMDFEStatus(ts=ts, pos=pos, dfe_coeff=dfe_coeff, h_ISI=h_ISI)
+
+    def calculate_impairments(
+        self,
+        h: np.ndarray,
+        dfe_status: COMDFEStatus,
+        h_XTs: list[np.ndarray],
+    ) -> COMImpairmentStatus:
+
+        L = self.cfg.L
+        link_cfg = self.cfg.link
+        imp_cfg = self.cfg.impairment
+        ft_cfg = self.cfg.filter
+        
+        ts = dfe_status.ts
+        pos = dfe_status.pos
+        h_ISI = dfe_status.h_ISI
+        h_dsamp = h[pos:: self.per_ui]
+        num_pre = (ts - pos) // self.per_ui
+        h_main = h_dsamp[num_pre]
+
+        # As
+        As = imp_cfg.R_LM * h_main / (L - 1)
+
+        # sigma_x
+        sigma_X = np.sqrt( (L**2 - 1) / (3 * (L-1)**2) )
+
+        # sigma_TX
+        sigma_TX = np.sqrt(h_main**2 * 10**(-imp_cfg.SNR_TX / 10))
+
+        # sigma_ISI
+        sigma_ISI = np.sqrt( sigma_X**2 * np.sum(h_ISI**2) )
+
+        # sigma_J
+        h_J = _calculate_h_J(h, ts, self.per_ui)
+        sigma_J = np.sqrt( (imp_cfg.A_DD**2+imp_cfg.sigma_RJ**2) * sigma_X**2 * np.sum(h_J**2) )
+
+        # sigma_XT
+        var_XT = 0
+        h_XTs_dsamp = []
+        for h_XT in h_XTs:
+            i, h_XT_dsamp = _find_pos_xtalk(h_XT, self.per_ui) 
+            var_XT += sigma_X**2 * np.sum(h_XT_dsamp**2)
+            h_XTs_dsamp.append(h_XT_dsamp)
+        sigma_XT = np.sqrt( var_XT )
+
+        # sigma_N
+        noise_psd = OneSidePSD.from_constant(link_cfg.freqs, imp_cfg.eta_0)
+        noise_filter = (
+            _build_H_r(link_cfg, ft_cfg)
+            .cascade_tf(_build_H_ctf(link_cfg, ft_cfg))
+        )
+        sigma_N = noise_psd.filtered_by(noise_filter).to_sigma()
+
+        return COMImpairmentStatus(
+            As=As,
+            sigma_X=sigma_X,
+            sigma_TX=sigma_TX,
+            h_ISI=h_ISI,
+            sigma_ISI=sigma_ISI,
+            h_J=h_J,
+            sigma_J=sigma_J,
+            h_XTs_dsamp=h_XTs_dsamp,
+            sigma_XT=sigma_XT,
+            sigma_N=sigma_N,
+        )
+
+    def calculate_COM(self, imp_status: COMImpairmentStatus) -> COMPMFStatus:
+        L = self.cfg.L
+        As = imp_status.As
+        imp_cfg = self.cfg.impairment
+
+        # Resolve PMF runtime config after As is known.
+        pmf_cfg = self.cfg.pmf.resolve(As)
+
+        # tx signal pmf
+        p_sig = Pmf1D.multi_dirac(
+            values = np.array([2*l/(L-1)-1 for l in range(L)]),
+            probs = 1/L * np.ones(L),
+            dx = pmf_cfg.dy,
+            unit = "",
+            name = "ideal_signal"
+        )
+
+        # ISI pmf
+        p_ISI = _build_pmf_interference(
+            p_sig, 
+            imp_status.h_ISI, 
+            pmf_cfg,
+            name="ISI"
+        )
+
+        # Gaussian Noise pmf
+        p_G = _build_pmf_G(imp_status, imp_cfg, pmf_cfg)
+
+        # Dual-Dirac jitter pmf
+        p_DD = _build_pmf_interference(
+            p_sig, 
+            imp_cfg.A_DD*imp_status.h_J, 
+            pmf_cfg,
+            name="Dual-Dirac"
+        )
+
+        # Xtalk pmf
+        p_XT = _build_pmf_XT_all(p_sig, imp_status.h_XTs_dsamp, pmf_cfg)
+        
+        # combined pmf, A_ni
+        p_combined = p_ISI.combine(p_G).combine(p_DD).combine(p_XT)
+        y0 = p_combined.quantile(self.cfg.DER_0)
+        A_ni = abs(y0)
+
+        # COM
+        COM = 20 * np.log10( As / A_ni )
+
+        return COMPMFStatus(
+            dy=pmf_cfg.dy,
+            tap_abs_th=pmf_cfg.tap_abs_th,
+            p_ISI=p_ISI,
+            p_G=p_G,
+            p_DD=p_DD,
+            p_XT=p_XT,
+            p_combined=p_combined,
+            y0=y0,
+            A_ni=A_ni,
+            COM=COM
+        )
+
 
 def _smoke_test_com_path() -> COMStatus:
     """
@@ -1639,6 +2002,19 @@ def _smoke_test_com_path() -> COMStatus:
             z_p2=None,
             Z_c2=78.2,
         ),
+        dfe=COMDFEConfig(
+            N_b=5,
+            b_max=0.5,
+        ),
+        impairment=COMImpairmentConfig(
+            R_LM=0.95,
+            SNR_TX=30.0,
+            sigma_RJ=0.01,
+            A_DD=0.01,
+            eta_0=1e-18,
+        ),
+        L=4,
+        DER_0=1e-5,
     )
 
     status = COM(cfg).run()
