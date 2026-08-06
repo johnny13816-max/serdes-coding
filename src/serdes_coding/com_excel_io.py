@@ -85,7 +85,7 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
             N_b=int(_fixed_float(fixed, "N_b")),
             b_max=_fixed_float(fixed, "b_max"),
         ),
-        impairment=COMImpairmentConfig(
+        imp=COMImpairmentConfig(
             R_LM=_fixed_float(fixed, "R_LM"),
             SNR_TX=_fixed_float(fixed, "SNR_TX"),
             sigma_RJ=_fixed_float(fixed, "sigma_RJ"),
@@ -194,7 +194,7 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
             N_b=int(_scalar_setting(table, "N_b")),
             b_max=_scalar_setting(table, "b_max(1)"),
         ),
-        impairment=COMImpairmentConfig(
+        imp=COMImpairmentConfig(
             R_LM=_scalar_setting(table, "R_LM"),
             SNR_TX=_scalar_setting(table, "SNR_TX"),
             sigma_RJ=_scalar_setting(table, "sigma_RJ"),

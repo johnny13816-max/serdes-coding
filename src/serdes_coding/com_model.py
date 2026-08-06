@@ -861,14 +861,14 @@ class COMPMFConfig(_PrettyDataclass):
     PMF-domain configuration for 93A.1.7 interference/noise distributions.
 
     This config owns only amplitude-axis and PMF numerical controls. It does
-    not own channel construction, DFE selection, or impairment statistics.
+    not own channel construction, DFE selection, or imp statistics.
     """
     dy_override: Optional[float] = None # unit: V, explicit PMF amplitude grid step; if None derive from As
     dy_rel_As: float = 1e-3           # unit: dimensionless, default dy limit = 0.1% of As (from spec)
     dy_abs_max: float = 0.01e-3       # unit: V, default dy absolute limit = 0.01 mV (from spec)
     tap_abs_th_override: Optional[float] = None # unit: V, explicit tap threshold; if None derive from As
     tap_rel_As: float = 1e-3          # unit: dimensionless, ignore pulse terms below 0.1% of As (from spec)
-    keep_mass: float = 1.0            # unit: probability, optional PMF truncation target
+    keep_mass: float = float(1 - 1e-5) # unit: probability, optional PMF truncation target
     gaussian_n_sigma: float = 8.0     # unit: sigma, half span for Gaussian PMF construction
 
     def __post_init__(self) -> None:
@@ -945,7 +945,7 @@ class COMConfig(_PrettyDataclass):
     rxpkg: COMPkgConfig               # unit contract: F/H/mm/ohm shared RX package parameters
 
     dfe: COMDFEConfig                 # unit contract: tap counts and normalized coefficients
-    impairment: COMImpairmentConfig   # unit contract: voltage/noise/jitter settings
+    imp: COMImpairmentConfig          # unit contract: voltage/noise/jitter settings
     L: int                            # unit: count, number of signal levels
     DER_0: float                    # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
@@ -1104,14 +1104,33 @@ class COMPMFStatus(_PrettyDataclass):
     A_ni: Optional[float] = None       # unit: V, noise/interference amplitude = abs(y0)
     COM: Optional[float] = None        # unit: dB, final COM = 20log10(As/A_ni)
 
-def _plt(use_agg: bool = False) -> Any:
-    if use_agg:
-        import matplotlib
-
-        matplotlib.use("Agg", force=True)
+def _plt() -> Any:
+    """Import pyplot without changing the active Matplotlib backend."""
     import matplotlib.pyplot as plt
 
     return plt
+
+def _subplots(save_path: str, *args: Any, **kwargs: Any) -> tuple[Any, Any]:
+    """
+    Create a figure without changing Matplotlib's global backend.
+
+    If save_path is provided, use a local Agg canvas so batch export does not
+    require a GUI backend and does not pollute an interactive debug session.
+    If save_path is empty, use pyplot so the user's current interactive backend
+    remains responsible for display.
+    """
+    if save_path:
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+
+        figsize = kwargs.pop("figsize", None)
+        fig = Figure(figsize=figsize)
+        FigureCanvasAgg(fig)
+        ax = fig.subplots(*args, **kwargs)
+        return fig, ax
+
+    plt = _plt()
+    return plt.subplots(*args, **kwargs)
 
 def _plot_save_path(save_path: str, filename: str) -> str:
     if not save_path:
@@ -1126,12 +1145,11 @@ def _plot_save_path(save_path: str, filename: str) -> str:
     return str(path / filename)
 
 def _finish_figure(fig: Any, save_path: str) -> None:
-    plt = _plt(use_agg=bool(save_path))
     fig.tight_layout()
     if save_path:
         fig.savefig(save_path, bbox_inches="tight")
-        plt.close(fig)
     else:
+        plt = _plt()
         fig.canvas.draw_idle()
         plt.show()
 
@@ -1213,7 +1231,7 @@ def _write_json(path: Path, data: dict[str, object]) -> None:
 class COMStatus(_PrettyDataclass):
     paths: list[COMPath]
     dfe: Optional['COMDFEStatus'] = None
-    impairment: Optional['COMImpairmentStatus'] = None
+    imp: Optional['COMImpairmentStatus'] = None
     pmf: Optional['COMPMFStatus'] = None
     FOM: Optional[float] = None        # unit: dB, 93A.1.6 figure of merit
 
@@ -1242,8 +1260,8 @@ class COMStatus(_PrettyDataclass):
             Optional x-axis limits in UI after each path main cursor is shifted
             to 0 UI.
         """
-        plt = _plt(use_agg=bool(save_path))
-        fig, ax = plt.subplots()
+        output_file = _plot_save_path(save_path, "path_pulses.png")
+        fig, ax = _subplots(output_file)
         for idx, path in enumerate(self.paths):
             ir = path.pulse.ir
             x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(ir)))]
@@ -1256,7 +1274,7 @@ class COMStatus(_PrettyDataclass):
             ax.set_xlim(*xlim_ui)
         ax.grid(True)
         ax.legend()
-        _finish_figure(fig, _plot_save_path(save_path, "path_pulses.png"))
+        _finish_figure(fig, output_file)
         return ax
 
     def plot_path_sbr(
@@ -1279,8 +1297,8 @@ class COMStatus(_PrettyDataclass):
         normalize_main_cursor:
             If True, normalize each SBR by its own main cursor magnitude.
         """
-        plt = _plt(use_agg=bool(save_path))
-        fig, ax = plt.subplots()
+        output_file = _plot_save_path(save_path, "path_sbr.png")
+        fig, ax = _subplots(output_file)
         for idx, path in enumerate(self.paths):
             sbr = path.pulse.sbr.copy()
             main = float(np.max(np.abs(sbr)))
@@ -1296,10 +1314,68 @@ class COMStatus(_PrettyDataclass):
             ax.set_xlim(*xlim_ui)
         ax.grid(True)
         ax.legend()
-        _finish_figure(fig, _plot_save_path(save_path, "path_sbr.png"))
+        _finish_figure(fig, output_file)
         return ax
 
-    def plot_dfe_summary(self, save_path: str = "") -> Any:
+    def plot_path_S_all_IL(
+        self,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+    ) -> Any:
+        """
+        Plot augmented signal-path insertion loss for all paths.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``path_S_all_IL.png``.
+        xlim:
+            Optional frequency limits in Hz.
+        """
+        output_file = _plot_save_path(save_path, "path_S_all_IL.png")
+        fig, ax = _subplots(output_file)
+        for idx, path in enumerate(self.paths):
+            path.S_all.plot_IL(ax=ax, xlim=xlim, label=_path_label(idx, path))
+
+        ax.set_title("Augmented Signal Path IL, S_all")
+        _finish_figure(fig, output_file)
+        return ax
+
+    def plot_path_H21_tf(
+        self,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+        ylim: Optional[tuple[float, float]] = (-80.0, 5.0),
+    ) -> Any:
+        """
+        Plot terminated voltage transfer function H21 for all paths.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``path_H21_tf.png``.
+        xlim:
+            Optional frequency limits in Hz. If None, LinkSegment uses 0 to fb.
+        ylim:
+            Optional y-axis limits in dB. The default report view clips extreme
+            high-frequency taper values so in-band channel differences remain visible.
+        """
+        output_file = _plot_save_path(save_path, "path_H21_tf.png")
+        fig, ax = _subplots(output_file)
+        for idx, path in enumerate(self.paths):
+            path.H_21.plot_tf(ax=ax, xlim=xlim, ylim=ylim, label=_path_label(idx, path))
+
+        ax.set_title("Voltage Transfer Function H21")
+        _finish_figure(fig, output_file)
+        return ax
+
+    def plot_dfe_summary(
+        self,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+    ) -> Any:
         """
         Plot DFE coefficients and residual ISI samples.
 
@@ -1308,63 +1384,70 @@ class COMStatus(_PrettyDataclass):
         save_path:
             Optional file path or directory. Directory mode writes
             ``dfe_summary.png``.
+        xlim_ui:
+            Optional residual-ISI x-axis limits in UI, with the main cursor at 0.
         """
         if self.dfe is None:
             raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
 
-        plt = _plt(use_agg=bool(save_path))
-        fig, axes = plt.subplots(2, 1, figsize=(7, 6))
+        output_file = _plot_save_path(save_path, "dfe_summary.png")
+        fig, axes = _subplots(output_file, 2, 1, figsize=(7, 6))
         tap_idx = np.arange(1, len(self.dfe.dfe_coeff) + 1)
         axes[0].bar(tap_idx, self.dfe.dfe_coeff)
         axes[0].set_title("DFE Coefficients")
         axes[0].set_xlabel("Tap index")
         axes[0].set_ylabel("Coefficient")
+        axes[0].set_xlim(0.5, max(1.5, len(self.dfe.dfe_coeff) + 0.5))
         axes[0].grid(True)
 
-        isi_idx = np.arange(len(self.dfe.h_ISI))
-        axes[1].bar(isi_idx, self.dfe.h_ISI)
+        per_ui = self.victim.pulse.cfg.per_ui
+        num_pre = (self.dfe.ts - self.dfe.pos) // per_ui
+        isi_ui = np.arange(len(self.dfe.h_ISI), dtype=float) - float(num_pre)
+        axes[1].bar(isi_ui, self.dfe.h_ISI, width=0.8)
         axes[1].set_title("Residual ISI Samples")
-        axes[1].set_xlabel("Sample index")
+        axes[1].set_xlabel("Discrete time (UI, main cursor = 0)")
         axes[1].set_ylabel("Amplitude (V)")
+        if xlim_ui is not None:
+            axes[1].set_xlim(*xlim_ui)
         axes[1].grid(True)
 
-        _finish_figure(fig, _plot_save_path(save_path, "dfe_summary.png"))
+        _finish_figure(fig, output_file)
         return axes
 
-    def plot_impairment_summary(self, save_path: str = "") -> Any:
+    def plot_imp_summary(self, save_path: str = "") -> Any:
         """
-        Plot impairment RMS components as a bar chart.
+        Plot imp RMS components as a bar chart.
 
         Parameters
         ----------
         save_path:
             Optional file path or directory. Directory mode writes
-            ``impairment_summary.png``.
+            ``imp_summary.png``.
         """
-        if self.impairment is None:
-            raise ValueError("COMStatus.impairment is None; run impairment calculation first.")
+        if self.imp is None:
+            raise ValueError("COMStatus.imp is None; run imp calculation first.")
 
         labels = ["TX", "ISI", "J", "XT", "N"]
         values = [
-            self.impairment.sigma_TX,
-            self.impairment.sigma_ISI,
-            self.impairment.sigma_J,
-            self.impairment.sigma_XT,
-            self.impairment.sigma_N,
+            self.imp.sigma_TX,
+            self.imp.sigma_ISI,
+            self.imp.sigma_J,
+            self.imp.sigma_XT,
+            self.imp.sigma_N,
         ]
 
-        plt = _plt(use_agg=bool(save_path))
-        fig, ax = plt.subplots()
+        output_file = _plot_save_path(save_path, "imp_summary.png")
+        fig, ax = _subplots(output_file)
         ax.bar(labels, values)
-        ax.set_title("Impairment RMS Breakdown")
+        ax.set_title("Imp RMS Breakdown")
         ax.set_ylabel("RMS amplitude (V)")
         ax.grid(True, axis="y")
-        text = f"As={self.impairment.As:.4e} V"
+        text = f"As={self.imp.As:.4e} V"
         if self.FOM is not None:
             text += f"\nFOM={self.FOM:.2f} dB"
         ax.text(0.98, 0.95, text, ha="right", va="top", transform=ax.transAxes)
 
-        _finish_figure(fig, _plot_save_path(save_path, "impairment_summary.png"))
+        _finish_figure(fig, output_file)
         return ax
 
     def plot_pmf_summary(self, save_path: str = "") -> Any:
@@ -1388,8 +1471,8 @@ class COMStatus(_PrettyDataclass):
             ("combined", self.pmf.p_combined),
         ]
 
-        plt = _plt(use_agg=bool(save_path))
-        fig, axes = plt.subplots(2, 1, figsize=(7, 6))
+        output_file = _plot_save_path(save_path, "pmf_summary.png")
+        fig, axes = _subplots(output_file, 2, 1, figsize=(7, 6))
         for label, p in components:
             if p is not None:
                 axes[0].plot(p.x, p.pmf, label=label)
@@ -1418,7 +1501,7 @@ class COMStatus(_PrettyDataclass):
         if title:
             fig.suptitle(", ".join(title))
 
-        _finish_figure(fig, _plot_save_path(save_path, "pmf_summary.png"))
+        _finish_figure(fig, output_file)
         return axes
 
     def plot_summary(self, save_path: str = "") -> dict[str, Any]:
@@ -1433,11 +1516,12 @@ class COMStatus(_PrettyDataclass):
         """
         outputs: dict[str, Any] = {}
         outputs["path_pulses"] = self.plot_path_pulses(save_path)
-        outputs["path_sbr"] = self.plot_path_sbr(save_path)
+        outputs["path_S_all_IL"] = self.plot_path_S_all_IL(save_path)
+        outputs["path_H21_tf"] = self.plot_path_H21_tf(save_path)
         if self.dfe is not None:
             outputs["dfe_summary"] = self.plot_dfe_summary(save_path)
-        if self.impairment is not None:
-            outputs["impairment_summary"] = self.plot_impairment_summary(save_path)
+        if self.imp is not None:
+            outputs["imp_summary"] = self.plot_imp_summary(save_path)
         if self.pmf is not None:
             outputs["pmf_summary"] = self.plot_pmf_summary(save_path)
         return outputs
@@ -1489,7 +1573,7 @@ class COMStatus(_PrettyDataclass):
             "FOM": _json_scalar(self.FOM),
             "paths": paths_meta,
             "dfe": None,
-            "impairment": None,
+            "imp": None,
             "pmf": None,
         }
 
@@ -1501,20 +1585,20 @@ class COMStatus(_PrettyDataclass):
                 "h_ISI": _array_meta(arrays, "dfe.h_ISI", self.dfe.h_ISI),
             }
 
-        if self.impairment is not None:
-            summary["impairment"] = {
-                "As": self.impairment.As,
-                "sigma_X": self.impairment.sigma_X,
-                "sigma_TX": self.impairment.sigma_TX,
-                "sigma_ISI": self.impairment.sigma_ISI,
-                "sigma_J": self.impairment.sigma_J,
-                "sigma_XT": self.impairment.sigma_XT,
-                "sigma_N": self.impairment.sigma_N,
-                "h_ISI": _array_meta(arrays, "impairment.h_ISI", self.impairment.h_ISI),
-                "h_J": _array_meta(arrays, "impairment.h_J", self.impairment.h_J),
+        if self.imp is not None:
+            summary["imp"] = {
+                "As": self.imp.As,
+                "sigma_X": self.imp.sigma_X,
+                "sigma_TX": self.imp.sigma_TX,
+                "sigma_ISI": self.imp.sigma_ISI,
+                "sigma_J": self.imp.sigma_J,
+                "sigma_XT": self.imp.sigma_XT,
+                "sigma_N": self.imp.sigma_N,
+                "h_ISI": _array_meta(arrays, "imp.h_ISI", self.imp.h_ISI),
+                "h_J": _array_meta(arrays, "imp.h_J", self.imp.h_J),
                 "h_XTs_dsamp": [
-                    _array_meta(arrays, f"impairment.h_XTs_dsamp.{idx}", h)
-                    for idx, h in enumerate(self.impairment.h_XTs_dsamp)
+                    _array_meta(arrays, f"imp.h_XTs_dsamp.{idx}", h)
+                    for idx, h in enumerate(self.imp.h_XTs_dsamp)
                 ],
             }
 
@@ -1597,8 +1681,8 @@ class COMSearchStatus(_PrettyDataclass):
         if len(ok_rows) == 0:
             raise ValueError("COMSearchStatus.rows contains no successful rows to plot.")
 
-        plt = _plt(use_agg=bool(save_path))
-        fig, ax = plt.subplots()
+        output_file = _plot_save_path(save_path, "search_fom_trace.png")
+        fig, ax = _subplots(output_file)
         ax.plot([row.idx for row in ok_rows], [row.FOM for row in ok_rows], marker="o", linewidth=1.0)
         ax.axhline(self.best_row.FOM, linestyle="--", color="tab:red", label=f"best FOM={self.best_row.FOM:.2f} dB")
         ax.set_title("Search FOM Trace")
@@ -1606,7 +1690,7 @@ class COMSearchStatus(_PrettyDataclass):
         ax.set_ylabel("FOM (dB)")
         ax.grid(True)
         ax.legend()
-        _finish_figure(fig, _plot_save_path(save_path, "search_fom_trace.png"))
+        _finish_figure(fig, output_file)
         return ax
 
     def plot_top_candidates(self, save_path: str = "", top_n: int = 10) -> Any:
@@ -1633,8 +1717,8 @@ class COMSearchStatus(_PrettyDataclass):
         labels = [f"{row.idx}\n({row.candidate.g_DC:.1f},{row.candidate.g_DC2:.1f})" for row in rows]
         values = [row.FOM for row in rows]
 
-        plt = _plt(use_agg=bool(save_path))
-        fig, ax = plt.subplots(figsize=(max(7, 0.7 * len(rows)), 4))
+        output_file = _plot_save_path(save_path, "search_top_candidates.png")
+        fig, ax = _subplots(output_file, figsize=(max(7, 0.7 * len(rows)), 4))
         ax.bar(np.arange(len(rows)), values)
         ax.set_xticks(np.arange(len(rows)))
         ax.set_xticklabels(labels)
@@ -1642,7 +1726,7 @@ class COMSearchStatus(_PrettyDataclass):
         ax.set_xlabel("Candidate idx\n(g_DC, g_DC2)")
         ax.set_ylabel("FOM (dB)")
         ax.grid(True, axis="y")
-        _finish_figure(fig, _plot_save_path(save_path, "search_top_candidates.png"))
+        _finish_figure(fig, output_file)
         return ax
 
     def plot_summary(self, save_path: str = "") -> dict[str, Any]:
@@ -2264,7 +2348,7 @@ def _build_pmf_XT_all(
 
 def _calculate_FOM(imp_status: COMImpairmentStatus) -> float:
     """
-    Calculate the 93A.1.6 FOM from signal amplitude and RSS impairments.
+    Calculate the 93A.1.6 FOM from signal amplitude and RSS imp terms.
 
     This metric is used only to select the best variable equalizer candidate.
     The final COM still comes from the 93A.1.7 PMF calculation.
@@ -2299,10 +2383,10 @@ def _search_row_from_status(
     candidate: COMSearchCandidate,
     status: COMStatus,
 ) -> COMSearchRow:
-    if status.dfe is None or status.impairment is None or status.FOM is None:
-        raise ValueError("Search candidate status must include DFE, impairment, and FOM.")
+    if status.dfe is None or status.imp is None or status.FOM is None:
+        raise ValueError("Search candidate status must include DFE, imp, and FOM.")
 
-    imp = status.impairment
+    imp = status.imp
     dfe = status.dfe
     return COMSearchRow(
         idx=idx,
@@ -2352,18 +2436,19 @@ class COM:
         Run one concrete COMConfig point without sweeping tunable parameters.
 
         This is the debug-friendly single-candidate pipeline:
-        paths -> DFE/sample phase -> impairments -> FOM -> optional PMF/COM.
+        paths -> DFE/sample phase -> imp -> FOM -> optional PMF/COM.
         """
         paths = self.build_all_paths()
+        self._validate_victim_time_alignment(paths[0])
         dfe_status = self.find_pos_and_dfe(h=paths[0].pulse.ir)
-        imp_status = self.calculate_impairments(
+        imp_status = self.calculate_imp(
             h=paths[0].pulse.ir,
             dfe_status=dfe_status,
             h_XTs=[path.pulse.ir for path in paths[1:]],
         )
         FOM = _calculate_FOM(imp_status)
         pmf_status = self.calculate_COM(imp_status) if calculate_pmf else None
-        return COMStatus(paths=paths, dfe=dfe_status, impairment=imp_status, pmf=pmf_status, FOM=FOM)
+        return COMStatus(paths=paths, dfe=dfe_status, imp=imp_status, pmf=pmf_status, FOM=FOM)
 
     def _run_search(self, search: COMSearchConfig) -> COMSearchStatus:
         candidates = search.candidates(self.cfg.filter)
@@ -2409,6 +2494,18 @@ class COM:
             num_error=num_error,
         )
 
+    def _validate_victim_time_alignment(self, victim: COMPath) -> None:
+        """
+        Guard victim H21/pulse against precursor wrap into the IFFT record tail.
+
+        This check is intentionally applied to the victim path only. ISI and DFE
+        are defined from the victim pulse response, while crosstalk paths use
+        separate phase selection and should not inherit the victim main-cursor
+        alignment contract.
+        """
+        victim.H_21.validate_aligned_ir(victim.H_21.ir, source_name="victim H_21 aligned_ir")
+        victim.pulse.validate_aligned_ir(victim.pulse.ir, source_name="victim pulse aligned_ir")
+
     # ------------------
     # proxy
     # ------------------
@@ -2441,6 +2538,23 @@ class COM:
         return self.victim.pulse.ir
 
     @property
+    def h_dsamp(self) -> np.ndarray:
+        """Victim pulse response sampled at the selected DFE sampling phase."""
+        dfe = self.dfe_status
+        if dfe is None:
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
+        return self.h[dfe.pos::self.per_ui]
+
+    @property
+    def t_dsamp_ui(self) -> np.ndarray:
+        """Discrete UI axis for h_dsamp and h_ISI, with main cursor at 0."""
+        dfe = self.dfe_status
+        if dfe is None:
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
+        num_pre = (dfe.ts - dfe.pos) // self.per_ui
+        return np.arange(len(self.h_dsamp), dtype=float) - float(num_pre)
+
+    @property
     def h_XT(self) -> list[np.ndarray]:
         """Crosstalk pulse responses h^(k)(t), k > 0."""
         return [path.pulse.ir for path in self.xtalks]
@@ -2450,12 +2564,141 @@ class COM:
         return self._require_status().dfe
 
     @property
-    def impairment_status(self) -> Optional[COMImpairmentStatus]:
-        return self._require_status().impairment
+    def imp_status(self) -> Optional[COMImpairmentStatus]:
+        return self._require_status().imp
 
     @property
     def pmf_status(self) -> Optional[COMPMFStatus]:
         return self._require_status().pmf
+
+    def _h_j_ui_axis(self) -> np.ndarray:
+        dfe = self.dfe_status
+        if dfe is None:
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
+
+        pos = int(dfe.ts) % self.per_ui
+        center_idx = np.arange(pos, len(self.h), self.per_ui)
+        valid = (center_idx > 0) & (center_idx < len(self.h) - 1)
+        center_idx = center_idx[valid]
+        return (center_idx.astype(float) - float(dfe.ts)) / float(self.per_ui)
+
+    def _plot_discrete_time_response(
+        self,
+        x_ui: np.ndarray,
+        y: np.ndarray,
+        title: str,
+        ylabel: str,
+        ax: Any = None,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+        label: Optional[str] = None,
+        filename: str = "discrete_response.png",
+    ) -> Any:
+        x_ui = np.asarray(x_ui, dtype=float)
+        y = np.asarray(y, dtype=float)
+        if x_ui.shape != y.shape:
+            raise ValueError("x_ui and y must have the same shape.")
+        if not np.all(np.isfinite(x_ui)) or not np.all(np.isfinite(y)):
+            raise ValueError("x_ui and y must contain only finite values.")
+
+        output_file = _plot_save_path(save_path, filename)
+        created_ax = ax is None
+        if created_ax:
+            fig, ax = _subplots(output_file)
+        else:
+            fig = ax.figure
+
+        ax.plot(x_ui, y, marker="o", markersize=3, linewidth=1.0, label=label)
+        if label is not None:
+            ax.legend()
+        ax.set_title(title)
+        ax.set_xlabel("Discrete time (UI, main cursor = 0)")
+        ax.set_ylabel(ylabel)
+        if xlim_ui is not None:
+            ax.set_xlim(*xlim_ui)
+        ax.grid(True)
+
+        if output_file or created_ax:
+            _finish_figure(fig, output_file)
+        return ax
+
+    def plot_h_dsamp(
+        self,
+        ax: Any = None,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+        label: Optional[str] = None,
+    ) -> Any:
+        """
+        Plot victim pulse samples at the selected DFE sampling phase.
+
+        Parameters follow the utility plot style:
+        ax is optional, save_path may be a file or directory, xlim_ui is in UI,
+        and label is used when overlaying multiple curves.
+        """
+        return self._plot_discrete_time_response(
+            self.t_dsamp_ui,
+            self.h_dsamp,
+            title="Downsampled Victim Pulse",
+            ylabel="h_dsamp (V)",
+            ax=ax,
+            save_path=save_path,
+            xlim_ui=xlim_ui,
+            label=label,
+            filename="h_dsamp.png",
+        )
+
+    def plot_h_ISI(
+        self,
+        ax: Any = None,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+        label: Optional[str] = None,
+    ) -> Any:
+        """
+        Plot residual ISI samples after DFE cancellation.
+
+        Uses the same discrete UI axis as h_dsamp, with the main cursor at 0.
+        """
+        dfe = self.dfe_status
+        if dfe is None:
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
+        return self._plot_discrete_time_response(
+            self.t_dsamp_ui,
+            dfe.h_ISI,
+            title="Residual ISI Samples",
+            ylabel="h_ISI (V)",
+            ax=ax,
+            save_path=save_path,
+            xlim_ui=xlim_ui,
+            label=label,
+            filename="h_ISI.png",
+        )
+
+    def plot_h_J(
+        self,
+        ax: Any = None,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+        label: Optional[str] = None,
+    ) -> Any:
+        """
+        Plot sampled jitter sensitivity h_J on its actual finite-difference axis.
+        """
+        imp = self.imp_status
+        if imp is None:
+            raise RuntimeError("COM.imp_status is not available. Run COM.run() first.")
+        return self._plot_discrete_time_response(
+            self._h_j_ui_axis(),
+            imp.h_J,
+            title="Sampled Jitter Sensitivity",
+            ylabel="h_J (V/UI)",
+            ax=ax,
+            save_path=save_path,
+            xlim_ui=xlim_ui,
+            label=label,
+            filename="h_J.png",
+        )
 
     # class methods
     def build_all_paths(self) -> list[COMPath]:
@@ -2524,7 +2767,7 @@ class COM:
 
         return COMDFEStatus(ts=ts, pos=pos, dfe_coeff=dfe_coeff, h_ISI=h_ISI)
 
-    def calculate_impairments(
+    def calculate_imp(
         self,
         h: np.ndarray,
         dfe_status: COMDFEStatus,
@@ -2533,7 +2776,7 @@ class COM:
 
         L = self.cfg.L
         link_cfg = self.cfg.link
-        imp_cfg = self.cfg.impairment
+        imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
         
         ts = dfe_status.ts
@@ -2592,7 +2835,7 @@ class COM:
     def calculate_COM(self, imp_status: COMImpairmentStatus) -> COMPMFStatus:
         L = self.cfg.L
         As = imp_status.As
-        imp_cfg = self.cfg.impairment
+        imp_cfg = self.cfg.imp
 
         # Resolve PMF runtime config after As is known.
         pmf_cfg = self.cfg.pmf.resolve(As)

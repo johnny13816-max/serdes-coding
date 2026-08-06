@@ -1240,6 +1240,18 @@ class SparamModel:
     def _magnitude_db(response: np.ndarray) -> np.ndarray:
         return 20 * np.log10(np.maximum(np.abs(response), np.finfo(float).tiny))
 
+    def _finish_frequency_plot(self, ax: Any, save_path: str, show: bool = True) -> Any:
+        plt = self._plt()
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        elif show:
+            fig.canvas.draw_idle()
+            plt.show()
+        return ax
+
     def _apply_frequency_plot_style(
         self,
         ax: Any,
@@ -1283,6 +1295,8 @@ class SparamModel:
         ax: Any = None,
         logx: bool = False,
         xlim: Optional[tuple[float, float]] = None,
+        save_path: str = "",
+        label: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1299,13 +1313,26 @@ class SparamModel:
         logx:
             Whether to use a logarithmic frequency axis.
         xlim:
-            Optional frequency limits in Hz. The limit is converted to the
-            scikit-rf plot frequency unit automatically.
+            Optional frequency limits in Hz.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        label:
+            Optional curve label. Useful when overlaying multiple channels.
         **kwargs:
-            Additional keyword arguments passed to scikit-rf.
+            Additional keyword arguments passed to matplotlib ``plot``.
         """
-        plot_ax = self.network.plot_s_db(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
-        return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
+        created_ax = ax is None
+        if created_ax:
+            _, ax = self._plt().subplots()
+        ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd21), label=label or "Sdd21", **kwargs)
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel("Frequency (GHz)")
+        ax.set_ylabel("IL, Sdd21 (dB)")
+        ax.set_title("Insertion Loss")
+        ax.legend()
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_RL(
         self,
@@ -1313,6 +1340,8 @@ class SparamModel:
         ax: Any = None,
         logx: bool = False,
         xlim: Optional[tuple[float, float]] = None,
+        save_path: str = "",
+        label: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1332,22 +1361,35 @@ class SparamModel:
         logx:
             Whether to use a logarithmic frequency axis.
         xlim:
-            Optional frequency limits in Hz. The limit is converted to the
-            scikit-rf plot frequency unit automatically.
+            Optional frequency limits in Hz.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        label:
+            Optional label prefix. Useful when overlaying multiple channels.
         **kwargs:
-            Additional keyword arguments passed to scikit-rf.
+            Additional keyword arguments passed to matplotlib ``plot``.
         """
+        created_ax = ax is None
+        if created_ax:
+            _, ax = self._plt().subplots()
+        prefix = "" if label is None else f"{label} "
         if port == "input":
-            plot_ax = self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
-            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
-        if port == "output":
-            plot_ax = self.network.plot_s_db(m=1, n=1, ax=ax, show_legend=True, logx=logx, **kwargs)
-            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
-        if port == "both":
-            plot_ax = self.network.plot_s_db(m=0, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
-            plot_ax = self.network.plot_s_db(m=1, n=1, ax=plot_ax, show_legend=True, logx=logx, **kwargs)
-            return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
-        raise ValueError('port must be "input", "output", or "both".')
+            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd11), label=f"{prefix}Sdd11", **kwargs)
+        elif port == "output":
+            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd22), label=f"{prefix}Sdd22", **kwargs)
+        elif port == "both":
+            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd11), label=f"{prefix}Sdd11", **kwargs)
+            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd22), label=f"{prefix}Sdd22", **kwargs)
+        else:
+            raise ValueError('port must be "input", "output", or "both".')
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel("Frequency (GHz)")
+        ax.set_ylabel("RL (dB)")
+        ax.set_title("Return Loss")
+        ax.legend()
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_phase(
         self,
@@ -1355,6 +1397,8 @@ class SparamModel:
         logx: bool = False,
         unwrap: bool = True,
         xlim: Optional[tuple[float, float]] = None,
+        save_path: str = "",
+        label: str | None = None,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1370,14 +1414,29 @@ class SparamModel:
             If True, unwrap phase before plotting. This is the SerDes default
             because through-channel phase continuity is usually the useful view.
         xlim:
-            Optional frequency limits in Hz. The limit is converted to the
-            scikit-rf plot frequency unit automatically.
+            Optional frequency limits in Hz.
+        save_path:
+            Optional output path. If provided, save the figure and close it.
+        label:
+            Optional curve label. Useful when overlaying multiple channels.
         **kwargs:
-            Additional keyword arguments passed to scikit-rf.
+            Additional keyword arguments passed to matplotlib ``plot``.
         """
-        plotter = self.network.plot_s_deg_unwrap if unwrap else self.network.plot_s_deg
-        plot_ax = plotter(m=1, n=0, ax=ax, show_legend=True, logx=logx, **kwargs)
-        return self._apply_frequency_plot_style(plot_ax, xlim=xlim)
+        created_ax = ax is None
+        if created_ax:
+            _, ax = self._plt().subplots()
+        phase = np.angle(self.sdd21)
+        if unwrap:
+            phase = np.unwrap(phase)
+        ax.plot(self.freqs / 1e9, np.rad2deg(phase), label=label or "Sdd21 phase", **kwargs)
+        if logx:
+            ax.set_xscale("log")
+        ax.set_xlabel("Frequency (GHz)")
+        ax.set_ylabel("Phase (deg)")
+        ax.set_title("Sdd21 Phase")
+        ax.legend()
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_sdd(
         self,
@@ -1867,7 +1926,7 @@ class LinkSegment:
     mixed-mode conversion, or IEEE COM package primitive construction. Those
     belong in SparamModel or com_model.py before a scalar response is selected.
     """
-    DEFAULT_MAIN_CURSOR_UI = 5.0
+    DEFAULT_MAIN_CURSOR_UI = 20.0
 
     def __init__(self, cfg: 'LinkConfig'):
         self.cfg = cfg
@@ -2117,7 +2176,7 @@ class LinkSegment:
         import matplotlib.pyplot as plt
         return plt
 
-    def _finish_plot(self, ax: Axes, save_path: str) -> Axes:
+    def _finish_plot(self, ax: Axes, save_path: str, show: bool = True) -> Axes:
         """
         Apply LinkSegment's plot output convention.
 
@@ -2132,7 +2191,7 @@ class LinkSegment:
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
             plt.close(fig)
-        else:
+        elif show:
             fig.canvas.draw_idle()
             plt.show()
 
@@ -2143,6 +2202,8 @@ class LinkSegment:
         ax: Optional[Axes] = None,
         save_path: str = "",
         xlim: Optional[tuple[float, float]] = None,
+        ylim: Optional[tuple[float, float]] = None,
+        label: str | None = None,
     ) -> Axes:
         """
         Plot absolute transfer-function magnitude in dB versus frequency.
@@ -2157,8 +2218,14 @@ class LinkSegment:
         xlim:
             Optional frequency limits in Hz. If None, use the SerDes default
             in-band view from 0 to cfg.fb.
+        ylim:
+            Optional y-axis limits in dB.
+        label:
+            Optional curve label. Useful when plotting multiple transfer
+            functions on the same Axes.
         """
-        if ax is None:
+        created_ax = ax is None
+        if created_ax:
             _, ax = self._plt().subplots()
 
         tf = self.validate_tf(self.tf)
@@ -2181,14 +2248,24 @@ class LinkSegment:
             raise ValueError("xlim selects no frequency samples.")
 
         mag_db = 20 * np.log10(np.maximum(np.abs(tf), np.finfo(float).tiny))
-        ax.plot(self.cfg.freqs[mask] / 1e9, mag_db[mask])
+        ax.plot(self.cfg.freqs[mask] / 1e9, mag_db[mask], label=label)
+        if label is not None:
+            ax.legend()
         ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("|H(f)| (dB)")
         ax.set_title("Transfer Function")
         ax.set_xlim(lo_hz / 1e9, hi_hz / 1e9)
+        if ylim is not None:
+            if len(ylim) != 2:
+                raise ValueError("ylim must contain two values: (min_db, max_db).")
+            lo_db = float(ylim[0])
+            hi_db = float(ylim[1])
+            if not np.isfinite(lo_db) or not np.isfinite(hi_db) or lo_db >= hi_db:
+                raise ValueError("ylim must be finite and strictly increasing.")
+            ax.set_ylim(lo_db, hi_db)
         ax.grid(True)
 
-        return self._finish_plot(ax, save_path)
+        return self._finish_plot(ax, save_path, show=created_ax)
 
     def annotate_f(self, ax: Axes, f: Optional[Union[float, np.ndarray]] = None) -> Axes:
         """
@@ -2343,7 +2420,8 @@ class LinkSegment:
         label: str | None = None,
     ) -> Axes:
         response = self.validate_time_response(response, name)
-        if ax is None:
+        created_ax = ax is None
+        if created_ax:
             _, ax = self._plt().subplots()
 
         x, xlabel = self._response_x_axis(response, x_unit, x_origin, origin_response=origin_response)
@@ -2356,7 +2434,7 @@ class LinkSegment:
         self._set_response_xlim(ax, x_unit, x_origin, xlim_ui)
         ax.grid(True)
 
-        return self._finish_plot(ax, save_path)
+        return self._finish_plot(ax, save_path, show=created_ax)
 
     def plot_ir(
         self,
@@ -2960,6 +3038,58 @@ class LinkSegment:
             raise ValueError(
                 f"{source_name} appears to contain wrapped or truncated tail energy: "
                 f"tail_energy_ratio={tail_energy_ratio:.3e} exceeds {tail_energy_tol:.3e}."
+            )
+
+        return ir
+
+    def validate_aligned_ir(
+        self,
+        ir: np.ndarray,
+        source_name: str = "aligned_ir",
+        tail_ui: float = 1.0,
+        tail_energy_tol: float = 1e-6,
+    ) -> np.ndarray:
+        """
+        Validate a TF-originated aligned impulse response.
+
+        Parameters
+        ----------
+        ir:
+            Aligned impulse response sampled on cfg.times.
+        source_name:
+            Name used in error messages.
+        tail_ui:
+            Tail window, in UI, used to detect circularly wrapped precursor
+            energy after alignment.
+        tail_energy_tol:
+            Maximum allowed energy ratio in the final tail_ui window.
+
+        Contract:
+        TF-originated responses may be circularly shifted to place the main
+        cursor at a useful analysis location. After that shift, the record tail
+        should not contain significant energy. If it does, the LinkConfig time
+        window or delay alignment is not safe for ISI/PMF calculation.
+        """
+        ir = self.validate_ir(ir, correct_wrap=False)
+        if tail_ui <= 0.0:
+            raise ValueError("tail_ui must be positive.")
+        if tail_energy_tol < 0.0:
+            raise ValueError("tail_energy_tol must be non-negative.")
+
+        energy = np.abs(ir) ** 2
+        total_energy = float(np.sum(energy))
+        if total_energy <= 0.0:
+            raise ValueError(f"{source_name} impulse-response energy is zero.")
+
+        tail_len = max(1, int(round(tail_ui * self.cfg.per_ui)))
+        tail_len = min(tail_len, len(ir))
+        tail_energy_ratio = float(np.sum(energy[-tail_len:]) / total_energy)
+        if tail_energy_ratio > tail_energy_tol:
+            raise ValueError(
+                f"{source_name} contains significant tail energy after alignment: "
+                f"tail_energy_ratio={tail_energy_ratio:.3e} exceeds {tail_energy_tol:.3e}. "
+                "This usually means precursor/main-lobe energy wrapped to the end "
+                "of the IFFT record; increase LinkConfig time span or inspect delay alignment."
             )
 
         return ir

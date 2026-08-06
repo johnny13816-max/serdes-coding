@@ -11,11 +11,12 @@
    - search parameters: `c_m2`, `c_m1`, `c_1`, `g_DC`, `g_DC2`。
    - search 階段只保存 lightweight summary。
    - best candidate 再跑完整 PMF/COM。
+   - 未來可加入 `keep_top_n_status`：只對 top N candidates 保留完整 `COMStatus`，用於 search debug，但避免保存所有 candidate 的大型 arrays。
 
 2. Single-run full output
    - 定義 durable output 格式。
    - 目標是可以重建某次 `COMStatus`。
-   - 需要包含 config snapshot、paths、DFE、impairment、PMF、COM、debug plots。
+   - 需要包含 config snapshot、paths、DFE、imp、PMF、COM、debug plots。
 
 3. Excel input contract
    - 完成 project-owned template 的 mapping validation。
@@ -31,7 +32,7 @@
 ## COM / 93A Core
 
 5. FOM validation
-   - 檢查 93A.1.6 impairment statistics。
+   - 檢查 93A.1.6 imp statistics。
    - 檢查 FOM formula 與 sign convention。
    - 建立 small sanity case。
 
@@ -118,7 +119,7 @@
 
 21. PSD arithmetic
    - 定義 PSD addition / filtering / integration。
-   - 支援多個 impairment PSD 合成。
+   - 支援多個 imp PSD 合成。
 
 22. PSD resample / align policy
    - arbitrary grid 與 LinkConfig grid 的轉換。

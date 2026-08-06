@@ -26,7 +26,7 @@ v1.0 包含：
 v1.0 不包含：
 
 - 178A / 802.3ck extension
-- higher-level package/channel/impairment search
+- higher-level package/channel/imp search
 - 官方 IEEE COM correlation claim
 - 任意外部 Excel 格式的完整自動解析
 
@@ -163,7 +163,7 @@ COM(cfg).run()
 
 - paths / S-domain / TF-domain / pulse
 - sampling phase / DFE
-- impairment components
+- imp components
 - PMF components
 - final COM
 

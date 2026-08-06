@@ -19,7 +19,7 @@
 - COM config/status dataclasses
 - 93A-specific package/filter/S-parameter formula
 - path build helpers
-- DFE / sampling phase / impairment / PMF helpers
+- DFE / sampling phase / imp / PMF helpers
 - smoke test
 
 整理方向：
@@ -155,9 +155,10 @@ search_status.plot_summary(save_path="report/search_run")
 `COMStatus.plot_summary()` 目前輸出：
 
 - `path_pulses.png`
-- `path_sbr.png`
+- `path_S_all_IL.png`
+- `path_H21_tf.png`
 - `dfe_summary.png`
-- `impairment_summary.png`
+- `imp_summary.png`
 - `pmf_summary.png`
 
 `COMSearchStatus.plot_summary()` 目前輸出：
@@ -315,3 +316,42 @@ Path build contract:
 Excel fixed_config contract:
 - package 參數使用前綴命名，例如 `txpkg_victim.C_d`、`txpkg_fext.z_p`、`txpkg_next.Z_c`、`rxpkg.C_p`。
 - PyChOpMarg legacy adapter 仍可讀舊 workbook；舊格式只有一組 package 時，會複製到四組 package config。
+## Matplotlib Backend Contract
+
+Plot/export helper 不得呼叫 `matplotlib.use(..., force=True)` 或改變全域 Matplotlib backend。
+
+目前規則：
+- `save_path=""`：使用使用者目前的 interactive backend，呼叫 `plt.show()`。
+- `save_path` 有值：使用局部 `FigureCanvasAgg` 建圖與存檔，不改全域 backend。
+
+原因：COM export/report 不能污染同一個 IPython / VS Code kernel，否則使用者後續手動畫 `SparamModel.plot_*()` 或 `LinkSegment.plot_*()` 會遇到 `FigureCanvasAgg is non-interactive`。
+
+## LinkSegment Alignment Guard Contract
+
+- TF-originated `aligned_ir` default main cursor is placed at 20 UI.
+- Purpose: keep enough precursor margin before the main cursor and reduce the chance that precursor energy wraps to the vector tail.
+- `validate_aligned_ir()` checks whether significant tail energy remains after alignment.
+- `COM` applies this guard to victim `H_21` and victim `pulse`.
+- Xtalk paths are not forced to share this guard because their phase/reference selection is different from the victim ISI/DFE path.
+
+## COM Downsample Debug Contract
+
+`COM` exposes these debug proxies after `COM.run()` or `_run_once()`:
+
+- `com.h_dsamp`: victim pulse sampled at the selected DFE sampling phase.
+- `com.t_dsamp_ui`: discrete UI time axis for `h_dsamp` and `h_ISI`, with main cursor at 0.
+
+Debug plot methods:
+
+- `com.plot_h_dsamp(ax=None, save_path="", xlim_ui=(-5, 20), label=None)`
+- `com.plot_h_ISI(ax=None, save_path="", xlim_ui=(-5, 20), label=None)`
+- `com.plot_h_J(ax=None, save_path="", xlim_ui=(-5, 20), label=None)`
+
+`h_J` uses its own reconstructed finite-difference UI axis because boundary samples may be skipped.
+
+## COM Report Plot Contract
+
+- `COMStatus.plot_dfe_summary()` plots residual `h_ISI` on a main-cursor-centered UI axis and defaults to `xlim_ui=(-5, 20)`.
+- `LinkSegment.plot_tf()` supports `ylim=(min_db, max_db)`.
+- `COMStatus.plot_path_H21_tf()` defaults to `ylim=(-80, 5)` so high-frequency taper values do not dominate the report view.
+- PMF FIR convolution uses `keep_mass=0.99999` by default to prevent long-tail convolution from dominating report x-axis range.

@@ -724,7 +724,7 @@ class Pmf1D:
 
                 if keep_mass < 1.0:
                     tmp = Pmf1D(dx=dx_ref, st_idx=out_st_idx, pmf=out_pmf, unit=self.unit)
-                    _truncate_keep_mass(tmp, keep_mass=keep_mass)
+                    tmp = _truncate_keep_mass(tmp, keep_mass=keep_mass)
                     out_st_idx = tmp.st_idx
                     out_pmf = tmp.pmf
 
