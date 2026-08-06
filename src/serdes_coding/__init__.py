@@ -22,9 +22,8 @@ from .com_model import (
     COMStatus,
     IEEECOMFilter,
     IEEECOMsparam,
-    excel_to_config,
-    excel_to_search_config,
 )
+from .com_excel_io import excel_to_config, excel_to_search_config
 from .link_segment import SparamModel
 
 __all__ = [

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from itertools import product
+import json
 from pathlib import Path
 import sys
-from typing import Literal, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence
 import numpy as np
 
 try:
@@ -124,194 +125,22 @@ class _PrettyDataclass:
         return f"{float(value):.6e}"
 
 def excel_to_config(excel_path: str) -> COMConfig:
-    """
-    Build COMConfig from a PyChOpMarg-style Excel config table.
+    """Backward-compatible wrapper for COM Excel input."""
+    try:
+        from .com_excel_io import excel_to_config as _excel_to_config
+    except ImportError:
+        from serdes_coding.com_excel_io import excel_to_config as _excel_to_config
 
-    This helper reads the reference Excel table under Parameter/Setting/Units
-    blocks. Range-valued fields keep the first value as the scalar default;
-    use excel_to_search_config() to recover the search-space vectors.
-    """
-    import pandas as pd
-
-    excel_path_obj = Path(excel_path)
-    table = _read_excel_parameter_table(excel_path_obj)
-    project_root = Path(__file__).resolve().parents[2]
-    chnl_dir = project_root / "reference_data" / "pychopmarg_example2" / "chnl_data"
-
-    f_b = _scalar_setting(table, "f_b") * 1e9
-    per_ui = int(_scalar_setting(table, "M"))
-    target_df = _scalar_setting(table, "Delta_f") * 1e9
-    z_p_idx = int(_scalar_setting(table, "z_p select")) - 1
-
-    C_d = _matrix_setting(table, "C_d") * 1e-9
-    L_s = _matrix_setting(table, "L_s") * 1e-9
-    C_b = _matrix_setting(table, "C_b") * 1e-9
-    C_p = _matrix_setting(table, "C_p") * 1e-9
-    z_p_tx = _vector_setting(table, "z_p (TX)")
-    z_p_rx = _vector_setting(table, "z_p (RX)")
-    package_Z_c = _matrix_setting(table, "package_Z_c")
-
-    port_order = tuple(int(x) - 1 for x in _vector_setting(table, "Port Order"))
-    if len(port_order) != 4:
-        raise ValueError("Port Order must contain exactly four ports.")
-
-    return COMConfig(
-        link=LinkConfig(
-            fb=f_b,
-            per_ui=per_ui,
-            target_df=target_df,
-        ),
-        filter=COMFilterConfig(
-            c_m3=0.0,
-            c_m2=0.0,
-            c_m1=0.0,
-            c_1=0.0,
-            num_pre=int(_scalar_setting(table, "ffe_pre_tap_len")) - 2,
-            Tr=_scalar_setting(table, "T_r") * 1e-9,
-            fr=_scalar_setting(table, "f_r") * f_b,
-            g_DC=_first_setting(table, "g_DC"),
-            g_DC2=_first_setting(table, "g_DC_HP"),
-            f_z=_scalar_setting(table, "f_z") * 1e9,
-            f_LF=_scalar_setting(table, "f_HP_PZ") * 1e9,
-            f_p1=_scalar_setting(table, "f_p1") * 1e9,
-            f_p2=_scalar_setting(table, "f_p2") * 1e9,
-            A_v=_scalar_setting(table, "A_v"),
-            A_fe=_scalar_setting(table, "A_fe"),
-            A_ne=_scalar_setting(table, "A_ne"),
-        ),
-        channel=COMChannelConfig(
-            victim_s4p_path=str(chnl_dir / "example2_THRU.s4p"),
-            next_s4p_paths=(
-                str(chnl_dir / "example2_NEXT1.s4p"),
-                str(chnl_dir / "example2_NEXT2.s4p"),
-                str(chnl_dir / "example2_NEXT3.s4p"),
-            ),
-            fext_s4p_paths=(
-                str(chnl_dir / "example2_FEXT1.s4p"),
-                str(chnl_dir / "example2_FEXT2.s4p"),
-            ),
-            port_order=port_order,
-            R0=_scalar_setting(table, "R_0"),
-            gamma_src=0.0,
-            gamma_load=0.0,
-        ),
-        pkg=COMPkgConfig(
-            C_d=float(C_d[0, 0]),
-            L_s=float(L_s[0, 0]),
-            C_b=float(C_b[0]),
-            z_p=float(z_p_tx[z_p_idx]),
-            C_p=float(C_p[0]),
-            enable=bool(_scalar_setting(table, "INC_PACKAGE")),
-            R0=_scalar_setting(table, "R_0"),
-            Z_c=float(package_Z_c[0, 0]),
-            z_p2=None,
-            Z_c2=float(package_Z_c[0, 1]) if package_Z_c.shape[1] > 1 else float(package_Z_c[0, 0]),
-        ),
-        dfe=COMDFEConfig(
-            N_b=int(_scalar_setting(table, "N_b")),
-            b_max=_scalar_setting(table, "b_max(1)"),
-        ),
-        impairment=COMImpairmentConfig(
-            R_LM=_scalar_setting(table, "R_LM"),
-            SNR_TX=_scalar_setting(table, "SNR_TX"),
-            sigma_RJ=_scalar_setting(table, "sigma_RJ"),
-            A_DD=_scalar_setting(table, "A_DD"),
-            eta_0=_scalar_setting(table, "eta_0") / 1e9,
-        ),
-        L=int(_scalar_setting(table, "L")),
-        DER_0=_scalar_setting(table, "DER_0"),
-    )
+    return _excel_to_config(excel_path)
 
 def excel_to_search_config(excel_path: str) -> 'COMSearchConfig':
-    """
-    Build COMSearchConfig from the range-valued fields in the reference Excel.
+    """Backward-compatible wrapper for COM search Excel input."""
+    try:
+        from .com_excel_io import excel_to_search_config as _excel_to_search_config
+    except ImportError:
+        from serdes_coding.com_excel_io import excel_to_search_config as _excel_to_search_config
 
-    The returned search config follows 93A.1.6 variable equalizer parameters.
-    """
-    table = _read_excel_parameter_table(Path(excel_path))
-    return COMSearchConfig(
-        c_m2_values=_sequence_setting(table, "c(-2)"),
-        c_m1_values=_sequence_setting(table, "c(-1)"),
-        c_1_values=_sequence_setting(table, "c(1)"),
-        g_DC_values=_sequence_setting(table, "g_DC"),
-        g_DC2_values=_sequence_setting(table, "g_DC_HP"),
-    )
-
-def _read_excel_parameter_table(excel_path: Path) -> dict[str, object]:
-    import pandas as pd
-
-    df = pd.read_excel(excel_path, sheet_name="COM_Settings", header=None)
-    table: dict[str, object] = {}
-    for start_col in (0, 5, 9):
-        block = df.iloc[:, start_col:start_col + 3]
-        for _, row in block.iterrows():
-            param = row.iloc[0]
-            setting = row.iloc[1]
-            if pd.isna(param) or str(param).strip() in {
-                "Parameter",
-                "Table 93A-1 parameters",
-                "I/O control",
-                "Table 93A–2 parameters",
-                "Table 92–12 parameters",
-                "Operational control",
-                "Receiver testing",
-                "Non standard control options",
-            }:
-                continue
-            table[str(param).strip()] = setting
-    return table
-
-def _matlab_array(value: object) -> np.ndarray:
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        return np.asarray([float(value)], dtype=float)
-    if not isinstance(value, str):
-        return np.asarray(value, dtype=float)
-
-    text = value.strip()
-    if text.startswith("[") and text.endswith("]"):
-        text = text[1:-1].strip()
-
-    rows = []
-    for row_text in text.split(";"):
-        row_text = row_text.strip()
-        if not row_text:
-            continue
-        parts = row_text.replace(",", " ").split()
-        if len(parts) == 1 and ":" in parts[0]:
-            lo, step, hi = [float(x) for x in parts[0].split(":")]
-            n = int(round((hi - lo) / step)) + 1
-            values = lo + step * np.arange(n)
-            values[np.isclose(values, 0.0, atol=1e-15)] = 0.0
-            rows.append(values)
-        else:
-            rows.append(np.asarray([float(x) for x in parts], dtype=float))
-
-    if len(rows) == 0:
-        raise ValueError(f"Cannot parse MATLAB-style array: {value!r}")
-    if len(rows) == 1:
-        return rows[0]
-    return np.vstack(rows)
-
-def _sequence_setting(table: dict[str, object], name: str) -> np.ndarray:
-    return np.ravel(_matlab_array(table[name])).astype(float)
-
-def _first_setting(table: dict[str, object], name: str) -> float:
-    return float(_sequence_setting(table, name)[0])
-
-def _scalar_setting(table: dict[str, object], name: str) -> float:
-    arr = _sequence_setting(table, name)
-    if len(arr) != 1:
-        raise ValueError(f"{name} must be scalar, got {table[name]!r}.")
-    return float(arr[0])
-
-def _vector_setting(table: dict[str, object], name: str) -> np.ndarray:
-    return _sequence_setting(table, name)
-
-def _matrix_setting(table: dict[str, object], name: str) -> np.ndarray:
-    arr = _matlab_array(table[name])
-    if arr.ndim == 1:
-        return arr
-    return arr.astype(float)
+    return _excel_to_search_config(excel_path)
 
 def IEEECOM_cascade_sdd(sx: np.ndarray, sy: np.ndarray) -> np.ndarray:
     """
@@ -1110,7 +939,10 @@ class COMConfig(_PrettyDataclass):
     link: LinkConfig                  # unit contract: Hz/s grid owned by LinkConfig
     filter: COMFilterConfig           # unit contract: internal filter units
     channel: COMChannelConfig         # unit contract: paths, ohm, dimensionless reflection coefficients
-    pkg: COMPkgConfig                 # unit contract: F/H/mm/ohm package parameters
+    txpkg_victim: COMPkgConfig        # unit contract: F/H/mm/ohm victim TX package parameters
+    txpkg_fext: COMPkgConfig          # unit contract: F/H/mm/ohm FEXT aggressor TX package parameters
+    txpkg_next: COMPkgConfig          # unit contract: F/H/mm/ohm NEXT aggressor TX package parameters
+    rxpkg: COMPkgConfig               # unit contract: F/H/mm/ohm shared RX package parameters
 
     dfe: COMDFEConfig                 # unit contract: tap counts and normalized coefficients
     impairment: COMImpairmentConfig   # unit contract: voltage/noise/jitter settings
@@ -1271,7 +1103,112 @@ class COMPMFStatus(_PrettyDataclass):
     y0: Optional[float] = None         # unit: V, CDF inverse at DER_0
     A_ni: Optional[float] = None       # unit: V, noise/interference amplitude = abs(y0)
     COM: Optional[float] = None        # unit: dB, final COM = 20log10(As/A_ni)
-    
+
+def _plt(use_agg: bool = False) -> Any:
+    if use_agg:
+        import matplotlib
+
+        matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt
+
+    return plt
+
+def _plot_save_path(save_path: str, filename: str) -> str:
+    if not save_path:
+        return ""
+
+    path = Path(save_path)
+    if path.suffix:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return str(path)
+
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path / filename)
+
+def _finish_figure(fig: Any, save_path: str) -> None:
+    plt = _plt(use_agg=bool(save_path))
+    fig.tight_layout()
+    if save_path:
+        fig.savefig(save_path, bbox_inches="tight")
+        plt.close(fig)
+    else:
+        fig.canvas.draw_idle()
+        plt.show()
+
+def _path_label(idx: int, path: 'COMPath') -> str:
+    return f"{idx}:{path.kind}"
+
+def _json_scalar(value: object) -> object:
+    if value is None:
+        return None
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if isinstance(value, complex):
+        return {"real": value.real, "imag": value.imag}
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+def _array_meta(arrays: dict[str, np.ndarray], key: str, value: np.ndarray) -> dict[str, object]:
+    arr = np.asarray(value)
+    arrays[key] = arr
+    return {
+        "array_key": key,
+        "shape": list(arr.shape),
+        "dtype": str(arr.dtype),
+    }
+
+def _sparam_export(name: str, model: SparamModel, arrays: dict[str, np.ndarray]) -> dict[str, object]:
+    return {
+        "type": type(model).__name__,
+        "freqs": _array_meta(arrays, f"{name}.freqs", model.freqs),
+        "sdd": _array_meta(arrays, f"{name}.sdd", model.sdd),
+    }
+
+def _segment_export(name: str, segment: LinkSegment, arrays: dict[str, np.ndarray]) -> dict[str, object]:
+    data: dict[str, object] = {
+        "type": type(segment).__name__,
+        "cfg": {
+            "fb": segment.cfg.fb,
+            "per_ui": segment.cfg.per_ui,
+            "target_df": segment.cfg.target_df,
+            "Nfft": segment.cfg.Nfft,
+            "df": segment.cfg.df,
+            "f_nyq": segment.cfg.f_nyq,
+            "dt": segment.cfg.dt,
+            "T_max": segment.cfg.T_max,
+        },
+        "freqs": _array_meta(arrays, f"{name}.freqs", segment.freqs),
+        "times": _array_meta(arrays, f"{name}.times", segment.times),
+        "tf": _array_meta(arrays, f"{name}.tf", segment.tf),
+        "raw_ir": _array_meta(arrays, f"{name}.raw_ir", segment.raw_ir),
+        "aligned_ir": _array_meta(arrays, f"{name}.aligned_ir", segment.aligned_ir),
+        "sr": _array_meta(arrays, f"{name}.sr", segment.sr),
+        "sbr": _array_meta(arrays, f"{name}.sbr", segment.sbr),
+    }
+    return data
+
+def _pmf_export(name: str, pmf: Optional[Pmf1D], arrays: dict[str, np.ndarray]) -> Optional[dict[str, object]]:
+    if pmf is None:
+        return None
+    return {
+        "type": type(pmf).__name__,
+        "dx": pmf.dx,
+        "st_idx": pmf.st_idx,
+        "unit": pmf.unit,
+        "name": pmf.name,
+        "pmf": _array_meta(arrays, f"{name}.pmf", pmf.pmf),
+        "x": _array_meta(arrays, f"{name}.x", pmf.x),
+        "cdf": _array_meta(arrays, f"{name}.cdf", pmf.cdf),
+    }
+
+def _write_json(path: Path, data: dict[str, object]) -> None:
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
 @dataclass(repr=False)
 class COMStatus(_PrettyDataclass):
     paths: list[COMPath]
@@ -1287,6 +1224,328 @@ class COMStatus(_PrettyDataclass):
     @property
     def xtalks(self) -> list[COMPath]:
         return self.paths[1:]
+
+    def plot_path_pulses(
+        self,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+    ) -> Any:
+        """
+        Plot all path pulse impulse responses on one aligned UI axis.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``path_pulses.png``.
+        xlim_ui:
+            Optional x-axis limits in UI after each path main cursor is shifted
+            to 0 UI.
+        """
+        plt = _plt(use_agg=bool(save_path))
+        fig, ax = plt.subplots()
+        for idx, path in enumerate(self.paths):
+            ir = path.pulse.ir
+            x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(ir)))]
+            ax.plot(x, ir, label=_path_label(idx, path))
+
+        ax.set_title("Path Pulse Responses")
+        ax.set_xlabel("Time (UI)")
+        ax.set_ylabel("h(t)")
+        if xlim_ui is not None:
+            ax.set_xlim(*xlim_ui)
+        ax.grid(True)
+        ax.legend()
+        _finish_figure(fig, _plot_save_path(save_path, "path_pulses.png"))
+        return ax
+
+    def plot_path_sbr(
+        self,
+        save_path: str = "",
+        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
+        normalize_main_cursor: bool = True,
+    ) -> Any:
+        """
+        Plot all path single-bit responses on one aligned UI axis.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``path_sbr.png``.
+        xlim_ui:
+            Optional x-axis limits in UI after each SBR main cursor is shifted
+            to 0 UI.
+        normalize_main_cursor:
+            If True, normalize each SBR by its own main cursor magnitude.
+        """
+        plt = _plt(use_agg=bool(save_path))
+        fig, ax = plt.subplots()
+        for idx, path in enumerate(self.paths):
+            sbr = path.pulse.sbr.copy()
+            main = float(np.max(np.abs(sbr)))
+            if normalize_main_cursor and main > 0:
+                sbr = sbr / main
+            x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(sbr)))]
+            ax.plot(x, sbr, label=_path_label(idx, path))
+
+        ax.set_title("Path Single-Bit Responses")
+        ax.set_xlabel("Time (UI)")
+        ax.set_ylabel("SBR / main" if normalize_main_cursor else "SBR")
+        if xlim_ui is not None:
+            ax.set_xlim(*xlim_ui)
+        ax.grid(True)
+        ax.legend()
+        _finish_figure(fig, _plot_save_path(save_path, "path_sbr.png"))
+        return ax
+
+    def plot_dfe_summary(self, save_path: str = "") -> Any:
+        """
+        Plot DFE coefficients and residual ISI samples.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``dfe_summary.png``.
+        """
+        if self.dfe is None:
+            raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
+
+        plt = _plt(use_agg=bool(save_path))
+        fig, axes = plt.subplots(2, 1, figsize=(7, 6))
+        tap_idx = np.arange(1, len(self.dfe.dfe_coeff) + 1)
+        axes[0].bar(tap_idx, self.dfe.dfe_coeff)
+        axes[0].set_title("DFE Coefficients")
+        axes[0].set_xlabel("Tap index")
+        axes[0].set_ylabel("Coefficient")
+        axes[0].grid(True)
+
+        isi_idx = np.arange(len(self.dfe.h_ISI))
+        axes[1].bar(isi_idx, self.dfe.h_ISI)
+        axes[1].set_title("Residual ISI Samples")
+        axes[1].set_xlabel("Sample index")
+        axes[1].set_ylabel("Amplitude (V)")
+        axes[1].grid(True)
+
+        _finish_figure(fig, _plot_save_path(save_path, "dfe_summary.png"))
+        return axes
+
+    def plot_impairment_summary(self, save_path: str = "") -> Any:
+        """
+        Plot impairment RMS components as a bar chart.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``impairment_summary.png``.
+        """
+        if self.impairment is None:
+            raise ValueError("COMStatus.impairment is None; run impairment calculation first.")
+
+        labels = ["TX", "ISI", "J", "XT", "N"]
+        values = [
+            self.impairment.sigma_TX,
+            self.impairment.sigma_ISI,
+            self.impairment.sigma_J,
+            self.impairment.sigma_XT,
+            self.impairment.sigma_N,
+        ]
+
+        plt = _plt(use_agg=bool(save_path))
+        fig, ax = plt.subplots()
+        ax.bar(labels, values)
+        ax.set_title("Impairment RMS Breakdown")
+        ax.set_ylabel("RMS amplitude (V)")
+        ax.grid(True, axis="y")
+        text = f"As={self.impairment.As:.4e} V"
+        if self.FOM is not None:
+            text += f"\nFOM={self.FOM:.2f} dB"
+        ax.text(0.98, 0.95, text, ha="right", va="top", transform=ax.transAxes)
+
+        _finish_figure(fig, _plot_save_path(save_path, "impairment_summary.png"))
+        return ax
+
+    def plot_pmf_summary(self, save_path: str = "") -> Any:
+        """
+        Plot PMF components and the final combined CDF.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``pmf_summary.png``.
+        """
+        if self.pmf is None:
+            raise ValueError("COMStatus.pmf is None; run PMF calculation first.")
+
+        components = [
+            ("ISI", self.pmf.p_ISI),
+            ("G", self.pmf.p_G),
+            ("DD", self.pmf.p_DD),
+            ("XT", self.pmf.p_XT),
+            ("combined", self.pmf.p_combined),
+        ]
+
+        plt = _plt(use_agg=bool(save_path))
+        fig, axes = plt.subplots(2, 1, figsize=(7, 6))
+        for label, p in components:
+            if p is not None:
+                axes[0].plot(p.x, p.pmf, label=label)
+        axes[0].set_title("PMF Components")
+        axes[0].set_xlabel("Amplitude (V)")
+        axes[0].set_ylabel("Probability mass")
+        axes[0].grid(True)
+        axes[0].legend()
+
+        if self.pmf.p_combined is not None:
+            p = self.pmf.p_combined
+            axes[1].plot(p.x, p.cdf, label="combined CDF")
+            if self.pmf.y0 is not None:
+                axes[1].axvline(self.pmf.y0, linestyle="--", color="tab:red", label=f"y0={self.pmf.y0:.3e} V")
+            axes[1].legend()
+        axes[1].set_title("Combined CDF")
+        axes[1].set_xlabel("Amplitude (V)")
+        axes[1].set_ylabel("CDF")
+        axes[1].grid(True)
+
+        title = []
+        if self.pmf.COM is not None:
+            title.append(f"COM={self.pmf.COM:.2f} dB")
+        if self.pmf.A_ni is not None:
+            title.append(f"A_ni={self.pmf.A_ni:.3e} V")
+        if title:
+            fig.suptitle(", ".join(title))
+
+        _finish_figure(fig, _plot_save_path(save_path, "pmf_summary.png"))
+        return axes
+
+    def plot_summary(self, save_path: str = "") -> dict[str, Any]:
+        """
+        Plot the standard COM single-run report set.
+
+        Parameters
+        ----------
+        save_path:
+            Optional output directory. If empty, figures are shown interactively.
+            If provided, fixed filenames are written under this directory.
+        """
+        outputs: dict[str, Any] = {}
+        outputs["path_pulses"] = self.plot_path_pulses(save_path)
+        outputs["path_sbr"] = self.plot_path_sbr(save_path)
+        if self.dfe is not None:
+            outputs["dfe_summary"] = self.plot_dfe_summary(save_path)
+        if self.impairment is not None:
+            outputs["impairment_summary"] = self.plot_impairment_summary(save_path)
+        if self.pmf is not None:
+            outputs["pmf_summary"] = self.plot_pmf_summary(save_path)
+        return outputs
+
+    def export(self, save_path: str, *, include_plots: bool = True) -> dict[str, str]:
+        """
+        Export this single-run COMStatus as report-friendly and reloadable data.
+
+        Parameters
+        ----------
+        save_path:
+            Output directory. The method writes ``summary.json`` and
+            ``arrays.npz`` under this directory. If include_plots is True, PNG
+            plots are written under ``plots/``.
+        include_plots:
+            If True, also call plot_summary() and save the standard figure set.
+
+        Returns
+        -------
+        dict
+            Paths of generated artifacts.
+        """
+        out_dir = Path(save_path)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        arrays: dict[str, np.ndarray] = {}
+
+        paths_meta = []
+        for idx, path in enumerate(self.paths):
+            prefix = f"paths.{idx}"
+            paths_meta.append({
+                "idx": idx,
+                "kind": path.kind,
+                "S_tx": _sparam_export(f"{prefix}.S_tx", path.S_tx, arrays),
+                "S_ch": _sparam_export(f"{prefix}.S_ch", path.S_ch, arrays),
+                "S_rx": _sparam_export(f"{prefix}.S_rx", path.S_rx, arrays),
+                "S_all": _sparam_export(f"{prefix}.S_all", path.S_all, arrays),
+                "H_ffe": _segment_export(f"{prefix}.H_ffe", path.H_ffe, arrays),
+                "H_t": _segment_export(f"{prefix}.H_t", path.H_t, arrays),
+                "H_21": _segment_export(f"{prefix}.H_21", path.H_21, arrays),
+                "H_r": _segment_export(f"{prefix}.H_r", path.H_r, arrays),
+                "H_ctf": _segment_export(f"{prefix}.H_ctf", path.H_ctf, arrays),
+                "H_all": _segment_export(f"{prefix}.H_all", path.H_all, arrays),
+                "X": _segment_export(f"{prefix}.X", path.X, arrays),
+                "pulse": _segment_export(f"{prefix}.pulse", path.pulse, arrays),
+            })
+
+        summary: dict[str, object] = {
+            "type": type(self).__name__,
+            "FOM": _json_scalar(self.FOM),
+            "paths": paths_meta,
+            "dfe": None,
+            "impairment": None,
+            "pmf": None,
+        }
+
+        if self.dfe is not None:
+            summary["dfe"] = {
+                "ts": self.dfe.ts,
+                "pos": self.dfe.pos,
+                "dfe_coeff": _array_meta(arrays, "dfe.dfe_coeff", self.dfe.dfe_coeff),
+                "h_ISI": _array_meta(arrays, "dfe.h_ISI", self.dfe.h_ISI),
+            }
+
+        if self.impairment is not None:
+            summary["impairment"] = {
+                "As": self.impairment.As,
+                "sigma_X": self.impairment.sigma_X,
+                "sigma_TX": self.impairment.sigma_TX,
+                "sigma_ISI": self.impairment.sigma_ISI,
+                "sigma_J": self.impairment.sigma_J,
+                "sigma_XT": self.impairment.sigma_XT,
+                "sigma_N": self.impairment.sigma_N,
+                "h_ISI": _array_meta(arrays, "impairment.h_ISI", self.impairment.h_ISI),
+                "h_J": _array_meta(arrays, "impairment.h_J", self.impairment.h_J),
+                "h_XTs_dsamp": [
+                    _array_meta(arrays, f"impairment.h_XTs_dsamp.{idx}", h)
+                    for idx, h in enumerate(self.impairment.h_XTs_dsamp)
+                ],
+            }
+
+        if self.pmf is not None:
+            summary["pmf"] = {
+                "dy": self.pmf.dy,
+                "tap_abs_th": self.pmf.tap_abs_th,
+                "y0": _json_scalar(self.pmf.y0),
+                "A_ni": _json_scalar(self.pmf.A_ni),
+                "COM": _json_scalar(self.pmf.COM),
+                "p_ISI": _pmf_export("pmf.p_ISI", self.pmf.p_ISI, arrays),
+                "p_G": _pmf_export("pmf.p_G", self.pmf.p_G, arrays),
+                "p_DD": _pmf_export("pmf.p_DD", self.pmf.p_DD, arrays),
+                "p_XT": _pmf_export("pmf.p_XT", self.pmf.p_XT, arrays),
+                "p_combined": _pmf_export("pmf.p_combined", self.pmf.p_combined, arrays),
+            }
+
+        summary_path = out_dir / "summary.json"
+        arrays_path = out_dir / "arrays.npz"
+        _write_json(summary_path, summary)
+        np.savez_compressed(arrays_path, **arrays)
+
+        outputs = {
+            "summary": str(summary_path),
+            "arrays": str(arrays_path),
+        }
+        if include_plots:
+            plot_dir = out_dir / "plots"
+            self.plot_summary(str(plot_dir))
+            outputs["plots"] = str(plot_dir)
+        return outputs
 
 @dataclass(repr=False)
 class COMSearchRow(_PrettyDataclass):
@@ -1323,6 +1582,148 @@ class COMSearchStatus(_PrettyDataclass):
     @property
     def COM(self) -> Optional[float]:
         return None if self.best.pmf is None else self.best.pmf.COM
+
+    def plot_fom_trace(self, save_path: str = "") -> Any:
+        """
+        Plot FOM versus retained candidate index.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``search_fom_trace.png``.
+        """
+        ok_rows = [row for row in self.rows if row.status == "ok"]
+        if len(ok_rows) == 0:
+            raise ValueError("COMSearchStatus.rows contains no successful rows to plot.")
+
+        plt = _plt(use_agg=bool(save_path))
+        fig, ax = plt.subplots()
+        ax.plot([row.idx for row in ok_rows], [row.FOM for row in ok_rows], marker="o", linewidth=1.0)
+        ax.axhline(self.best_row.FOM, linestyle="--", color="tab:red", label=f"best FOM={self.best_row.FOM:.2f} dB")
+        ax.set_title("Search FOM Trace")
+        ax.set_xlabel("Candidate index")
+        ax.set_ylabel("FOM (dB)")
+        ax.grid(True)
+        ax.legend()
+        _finish_figure(fig, _plot_save_path(save_path, "search_fom_trace.png"))
+        return ax
+
+    def plot_top_candidates(self, save_path: str = "", top_n: int = 10) -> Any:
+        """
+        Plot top-N retained candidates sorted by FOM.
+
+        Parameters
+        ----------
+        save_path:
+            Optional file path or directory. Directory mode writes
+            ``search_top_candidates.png``.
+        top_n:
+            Number of successful candidates to show.
+        """
+        ok_rows = [row for row in self.rows if row.status == "ok"]
+        if len(ok_rows) == 0:
+            raise ValueError("COMSearchStatus.rows contains no successful rows to plot.")
+
+        top_n = int(top_n)
+        if top_n <= 0:
+            raise ValueError("top_n must be positive.")
+
+        rows = sorted(ok_rows, key=lambda row: row.FOM, reverse=True)[:top_n]
+        labels = [f"{row.idx}\n({row.candidate.g_DC:.1f},{row.candidate.g_DC2:.1f})" for row in rows]
+        values = [row.FOM for row in rows]
+
+        plt = _plt(use_agg=bool(save_path))
+        fig, ax = plt.subplots(figsize=(max(7, 0.7 * len(rows)), 4))
+        ax.bar(np.arange(len(rows)), values)
+        ax.set_xticks(np.arange(len(rows)))
+        ax.set_xticklabels(labels)
+        ax.set_title("Top Search Candidates")
+        ax.set_xlabel("Candidate idx\n(g_DC, g_DC2)")
+        ax.set_ylabel("FOM (dB)")
+        ax.grid(True, axis="y")
+        _finish_figure(fig, _plot_save_path(save_path, "search_top_candidates.png"))
+        return ax
+
+    def plot_summary(self, save_path: str = "") -> dict[str, Any]:
+        """
+        Plot the standard COM search report set.
+
+        Parameters
+        ----------
+        save_path:
+            Optional output directory. If empty, figures are shown interactively.
+            If provided, fixed filenames are written under this directory.
+        """
+        outputs: dict[str, Any] = {}
+        outputs["search_fom_trace"] = self.plot_fom_trace(save_path)
+        outputs["search_top_candidates"] = self.plot_top_candidates(save_path)
+        best_path = "" if not save_path else str(Path(save_path) / "best")
+        outputs["best"] = self.best.plot_summary(best_path)
+        return outputs
+
+    def export(self, save_path: str, *, include_plots: bool = True) -> dict[str, str]:
+        """
+        Export search summary plus the full best-candidate COMStatus.
+
+        Parameters
+        ----------
+        save_path:
+            Output directory. The method writes search_summary.json and exports
+            the best full status under ``best/``.
+        include_plots:
+            If True, also write search plots and best-candidate plots.
+        """
+        out_dir = Path(save_path)
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        rows = []
+        for row in self.rows:
+            rows.append({
+                "idx": row.idx,
+                "status": row.status,
+                "error": row.error,
+                "FOM": _json_scalar(row.FOM),
+                "As": _json_scalar(row.As),
+                "sigma_ISI": _json_scalar(row.sigma_ISI),
+                "sigma_J": _json_scalar(row.sigma_J),
+                "sigma_XT": _json_scalar(row.sigma_XT),
+                "sigma_N": _json_scalar(row.sigma_N),
+                "sigma_TX": _json_scalar(row.sigma_TX),
+                "ts": _json_scalar(row.ts),
+                "pos": _json_scalar(row.pos),
+                "candidate": {
+                    "c_m2": row.candidate.c_m2,
+                    "c_m1": row.candidate.c_m1,
+                    "c_1": row.candidate.c_1,
+                    "g_DC": row.candidate.g_DC,
+                    "g_DC2": row.candidate.g_DC2,
+                },
+            })
+
+        summary = {
+            "type": type(self).__name__,
+            "num_candidates": self.num_candidates,
+            "num_success": self.num_success,
+            "num_error": self.num_error,
+            "COM": _json_scalar(self.COM),
+            "best_row_idx": self.best_row.idx,
+            "best_row_FOM": self.best_row.FOM,
+            "rows": rows,
+        }
+        summary_path = out_dir / "search_summary.json"
+        _write_json(summary_path, summary)
+
+        best_outputs = self.best.export(str(out_dir / "best"), include_plots=include_plots)
+        outputs = {
+            "search_summary": str(summary_path),
+            "best_summary": best_outputs["summary"],
+            "best_arrays": best_outputs["arrays"],
+        }
+        if include_plots:
+            self.plot_summary(str(out_dir / "plots"))
+            outputs["plots"] = str(out_dir / "plots")
+        return outputs
 
 # ======================================
 # class helpers
@@ -1527,7 +1928,7 @@ def _build_path(
     link_cfg: LinkConfig,
     channel_cfg: COMChannelConfig,
     ft_cfg: COMFilterConfig,
-    pkg_cfg: COMPkgConfig,
+    txpkg_cfg: COMPkgConfig,
     shared: COMSharedPath,
     kind: Literal["victim", "next", "fext"],
     S_ch: SparamModel,
@@ -1543,8 +1944,8 @@ def _build_path(
         Channel configuration containing source/load reflection coefficients.
     ft_cfg:
         Filter configuration containing victim/FEXT/NEXT pulse amplitudes.
-    pkg_cfg:
-        Package configuration used to build Tx/Rx package models on S_ch.freqs.
+    txpkg_cfg:
+        Path-specific TX package configuration used to build S_tx on S_ch.freqs.
     shared:
         Shared COM path blocks built on this run's common measured frequency
         grid and LinkConfig scalar grid.
@@ -1558,15 +1959,15 @@ def _build_path(
         raise ValueError("S_ch.freqs must match shared.S_rx.freqs for measured-domain cascade.")
 
     if kind == "next":
-        S_tx = _build_txpkg(S_ch.freqs, pkg_cfg, isNext=True)
+        S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg, isNext=True)
         H_ffe = shared.H_ffe_next
         X = IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_ne)
     elif kind == "fext":
-        S_tx = _build_txpkg(S_ch.freqs, pkg_cfg)
+        S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg)
         H_ffe = shared.H_ffe
         X = IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_fe)
     elif kind == "victim":
-        S_tx = _build_txpkg(S_ch.freqs, pkg_cfg)
+        S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg)
         H_ffe = shared.H_ffe
         X = IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_v)
     else:
@@ -1608,13 +2009,12 @@ def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     filters on the LinkConfig FFT grid.
     """
     link_cfg = cfg.link
-    pkg_cfg = cfg.pkg
     ft_cfg = cfg.filter
     return COMSharedPath(
         H_ffe=_build_H_ffe(link_cfg, ft_cfg),
         H_ffe_next=_build_H_ffe_next(link_cfg),
         H_t=_build_H_t(link_cfg, ft_cfg),
-        S_rx=_build_rxpkg(freqs, pkg_cfg),
+        S_rx=_build_rxpkg(freqs, cfg.rxpkg),
         H_r=_build_H_r(link_cfg, ft_cfg),
         H_ctf=_build_H_ctf(link_cfg, ft_cfg),
     )
@@ -1635,7 +2035,6 @@ def _build_paths(
     link_cfg = cfg.link
     ch_cfg = cfg.channel
     ft_cfg = cfg.filter
-    pkg_cfg = cfg.pkg
 
     expected_count = 1 + len(ch_cfg.next_s4p_paths) + len(ch_cfg.fext_s4p_paths)
     if len(channels) != expected_count:
@@ -1649,7 +2048,7 @@ def _build_paths(
             link_cfg=link_cfg,
             channel_cfg=ch_cfg,
             ft_cfg=ft_cfg,
-            pkg_cfg=pkg_cfg,
+            txpkg_cfg=cfg.txpkg_victim,
             shared=shared,
             kind="victim",
             S_ch=channels[0],
@@ -1666,7 +2065,7 @@ def _build_paths(
                 link_cfg=link_cfg,
                 channel_cfg=ch_cfg,
                 ft_cfg=ft_cfg,
-                pkg_cfg=pkg_cfg,
+                txpkg_cfg=cfg.txpkg_next,
                 shared=shared,
                 kind="next",
                 S_ch=S_ch,
@@ -1679,7 +2078,7 @@ def _build_paths(
                 link_cfg=link_cfg,
                 channel_cfg=ch_cfg,
                 ft_cfg=ft_cfg,
-                pkg_cfg=pkg_cfg,
+                txpkg_cfg=cfg.txpkg_fext,
                 shared=shared,
                 kind="fext",
                 S_ch=S_ch,
@@ -2058,7 +2457,7 @@ class COM:
     def pmf_status(self) -> Optional[COMPMFStatus]:
         return self._require_status().pmf
 
-    # LV-1 methods
+    # class methods
     def build_all_paths(self) -> list[COMPath]:
         """
         Build all COM paths.
@@ -2251,35 +2650,45 @@ class COM:
         )
 
 
-def _smoke_test_com_path() -> tuple[COMConfig, COMStatus]:
-    """
-    Run an end-to-end COMPath smoke test with bundled reference Excel/channels.
-
-    This is not a COM-correlation test. It only checks that the current pipeline
-    can load the reference Excel, build channel-under-test S-parameters,
-    package/filter blocks, per-path voltage transfer functions, pulse
-    responses, and PMF/COM without shape/contract errors.
-    """
-    project_root = Path(__file__).resolve().parents[2]
-    cfg_path = project_root / "reference_data" / "pychopmarg_example2" / "config" / "config_com_ieee8023dj_PyChOpMarg_vs_MATLAB.xls"
-    cfg = excel_to_config(str(cfg_path))
-
-    status = COM(cfg).run()
-
-    print("COMPath smoke test passed")
-    print(f"path_count = {len(status.paths)}")
-    for idx, path in enumerate(status.paths):
-        delay = path.pulse.find_main_delay()
-        print(
-            f"[{idx}] kind={path.kind}, "
-            f"S_all={path.S_all.sdd.shape}, "
-            f"H_21={path.H_21.tf.shape}, "
-            f"H_all={path.H_all.tf.shape}, "
-            f"pulse_ir={path.pulse.ir.shape}, "
-            f"peak_ui={delay['peak_time_ui']:.3f}"
-        )
-
-    return cfg, status
-
 if __name__ == "__main__":
-    cfg, status =  _smoke_test_com_path()
+    project_root = Path(__file__).resolve().parents[2]
+
+    # Project-owned COM input workbook.
+    config_path = project_root / "templates" / "com_v1_params_template.xlsx"
+
+    # Choose one mode:
+    # - "single": use fixed_config only and export one full debug/study status
+    # - "search": use fixed_config + search_config and export search result + best status
+    run_mode = "single"
+
+    if run_mode == "single":
+        cfg = excel_to_config(str(config_path))
+        status = COM(cfg).run()
+
+        output_path = project_root / "reports" / "single_run"
+        outputs = status.export(str(output_path), include_plots=True)
+
+        print("COM single run completed")
+        print(f"config: {config_path}")
+        print(f"output: {output_path}")
+        print(f"FOM: {status.FOM}")
+        if status.pmf is not None:
+            print(f"COM: {status.pmf.COM}")
+        print(outputs)
+    elif run_mode == "search":
+        cfg = excel_to_config(str(config_path))
+        search = excel_to_search_config(str(config_path))
+        search_status = COM(cfg).run(search)
+
+        output_path = project_root / "reports" / "search_run"
+        outputs = search_status.export(str(output_path), include_plots=True)
+
+        print("COM search run completed")
+        print(f"config: {config_path}")
+        print(f"output: {output_path}")
+        print(f"best FOM: {search_status.best.FOM}")
+        if search_status.best.pmf is not None:
+            print(f"best COM: {search_status.best.pmf.COM}")
+        print(outputs)
+    else:
+        raise ValueError(f"Unsupported run_mode: {run_mode!r}. Use 'single' or 'search'.")

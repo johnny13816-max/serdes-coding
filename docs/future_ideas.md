@@ -1,92 +1,151 @@
 # SerDes Coding Todo / Future Ideas
 
-本文件記錄已討論但尚未完整落地的功能。目的不是取代 issue tracker，而是保留專案設計方向，避免之後忘記已經討論過的 module 或 method。
+## 目的
+
+這份文件記錄未來可能加入的 module、method、validation flow。它不是 issue tracker，而是避免已討論過的想法遺失。
+
+## 近期優先項目
+
+1. COM v1.0 search flow
+   - 完成 93A search candidate sweep。
+   - search parameters: `c_m2`, `c_m1`, `c_1`, `g_DC`, `g_DC2`。
+   - search 階段只保存 lightweight summary。
+   - best candidate 再跑完整 PMF/COM。
+
+2. Single-run full output
+   - 定義 durable output 格式。
+   - 目標是可以重建某次 `COMStatus`。
+   - 需要包含 config snapshot、paths、DFE、impairment、PMF、COM、debug plots。
+
+3. Excel input contract
+   - 完成 project-owned template 的 mapping validation。
+   - 確認 PyChOpMarg/PyCOM reference config 是否正確 mapping 到目前 template。
+   - 前處理 adapter 不放入 COM algorithm core。
+
+4. COM module cleanup
+   - 先移出 Excel I/O。
+   - 再移出 reference adapter。
+   - 再移出 smoke test。
+   - 最後才拆 config/status/formula。
 
 ## COM / 93A Core
 
-1. `COM.run()` 加入完整 FOM search
-   - 掃描 `c(-2)`, `c(-1)`, `c(1)`, `gDC`, `gDC2`。
-   - 每組設定需重新建立 equivalent channel、DFE、impairment，最後選擇最大 COM/FOM。
+5. FOM validation
+   - 檢查 93A.1.6 impairment statistics。
+   - 檢查 FOM formula 與 sign convention。
+   - 建立 small sanity case。
 
-2. `COMResult / COMStatus` 最終輸出格式
-   - 區分單一設定下的結果與掃描完成後的最佳結果。
-   - 保留 path-level 中間量，方便 debug `status.paths[0].H_21`、`status.paths[0].pulse` 等資料。
+6. PMF validation
+   - 檢查 93A.1.7 PMF source：ISI、Gaussian、dual-Dirac jitter、XT。
+   - 檢查 PMF convolution order 與 amplitude grid。
+   - 檢查 final COM。
 
-3. 93A.1.7 PMF pipeline 完整串接
-   - 將 signal PDF、ISI、noise、jitter、crosstalk PMF 合成。
-   - 接到 final COM/FOM calculation。
-
-4. `calculate_COM()` 主流程
-   - 接在 `_find_pos_and_dfe()` 與 `_calculate_impairments()` 後面。
-   - 實作從 impairment statistics / PMF 到 final COM value 的流程。
-
-5. COM 93A vs 802.3ck / 178A 版本分流
-   - 先完成 93A。
-   - 後續用 config version 或 method naming 區分 `_93a`, `_178a`, `_8023ck` 行為。
+7. COM 93A vs 178A comparison
+   - 先不實作。
+   - 保留未來架構：`model_93a.py` / `model_178a.py` 或 method suffix `_93a` / `_178a`。
 
 ## DFE / Sampling Phase Validation
 
-6. DFE / sampling phase validation
-   - 檢查 `_calculate_h_J()` 的 boundary case，特別是 `pos == 0`。
-   - 驗證 fixed DFE tap clipping、sample phase search、main cursor 選擇是否符合 spec。
-   - 驗證 802.3ck floating DFE 的 floating bank、overlap removal、tail RSS constraint、tap indexing。
-   - 增加 debug report，例如 selected `ts`, `pos`, main cursor, clipped taps。
+8. DFE / sampling phase debug report
+   - selected `ts`
+   - selected `pos`
+   - main cursor
+   - fixed DFE coefficients
+   - clipped taps
+   - residual ISI vector
+
+9. 93A sampling phase validation
+   - 檢查 `_find_sampling_phase_93a()`。
+   - 檢查 `h_J` boundary handling。
+   - 檢查 `pos == 0` / `pos == per_ui - 1` edge cases。
+
+10. 802.3ck floating DFE
+   - 未來項目。
+   - 需要釐清 floating bank、overlap removal、tail RSS constraint、tap indexing。
 
 ## SparamPreProcess
 
-7. `SparamPreProcess` module / class
-   - 專門處理 S-parameter quality 與 preprocessing。
-   - 來源參考包含 `sparam_to_sbr.pdf` 內的 DC、causality、passivity、reciprocity、extrapolation 等議題。
+11. 建立 `SparamPreProcess` module/class
+   - 專門處理 `sparam_to_sbr.pdf` 中提到的前處理議題。
+   - 包含 DC、causality、passivity、reciprocity、extrapolation。
 
-8. Passivity check / fix
-   - 檢查 S matrix 是否 passive。
-   - 後續評估是否提供 passivity enforcement / correction。
+12. Raw S4P / full mixed-mode debug domain
+   - 保存原始 S4P。
+   - 產生完整 mixed-mode matrix。
+   - 提供 Sdd / Sdc / Scd / Scc debug。
+   - 避免讓 `SparamModel` 失去 Sdd 2-port contract。
 
-9. Causality check / fix
-   - 檢查 S-parameter 轉到時域後是否有 non-causal response。
-   - 提供 debug/report，而不是直接靜默修正。
+13. S4P port-order auto debug helper
+   - 比較 candidate port order，例如 `0123`、`0213`。
+   - 檢查 `Sdd21/Sdd11/Sdd22` magnitude。
+   - 檢查 mode conversion。
+   - 檢查 impulse response causality。
+   - 檢查 polarity / Tx-Rx direction swap。
 
-10. S-parameter DC extrapolation 多模型比較
-    - 比較 hold、linear、rational fit、low-frequency physical model 等方法。
-    - 用於缺少 DC 點的 measured S-parameter。
+14. Passivity check / fix
+   - 定義 passivity metric。
+   - 研究 passivity enforcement/correction 是否需要。
 
-11. Channel high-frequency extrapolation policy
-    - measured channel 不到 LinkConfig Nyquist 時，明確定義補高頻策略。
-    - 需要避免不合理高頻外推造成 impulse response artifact。
+15. Causality check / fix
+   - 建立 S-parameter to impulse response causality report。
+   - 檢查 non-causal energy、wrap-around、main cursor alignment。
 
-12. SparamModel measured-domain cascade policy
-    - S-domain 盡量維持 measured grid。
-    - 轉成 voltage transfer function domain 後，再進 LinkSegment grid。
+16. S-parameter DC extrapolation
+   - 比較 hold、linear、rational fit、low-frequency physical model。
+   - 對應 `sparam_to_sbr.pdf` 的 missing DC 問題。
+
+17. Channel high-frequency extrapolation
+   - 定義 measured channel 未達 LinkConfig Nyquist 時的處理。
+   - 避免 high-frequency 補值造成 impulse artifact。
+
+18. Measured-domain cascade policy
+   - S-parameter domain 優先維持 measured grid。
+   - cascade 後再轉 voltage transfer function。
+   - 最後才轉到 `LinkSegment` grid。
 
 ## LinkSegment Deferred Flow
 
-13. `LinkSegment.from_ir()` 後續處理 flow
-    - 目前先不文件化完整 contract，等 from-ir / resample / causality policy 穩定後再整理。
-    - 之後需要補強 measured discrete waveform、fitted IR、resample 到 LinkConfig grid 的處理方式。
+19. `LinkSegment.from_ir()` flow 加強
+   - 明確定義 measured discrete waveform / fitted IR / resample 到 LinkConfig grid 的流程。
+   - 檢查 interpolation 後是否需要 amplitude scaling。
+   - 檢查 raw/aligned IR contract 是否仍適用。
+
+20. LinkSegment plot/report
+   - 增加 standardized debug plot set。
+   - 例如 TF / IR / SR / SBR / main-cursor aligned view。
 
 ## PSD / Noise
 
-14. PSD arithmetic
-    - 增加 PSD 相加、縮放、合成等操作。
-    - 支援多個 impairment PSD 組合。
+21. PSD arithmetic
+   - 定義 PSD addition / filtering / integration。
+   - 支援多個 impairment PSD 合成。
 
-15. PSD resample / align policy 完整化
-    - 保留 arbitrary grid 與 LinkConfig grid 兩種入口。
-    - 明確定義 `ifftable`、DC 外推、高頻外推、filter grid mismatch 的行為。
+22. PSD resample / align policy
+   - arbitrary grid 與 LinkConfig grid 的轉換。
+   - DC extrapolation 與 high-frequency extrapolation policy。
+   - `ifftable` contract。
 
-16. PSD to time-domain noise generation
-    - 從 one-sided PSD 產生 random time-domain noise。
-    - 用於 Monte Carlo waveform 或 debug noise injection。
+23. PSD to time-domain noise generation
+   - one-sided PSD 轉 random time-domain noise。
+   - 用於 Monte Carlo waveform debug。
+
+24. ADC quantization noise helper
+   - 不放在 `OneSidePSD` constructor。
+   - 建立 helper 將 ADC setup 轉成 `OneSidePSD.from_sigma()` 或 `from_constant()` 輸入。
 
 ## PMF Handler
 
-17. PMF 93A.1.7 完整功能檢查
-    - 確認 `PMF1D` 涵蓋 multi-dirac、Gaussian、scale_x、shift_x、resample_to_grid、fir_filter、cascade、CDF。
+25. PMF cleanup
+   - 移除或實作殘留 public API：`fir_filtered_pmf()`、`Pmf1D.uniform()`。
+   - 確認 public methods 全部是 immutable style。
 
-18. PMF lazy CDF policy
-    - 決定 CDF 是否採 lazy evaluation。
-    - 明確定義何時重算、何時不保存。
+26. PMF debug / plot tools
+   - plot PMF/PDF-like view。
+   - plot CDF。
+   - main cursor normalized view。
+   - tail probability debug view。
 
-19. PMF debug / plot tools
-    - 畫 PDF/CDF。
-    - 加入 main cursor normalization、tail probability 等 debug view。
+27. PMF numerical validation
+   - 檢查 `combine()` round-trip / mass conservation。
+   - 檢查 `resample_dx()` mass conservation。
+   - 檢查 `fir_filter()` tap pruning 與 93A threshold。

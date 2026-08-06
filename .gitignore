@@ -8,6 +8,11 @@ __pycache__/
 
 # Distribution / packaging
 .Python
+node_modules/
+.mplconfig/
+templates/*_preview.png
+templates/*.inspect.ndjson
+reports/
 build/
 develop-eggs/
 dist/
