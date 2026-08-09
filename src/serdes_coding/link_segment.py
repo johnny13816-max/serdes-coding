@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import numpy as np
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
@@ -299,16 +299,23 @@ class LinkConfig:
     freqs: np.ndarray = field(init=False)           # unit: Hz, positive half side, np.arange(0,Fs/2+df,df)
     times: np.ndarray = field(init=False)           # unit: sec
     times_ui: np.ndarray = field(init=False)        # unit: UI
+    sampled_nfft: int = field(init=False)           # unit: samples, symbol-rate sampled-domain FFT length
+    sampled_df: float = field(init=False)            # unit: Hz, sampled-domain frequency resolution
+    theta: np.ndarray = field(init=False)            # unit: rad/sample, sampled-domain rfft axis [0, pi]
+    theta_freqs: np.ndarray = field(init=False)      # unit: Hz, equivalent baseband axis theta*fb/(2*pi)
 
     def __post_init__(self):
         self.bt = 1.0 / self.fb
         self.dt = self.bt / self.per_ui
         self.Fs = 1.0 / self.dt
         self.f_nyq = self.Fs / 2
-        if (int(self.Fs / self.target_df)%2 == 0):
-            nfft = int(self.Fs / self.target_df)
-        else:
-            nfft = int(self.Fs / self.target_df) + 1
+        raw_nfft = int(np.ceil(self.Fs / self.target_df))
+        # Default configs align the continuous-time rfft grid and the
+        # symbol-rate sampled-domain rfft grid to the same df:
+        #   df = Fs/Nfft = fb/sampled_nfft, sampled_nfft = Nfft/per_ui.
+        # The 2*per_ui block keeps Nfft/per_ui even, so theta includes pi.
+        block = 2 * int(self.per_ui)
+        nfft = int(np.ceil(raw_nfft / block) * block)
         self._set_derived_grid(nfft)
 
     @classmethod
@@ -359,16 +366,40 @@ class LinkConfig:
         self.times = np.arange(self.Nfft) * self.dt
         self.L_ui = int(self.Nfft / self.per_ui)
         self.times_ui = self.times / self.bt
+        self._set_sampled_grid()
 
         self.validate_freqs(self.freqs, require_uniform=True, expected_stop=self.f_nyq)
         self.validate_times(self.times, expected_stop=self.T_max - self.dt)
+
+    def _set_sampled_grid(self) -> None:
+        """
+        Define the symbol-rate sampled-domain rfft grid.
+
+        For default LinkConfig objects, Nfft is chosen as a multiple of
+        2*per_ui, so sampled_df equals the continuous-time df exactly. For
+        from_Nfft() configs created from arbitrary linear-convolution lengths,
+        use the closest even sampled-domain FFT length.
+        """
+        if self.Nfft % self.per_ui == 0:
+            sampled_nfft = self.Nfft // self.per_ui
+        else:
+            sampled_nfft = int(np.ceil(self.fb / self.df))
+
+        sampled_nfft = max(2, int(sampled_nfft))
+        if sampled_nfft % 2 != 0:
+            sampled_nfft += 1
+
+        self.sampled_nfft = sampled_nfft
+        self.sampled_df = self.fb / self.sampled_nfft
+        self.theta = np.linspace(0.0, np.pi, self.sampled_nfft // 2 + 1)
+        self.theta_freqs = self.theta * self.fb / (2 * np.pi)
 
     @staticmethod
     def validate_freqs(
         freqs: np.ndarray,
         require_uniform: bool = False,
         expected_stop: float | None = None,
-        rtol: float = 1e-12,
+        rtol: float = 1e-9,
         atol: float = 1e-15,
     ) -> np.ndarray:
         """
@@ -464,15 +495,16 @@ class LinkConfig:
         return times
 
 @dataclass
-class OneSidePSD:
+class ContinuousPSD:
     """
-    One-sided power spectral density container.
+    Continuous-time one-sided power spectral density container.
 
     Class boundary
     --------------
-    OneSidePSD owns scalar one-sided PSD samples S(f) on a non-negative
-    frequency axis. Internally the stored PSD is always one-sided and uses SI
-    frequency units, so integrated power is approximated by integral S(f) df.
+    ContinuousPSD owns scalar one-sided PSD samples S_ct,1(f) on a
+    non-negative continuous frequency axis. Internally the stored PSD is
+    always one-sided and uses SI frequency units, so integrated power is
+    approximated by integral S_ct,1(f) df.
 
     It does not own transfer-function FFT/IFFT conversion or S-parameter
     conversion. Filtering by an LTI response is represented by:
@@ -538,7 +570,7 @@ class OneSidePSD:
         sigma: float,
         f_start: float = 0.0,
         f_stop: float = np.inf,
-    ) -> 'OneSidePSD':
+    ) -> 'ContinuousPSD':
         """
         Build a flat band-limited one-sided PSD from RMS amplitude.
 
@@ -585,7 +617,7 @@ class OneSidePSD:
         cls,
         freqs: np.ndarray,
         psd_value: float,
-    ) -> 'OneSidePSD':
+    ) -> 'ContinuousPSD':
         """
         Build a flat one-sided PSD from a constant PSD density.
 
@@ -607,7 +639,7 @@ class OneSidePSD:
         cls,
         freqs: np.ndarray,
         func: Any,
-    ) -> 'OneSidePSD':
+    ) -> 'ContinuousPSD':
         """
         Build a one-sided PSD from a scalar frequency-domain model.
 
@@ -638,7 +670,7 @@ class OneSidePSD:
         cfg: LinkConfig,
         *,
         dc: Literal["error", "hold"] = "error",
-    ) -> 'OneSidePSD':
+    ) -> 'ContinuousPSD':
         """
         Return a copy sampled on cfg.freqs.
 
@@ -674,7 +706,7 @@ class OneSidePSD:
 
         return type(self)(freqs=f_new, psd=psd_new, ifftable=True)
 
-    def filtered_by(self, response: 'LinkSegment') -> 'OneSidePSD':
+    def filtered_by(self, response: 'LinkSegment') -> 'ContinuousPSD':
         """
         Return the PSD after filtering by a LinkSegment transfer function.
 
@@ -687,6 +719,90 @@ class OneSidePSD:
         if not isFreqsEqual(self.freqs, response.freqs):
             raise ValueError("PSD and LinkSegment frequency grids must match. Use aligned_to(cfg, dc=...) first.")
         return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2, ifftable=self.ifftable)
+
+    def to_sampled(
+        self,
+        fb: float,
+        theta: Optional[np.ndarray] = None,
+        *,
+        alias_kmax: Optional[int] = None,
+        theta_points: Optional[int] = None,
+    ) -> 'SampledPSD':
+        """
+        Convert this continuous-time one-sided PSD to a sampled-domain PSD.
+
+        Parameters
+        ----------
+        fb:
+            Sampling rate / baud rate in Hz.
+        theta:
+            Optional sampled-domain one-sided frequency axis in rad/sample.
+            If omitted, a uniform one-sided sampled-domain axis from 0 to pi,
+            including both endpoints, is generated.
+        alias_kmax:
+            Optional integer alias summation range. The method sums branches
+            for k=-alias_kmax..alias_kmax. If omitted, the range is inferred
+            from self.freqs[-1] and fb.
+        theta_points:
+            Optional number of points for the generated theta axis when
+            theta is None. If omitted, use the number of CT samples inside
+            [0, fb/2], with a minimum of two points.
+
+        Notes
+        -----
+        Sampling always aliases continuous-time PSD. This method performs the
+        aliasing sum directly in one-sided form:
+            theta = 2*pi*f/fb
+            f0 = theta*fb/(2*pi)
+            S_dt,1 = fb/(2*pi) * sum_k S_ct,1(| f0 + k*fb |)
+
+        The absolute-value lookup is the implicit one-sided view of the
+        two-sided alias branches. The DC and Nyquist endpoints are halved to
+        avoid double-counting the mirrored branch. If the input has no
+        out-of-band energy, the aliasing
+        sum naturally reduces to the baseband variable transform.
+        """
+        fb = float(fb)
+        if not np.isfinite(fb) or fb <= 0.0:
+            raise ValueError("fb must be finite and positive.")
+
+        if theta is None:
+            in_band = self.freqs <= 0.5 * fb
+            if theta_points is None:
+                theta_points = max(2, int(np.count_nonzero(in_band)))
+            else:
+                theta_points = int(theta_points)
+            if theta_points < 2:
+                raise ValueError("theta_points must be at least 2.")
+            theta = np.linspace(0.0, np.pi, theta_points)
+        else:
+            theta = SampledPSD.validate_theta(theta)
+
+        if alias_kmax is None:
+            alias_kmax = int(np.ceil(float(self.freqs[-1]) / fb)) + 1
+        else:
+            alias_kmax = int(alias_kmax)
+        if alias_kmax < 0:
+            raise ValueError("alias_kmax must be non-negative.")
+
+        f0 = theta * fb / (2 * np.pi)
+
+        def interp_ct_psd(f_abs: np.ndarray) -> np.ndarray:
+            return np.interp(f_abs, self.freqs, self.psd, left=self.psd[0], right=0.0)
+
+        folded = np.zeros_like(theta, dtype=float)
+        for k in range(-alias_kmax, alias_kmax + 1):
+            kfb = k * fb
+            folded += interp_ct_psd(np.abs(f0 + kfb))
+
+        psd_dt = (fb / (2 * np.pi)) * folded
+
+        if len(psd_dt) > 0 and np.isclose(theta[0], 0.0):
+            psd_dt[0] *= 0.5
+        if len(psd_dt) > 1 and np.isclose(theta[-1], np.pi):
+            psd_dt[-1] *= 0.5
+
+        return SampledPSD(theta=theta, psd=psd_dt, fb=fb)
 
     def to_sigma(self) -> float:
         """
@@ -756,6 +872,559 @@ class OneSidePSD:
             plt.show()
 
         return ax
+
+@dataclass
+class SampledResponse:
+    """
+    Sampled/discrete-time response container.
+
+    Class boundary
+    --------------
+    SampledResponse owns a discrete-time LTI response on a normalized
+    one-sided rfft-style frequency axis. It is the sampled-domain counterpart
+    of LinkSegment, but it does not represent a continuous-time physical link
+    and does not apply continuous-time IFFT scaling.
+
+    Stored conventions:
+    - theta: rad/sample, one-sided rfft-style grid from 0 to pi.
+    - tf: H(e^jtheta), complex sampled-domain transfer function.
+    - ir: h[n], discrete-time impulse response.
+    - fb: sampling rate / baud rate in Hz.
+    """
+    theta: np.ndarray                # unit: rad/sample, one-sided rfft-style axis
+    tf: np.ndarray                   # unit: response gain, H(e^jtheta)
+    ir: np.ndarray                   # unit: discrete-time impulse response h[n]
+    fb: float                        # unit: Hz, sampling rate / baud rate
+
+    def __post_init__(self) -> None:
+        self.theta = self.validate_rfft_theta(self.theta)
+        self.tf = self.validate_tf(self.tf, self.theta)
+        self.ir = self.validate_ir(self.ir)
+        expected_ir_len = 2 * (len(self.theta) - 1)
+        if len(self.ir) != expected_ir_len:
+            raise ValueError(
+                "ir length must match the even-length rfft theta grid. "
+                f"Expected {expected_ir_len}, got {len(self.ir)}."
+            )
+        self.fb = float(self.fb)
+        if not np.isfinite(self.fb) or self.fb <= 0.0:
+            raise ValueError("fb must be finite and positive.")
+
+    @staticmethod
+    def validate_rfft_theta(theta: np.ndarray) -> np.ndarray:
+        """
+        Validate a one-sided even-length rfft theta grid.
+
+        Parameters
+        ----------
+        theta:
+            Frequency axis in rad/sample. First point must be 0, last point
+            must be pi, and spacing must be uniform.
+        """
+        theta = SampledPSD.validate_theta(theta)
+        if not np.isclose(theta[0], 0.0):
+            raise ValueError("theta[0] must be 0 for SampledResponse.")
+        if not np.isclose(theta[-1], np.pi):
+            raise ValueError("theta[-1] must be pi for SampledResponse.")
+        steps = np.diff(theta)
+        if not np.allclose(steps, steps[0], rtol=1e-12, atol=1e-15):
+            raise ValueError("theta must be uniformly spaced for SampledResponse.")
+        return theta
+
+    @staticmethod
+    def validate_tf(tf: np.ndarray, theta: np.ndarray) -> np.ndarray:
+        """
+        Validate sampled-domain transfer-function samples.
+
+        Parameters
+        ----------
+        tf:
+            Complex one-sided transfer function H(e^jtheta).
+        theta:
+            One-sided theta grid used for shape checking.
+        """
+        tf = np.asarray(tf, dtype=complex)
+        if tf.shape != theta.shape:
+            raise ValueError("tf and theta must have the same shape.")
+        if tf.ndim != 1:
+            raise ValueError("tf must be a 1D array.")
+        if not np.all(np.isfinite(tf)):
+            raise ValueError("tf contains non-finite values.")
+        if not np.isclose(tf[0].imag, 0.0):
+            raise ValueError("SampledResponse tf[0] must be real for irfft.")
+        if not np.isclose(tf[-1].imag, 0.0):
+            raise ValueError("SampledResponse tf[-1] must be real for even-length irfft.")
+        return tf
+
+    @staticmethod
+    def validate_ir(ir: np.ndarray) -> np.ndarray:
+        """
+        Validate discrete-time impulse response samples.
+
+        Parameters
+        ----------
+        ir:
+            Real-valued discrete-time impulse response h[n].
+        """
+        ir = np.asarray(ir, dtype=float)
+        if ir.ndim != 1:
+            raise ValueError("ir must be a 1D array.")
+        if len(ir) < 2:
+            raise ValueError("ir must contain at least two samples.")
+        if len(ir) % 2 != 0:
+            raise ValueError("SampledResponse currently requires even-length ir.")
+        if not np.all(np.isfinite(ir)):
+            raise ValueError("ir contains non-finite values.")
+        return ir
+
+    @classmethod
+    def from_tf(
+        cls,
+        theta: np.ndarray,
+        tf: np.ndarray,
+        fb: float,
+        nfft: Optional[int] = None,
+    ) -> 'SampledResponse':
+        """
+        Build SampledResponse from H(e^jtheta).
+
+        Parameters
+        ----------
+        theta:
+            One-sided rfft-style theta grid in rad/sample.
+        tf:
+            Complex H(e^jtheta) samples on theta.
+        fb:
+            Sampling rate / baud rate in Hz.
+        nfft:
+            Optional even FFT length. If omitted, use 2*(len(tf)-1).
+            When provided, it must be consistent with len(tf).
+
+        Notes
+        -----
+        Uses DSP DFT convention directly:
+            ir = irfft(tf)
+        No continuous-time Fs scaling is applied.
+        """
+        theta = cls.validate_rfft_theta(theta)
+        tf = cls.validate_tf(tf, theta)
+        if nfft is None:
+            nfft = 2 * (len(theta) - 1)
+        nfft = int(nfft)
+        if nfft <= 0 or nfft % 2 != 0:
+            raise ValueError("SampledResponse nfft must be a positive even integer.")
+        if len(tf) != nfft // 2 + 1:
+            raise ValueError("len(tf) must equal nfft//2 + 1.")
+        ir = np.fft.irfft(tf, n=nfft)
+        return cls(theta=theta, tf=tf, ir=ir, fb=fb)
+
+    @classmethod
+    def from_ir(
+        cls,
+        ir: np.ndarray,
+        cfg: LinkConfig,
+    ) -> 'SampledResponse':
+        """
+        Build SampledResponse from discrete-time impulse response h[n].
+
+        Parameters
+        ----------
+        ir:
+            Real-valued discrete-time impulse response h[n].
+        cfg:
+            LinkConfig that owns the sampled-domain grid. The response is
+            zero-padded to cfg.sampled_nfft and uses cfg.theta as its
+            one-sided sampled-domain frequency axis.
+        """
+        ir = cls.validate_ir(ir)
+        nfft = int(cfg.sampled_nfft)
+        if nfft < len(ir):
+            raise ValueError("cfg.sampled_nfft must be greater than or equal to len(ir).")
+        if nfft % 2 != 0:
+            raise ValueError("cfg.sampled_nfft must be even.")
+        ir_padded = np.zeros(nfft, dtype=float)
+        ir_padded[:len(ir)] = ir
+        tf = np.fft.rfft(ir_padded, n=nfft)
+        return cls(theta=cfg.theta, tf=tf, ir=ir_padded, fb=cfg.fb)
+
+    @property
+    def freqs(self) -> np.ndarray:
+        """
+        Debug convenience axis in Hz: f = theta*fb/(2*pi).
+        """
+        return self.theta * self.fb / (2 * np.pi)
+
+    @property
+    def nfft(self) -> int:
+        """
+        Even FFT length associated with this rfft-style sampled response.
+        """
+        return int(len(self.ir))
+
+    def magnitude_squared(self) -> np.ndarray:
+        """
+        Return |H(e^jtheta)|^2 on this response's theta grid.
+        """
+        return np.abs(self.tf) ** 2
+
+    def cascade_tf(self, other: 'SampledResponse') -> 'SampledResponse':
+        """
+        Cascade two sampled-domain responses by multiplying transfer functions.
+
+        Parameters
+        ----------
+        other:
+            Another SampledResponse on the same theta grid and fb.
+        """
+        if not np.isclose(self.fb, other.fb):
+            raise ValueError("SampledResponse fb values must match.")
+        if not np.allclose(self.theta, other.theta, rtol=1e-12, atol=1e-15):
+            raise ValueError("SampledResponse theta grids must match.")
+        return type(self).from_tf(self.theta, self.tf * other.tf, self.fb)
+
+    def plot_tf(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Plot sampled transfer-function magnitude versus theta.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes.
+        save_path:
+            Optional output path. If provided, save and close the figure.
+        xlim:
+            Optional theta limits in rad/sample.
+        label:
+            Optional curve label.
+        """
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        theta = self.theta
+        mag_db = 20 * np.log10(np.maximum(np.abs(self.tf), np.finfo(float).tiny))
+        if xlim is not None:
+            lo, hi = float(xlim[0]), float(xlim[1])
+            if lo >= hi:
+                raise ValueError("xlim must be strictly increasing.")
+            mask = (theta >= lo) & (theta <= hi)
+            if not np.any(mask):
+                raise ValueError("xlim selects no response samples.")
+            theta = theta[mask]
+            mag_db = mag_db[mask]
+
+        ax.plot(theta, mag_db, label=label)
+        if label is not None:
+            ax.legend()
+        ax.set_xlabel("Frequency (rad/sample)")
+        ax.set_ylabel("|H(e^jtheta)| (dB)")
+        ax.set_title("Sampled Response TF")
+        ax.grid(True)
+
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            fig.canvas.draw_idle()
+            plt.show()
+
+        return ax
+
+    def plot_ir(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        xlim: Optional[tuple[int, int]] = None,
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Plot sampled impulse response h[n].
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes.
+        save_path:
+            Optional output path. If provided, save and close the figure.
+        xlim:
+            Optional sample-index limits.
+        label:
+            Optional curve label.
+        """
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        n = np.arange(len(self.ir))
+        ir = self.ir
+        if xlim is not None:
+            lo, hi = int(xlim[0]), int(xlim[1])
+            if lo >= hi:
+                raise ValueError("xlim must be strictly increasing.")
+            mask = (n >= lo) & (n <= hi)
+            if not np.any(mask):
+                raise ValueError("xlim selects no impulse-response samples.")
+            n = n[mask]
+            ir = ir[mask]
+
+        ax.plot(n, ir, label=label)
+        if label is not None:
+            ax.legend()
+        ax.set_xlabel("Sample index")
+        ax.set_ylabel("h[n]")
+        ax.set_title("Sampled Response IR")
+        ax.grid(True)
+
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            fig.canvas.draw_idle()
+            plt.show()
+
+        return ax
+
+@dataclass
+class SampledPSD:
+    """
+    Sampled/discrete-time one-sided power spectral density container.
+
+    Class boundary
+    --------------
+    SampledPSD owns scalar one-sided PSD samples S_dt,1(theta) on the
+    normalized sampled-domain frequency axis [0, pi]. It is the one-sided
+    equivalent of the spec-style two-sided PSD on [-pi, pi) for real-valued
+    signals.
+
+    The stored PSD unit is quantity^2/rad, so integrated power is approximated
+    by integral S_dt,1(theta) d theta.
+    """
+    theta: np.ndarray                # unit: rad/sample, one-sided axis [0, pi]
+    psd: np.ndarray                  # unit: quantity^2/rad, one-sided PSD samples
+    fb: float                        # unit: Hz, sampling rate / baud rate
+
+    def __post_init__(self) -> None:
+        self.theta = self.validate_theta(self.theta)
+        self.psd = self.validate_psd(self.psd, self.theta)
+        self.fb = float(self.fb)
+        if not np.isfinite(self.fb) or self.fb <= 0.0:
+            raise ValueError("fb must be finite and positive.")
+
+    @staticmethod
+    def validate_theta(theta: np.ndarray) -> np.ndarray:
+        """
+        Validate one-sided sampled-domain frequency samples.
+
+        Parameters
+        ----------
+        theta:
+            Frequency axis in rad/sample. Must be 1-D, finite, strictly
+            increasing, and contained in [0, pi].
+        """
+        theta = np.asarray(theta, dtype=float)
+        if theta.ndim != 1:
+            raise ValueError("theta must be a 1D array.")
+        if len(theta) < 2:
+            raise ValueError("theta must contain at least two points.")
+        if not np.all(np.isfinite(theta)):
+            raise ValueError("theta contains non-finite values.")
+        if not np.all(np.diff(theta) > 0):
+            raise ValueError("theta must be strictly increasing.")
+        if theta[0] < 0.0 or theta[-1] > np.pi:
+            raise ValueError("theta must be within [0, pi].")
+        return theta
+
+    @staticmethod
+    def validate_psd(psd: np.ndarray, theta: np.ndarray) -> np.ndarray:
+        """
+        Validate one-sided sampled PSD samples.
+
+        Parameters
+        ----------
+        psd:
+            One-sided PSD samples in quantity^2/rad.
+        theta:
+            Sampled-domain frequency axis used only for shape checking.
+        """
+        psd = np.asarray(psd, dtype=float)
+        if psd.shape != theta.shape:
+            raise ValueError("psd and theta must have the same shape.")
+        if psd.ndim != 1:
+            raise ValueError("psd must be a 1D array.")
+        if not np.all(np.isfinite(psd)):
+            raise ValueError("psd contains non-finite values.")
+        if np.any(psd < 0.0):
+            raise ValueError("psd must be non-negative.")
+        return psd
+
+    @classmethod
+    def from_constant(
+        cls,
+        theta: np.ndarray,
+        psd_value: float,
+        fb: float,
+    ) -> 'SampledPSD':
+        """
+        Build a flat one-sided sampled PSD from a constant density.
+
+        Parameters
+        ----------
+        theta:
+            Sampled-domain frequency axis in rad/sample.
+        psd_value:
+            Constant one-sided PSD density in quantity^2/rad.
+        fb:
+            Sampling rate / baud rate in Hz.
+        """
+        theta = cls.validate_theta(theta)
+        psd_value = float(psd_value)
+        if not np.isfinite(psd_value) or psd_value < 0.0:
+            raise ValueError("psd_value must be finite and non-negative.")
+        return cls(theta=theta, psd=psd_value * np.ones_like(theta, dtype=float), fb=fb)
+
+    @property
+    def freqs(self) -> np.ndarray:
+        """
+        Debug convenience axis in Hz: f = theta*fb/(2*pi).
+        """
+        return self.theta * self.fb / (2 * np.pi)
+
+    def to_continuous_baseband(self) -> ContinuousPSD:
+        """
+        Convert sampled-domain PSD to a baseband-equivalent ContinuousPSD.
+
+        This is not an inverse of broadband aliasing. It only maps the stored
+        sampled-domain PSD back to the equivalent 0..fb/2 continuous baseband:
+            S_ct,1(f) = 2*pi/fb * S_dt,1(theta)
+        """
+        return ContinuousPSD(
+            freqs=self.freqs,
+            psd=(2 * np.pi / self.fb) * self.psd,
+            ifftable=False,
+        )
+
+    def filtered_by(self, response: SampledResponse) -> 'SampledPSD':
+        """
+        Return the sampled PSD after filtering by a SampledResponse.
+
+        Parameters
+        ----------
+        response:
+            Sampled-domain response whose theta grid and fb match this PSD.
+        """
+        if not np.isclose(self.fb, response.fb):
+            raise ValueError("SampledPSD and SampledResponse fb values must match.")
+        if not np.allclose(self.theta, response.theta, rtol=1e-12, atol=1e-15):
+            raise ValueError("SampledPSD and SampledResponse theta grids must match.")
+        return type(self)(theta=self.theta, psd=self.psd * response.magnitude_squared(), fb=self.fb)
+
+    def add(self, other: 'SampledPSD') -> 'SampledPSD':
+        """
+        Return the sum of two independent sampled-domain PSD components.
+
+        Parameters
+        ----------
+        other:
+            Another SampledPSD with the same fb and theta grid.
+
+        Notes
+        -----
+        This method assumes the two PSD components are uncorrelated, so their
+        power spectral densities add directly:
+            S_total(theta) = S_self(theta) + S_other(theta)
+        """
+        if not isinstance(other, SampledPSD):
+            raise TypeError("other must be a SampledPSD.")
+        if not np.isclose(self.fb, other.fb):
+            raise ValueError("SampledPSD fb values must match.")
+        if not np.allclose(self.theta, other.theta, rtol=1e-12, atol=1e-15):
+            raise ValueError("SampledPSD theta grids must match.")
+        return type(self)(theta=self.theta, psd=self.psd + other.psd, fb=self.fb)
+
+    def __add__(self, other: 'SampledPSD') -> 'SampledPSD':
+        """
+        Operator alias for add().
+        """
+        return self.add(other)
+
+    def to_sigma(self) -> float:
+        """
+        Integrate one-sided sampled PSD over theta and return RMS amplitude.
+        """
+        power = float(np.trapezoid(self.psd, self.theta))
+        return float(np.sqrt(power))
+
+    def plot(
+        self,
+        ax: Optional[Axes] = None,
+        save_path: str = "",
+        xlim: Optional[tuple[float, float]] = None,
+        label: str | None = None,
+    ) -> Axes:
+        """
+        Plot one-sided sampled PSD versus theta.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib Axes.
+        save_path:
+            Optional output path. If provided, save and close the figure.
+        xlim:
+            Optional theta limits in rad/sample.
+        label:
+            Optional curve label.
+        """
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots()
+
+        theta = self.theta
+        psd = self.psd
+        if xlim is not None:
+            lo, hi = float(xlim[0]), float(xlim[1])
+            if lo >= hi:
+                raise ValueError("xlim must be strictly increasing.")
+            mask = (theta >= lo) & (theta <= hi)
+            if not np.any(mask):
+                raise ValueError("xlim selects no PSD samples.")
+            theta = theta[mask]
+            psd = psd[mask]
+
+        ax.plot(theta, psd, label=label)
+        if label is not None:
+            ax.legend()
+        ax.set_xlabel("Frequency (rad/sample)")
+        ax.set_ylabel("One-sided sampled PSD")
+        ax.set_title("Sampled PSD")
+        ax.grid(True)
+
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            plt.close(fig)
+        else:
+            fig.canvas.draw_idle()
+            plt.show()
+
+        return ax
+
+# Backward compatibility for the existing 93A implementation.
+OneSidePSD = ContinuousPSD
 
 @dataclass
 class SparamProcessor:
@@ -1257,6 +1926,11 @@ class SparamModel:
         ax: Any,
         xlim: Optional[tuple[float, float]] = None,
         x_scale: Optional[float] = None,
+        y_values: Optional[np.ndarray] = None,
+        y_mask: Optional[np.ndarray] = None,
+        auto_ylim: bool = True,
+        ylim_pad_ratio: float = 0.05,
+        auto_ylim_floor: Optional[float] = -300.0,
     ) -> Any:
         """
         Apply SparamModel's default frequency-plot convention.
@@ -1270,23 +1944,67 @@ class SparamModel:
         x_scale:
             Multiplier from Hz to the plot x-axis unit. If None, infer the
             scale from the scikit-rf Network frequency object.
+        y_values:
+            Optional plotted y-values in dB or degrees used for automatic y-limit.
+            Shape can be (N,) or (K, N).
+        y_mask:
+            Frequency mask corresponding to the displayed x-range.
+        auto_ylim:
+            If True, set y-limits from y_values inside y_mask.
+        ylim_pad_ratio:
+            Fractional y-span padding used when auto_ylim is True.
+        auto_ylim_floor:
+            Optional lower display floor for automatic y-limit calculation.
+            Values below this floor are treated as numerical floor artifacts
+            such as ideal zeros, but the plotted data itself is not clipped.
         """
         if ax is None:
             ax = self._plt().gca()
 
         ax.grid(True)
-        if xlim is not None:
+        if xlim is None:
+            lo_hz = float(self.freqs[0])
+            hi_hz = float(self.freqs[-1])
+        else:
             if len(xlim) != 2:
                 raise ValueError("xlim must contain two values: (start_hz, stop_hz).")
             lo_hz = float(xlim[0])
             hi_hz = float(xlim[1])
             if not np.isfinite(lo_hz) or not np.isfinite(hi_hz) or lo_hz >= hi_hz:
                 raise ValueError("xlim must be finite and strictly increasing.")
-            if x_scale is None:
-                f_scaled = np.asarray(self.network.frequency.f_scaled, dtype=float)
-                valid = np.abs(self.freqs) > 0.0
-                x_scale = float(np.median(f_scaled[valid] / self.freqs[valid])) if np.any(valid) else 1.0
+
+        if x_scale is None:
+            f_scaled = np.asarray(self.network.frequency.f_scaled, dtype=float)
+            valid = np.abs(self.freqs) > 0.0
+            x_scale = float(np.median(f_scaled[valid] / self.freqs[valid])) if np.any(valid) else 1.0
+
+        if xlim is not None:
             ax.set_xlim(lo_hz * x_scale, hi_hz * x_scale)
+
+        if y_mask is None:
+            y_mask = (self.freqs >= lo_hz) & (self.freqs <= hi_hz)
+        if auto_ylim and y_values is not None:
+            y_arr = np.asarray(y_values, dtype=float)
+            if y_arr.ndim == 1:
+                visible = y_arr[y_mask]
+            elif y_arr.ndim == 2:
+                visible = y_arr[:, y_mask].ravel()
+            else:
+                raise ValueError("y_values must be 1D or 2D.")
+
+            visible = visible[np.isfinite(visible)]
+            if auto_ylim_floor is not None:
+                above_floor = visible[visible > float(auto_ylim_floor)]
+                if above_floor.size > 0:
+                    visible = above_floor
+            if visible.size > 0:
+                y_min = float(np.min(visible))
+                y_max = float(np.max(visible))
+                if np.isclose(y_min, y_max):
+                    pad = max(1.0, abs(y_min) * ylim_pad_ratio)
+                else:
+                    pad = (y_max - y_min) * float(ylim_pad_ratio)
+                ax.set_ylim(y_min - pad, y_max + pad)
 
         return ax
 
@@ -1297,6 +2015,9 @@ class SparamModel:
         xlim: Optional[tuple[float, float]] = None,
         save_path: str = "",
         label: str | None = None,
+        auto_ylim: bool = True,
+        annotate_f: Optional[float] = None,
+        annotate_label: str = "IL",
         **kwargs: Any,
     ) -> Any:
         """
@@ -1318,21 +2039,118 @@ class SparamModel:
             Optional output path. If provided, save the figure and close it.
         label:
             Optional curve label. Useful when overlaying multiple channels.
+        auto_ylim:
+            If True, set y-limits from the plotted frequency range.
+        annotate_f:
+            Optional frequency in Hz to annotate, e.g. fb for IL at baud rate.
+        annotate_label:
+            Label prefix for the annotation text.
         **kwargs:
             Additional keyword arguments passed to matplotlib ``plot``.
         """
         created_ax = ax is None
         if created_ax:
             _, ax = self._plt().subplots()
-        ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd21), label=label or "Sdd21", **kwargs)
+        il_db = self._magnitude_db(self.sdd21)
+        ax.plot(self.freqs / 1e9, il_db, label=label or "Sdd21", **kwargs)
         if logx:
             ax.set_xscale("log")
         ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("IL, Sdd21 (dB)")
         ax.set_title("Insertion Loss")
         ax.legend()
-        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9, y_values=il_db, auto_ylim=auto_ylim)
+        if annotate_f is not None:
+            self.annotate_IL(ax, annotate_f, label=annotate_label)
         return self._finish_frequency_plot(ax, save_path, show=created_ax)
+
+    def annotate_IL(self, ax: Any, f: float, label: str = "IL") -> Any:
+        """Annotate insertion loss Sdd21 at a specific frequency."""
+        f_hz = float(f)
+        if not np.isfinite(f_hz):
+            raise ValueError("f must be finite.")
+        if f_hz < self.freqs[0] or f_hz > self.freqs[-1]:
+            raise ValueError("f must be within self.freqs.")
+
+        il_db = self._magnitude_db(self.sdd21)
+        il_at_f = float(np.interp(f_hz, self.freqs, il_db))
+        f_ghz = f_hz / 1e9
+        ax.axvline(f_ghz, linestyle="--", color="tab:red", linewidth=1.0)
+        y_min, y_max = ax.get_ylim()
+        y_text = min(max(il_at_f, y_min), y_max)
+        ax.annotate(
+            f"{label}@{f_ghz:.3f} GHz = {il_at_f:.2f} dB",
+            xy=(f_ghz, y_text),
+            xytext=(6, 8),
+            textcoords="offset points",
+            fontsize=8,
+            color="tab:red",
+            arrowprops={"arrowstyle": "->", "color": "tab:red", "linewidth": 0.8},
+        )
+        return ax
+
+    def annotate_f(self, ax: Any, f: float, label: str = "Sdd21") -> Any:
+        """
+        Annotate through-path Sdd21 relative gain at a specific frequency.
+
+        Parameters
+        ----------
+        ax:
+            Matplotlib Axes containing a SparamModel frequency plot.
+        f:
+            Frequency in Hz to annotate.
+        label:
+            Label prefix for the annotation text.
+        """
+        f_hz = float(f)
+        if not np.isfinite(f_hz):
+            raise ValueError("f must be finite.")
+        if f_hz < self.freqs[0] or f_hz > self.freqs[-1]:
+            raise ValueError("f must be within self.freqs.")
+
+        mag_db = self._magnitude_db(self.sdd21)
+        rel_db = mag_db - mag_db[0]
+        mag_at_f = float(np.interp(f_hz, self.freqs, mag_db))
+        rel_at_f = float(np.interp(f_hz, self.freqs, rel_db))
+        f_ghz = f_hz / 1e9
+
+        y_min, y_max = ax.get_ylim()
+        ax.axvline(f_ghz, linestyle="--", color="tab:red", linewidth=1.0)
+        ax.plot(f_ghz, mag_at_f, marker="o", color="tab:red", markersize=4)
+        ax.annotate(
+            f"{label}@{f_ghz:.3f} GHz = {rel_at_f:.1f} dB",
+            xy=(f_ghz, mag_at_f),
+            xytext=(6, 8),
+            textcoords="offset points",
+            fontsize=8,
+            color="tab:red",
+            bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "tab:red", "alpha": 0.85},
+        )
+        ax.set_ylim(y_min, y_max)
+        return ax
+
+    def frequency_at_sdd21_gain(self, gain_db: float = -3.0) -> Optional[float]:
+        """
+        Return first frequency where Sdd21 drops to a relative gain target.
+
+        Parameters
+        ----------
+        gain_db:
+            Relative gain in dB with respect to Sdd21 at DC.
+        """
+        rel_db = self._magnitude_db(self.sdd21) - self._magnitude_db(self.sdd21)[0]
+        target = float(gain_db)
+        crossing = np.where(rel_db <= target)[0]
+        if len(crossing) == 0:
+            return None
+        idx = int(crossing[0])
+        if idx == 0:
+            return float(self.freqs[0])
+        x0, x1 = float(self.freqs[idx - 1]), float(self.freqs[idx])
+        y0, y1 = float(rel_db[idx - 1]), float(rel_db[idx])
+        if np.isclose(y0, y1):
+            return x1
+        return float(x0 + (target - y0) * (x1 - x0) / (y1 - y0))
 
     def plot_RL(
         self,
@@ -1342,6 +2160,7 @@ class SparamModel:
         xlim: Optional[tuple[float, float]] = None,
         save_path: str = "",
         label: str | None = None,
+        auto_ylim: bool = True,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1366,6 +2185,8 @@ class SparamModel:
             Optional output path. If provided, save the figure and close it.
         label:
             Optional label prefix. Useful when overlaying multiple channels.
+        auto_ylim:
+            If True, set y-limits from the plotted frequency range.
         **kwargs:
             Additional keyword arguments passed to matplotlib ``plot``.
         """
@@ -1373,13 +2194,21 @@ class SparamModel:
         if created_ax:
             _, ax = self._plt().subplots()
         prefix = "" if label is None else f"{label} "
+        plotted: list[np.ndarray] = []
         if port == "input":
-            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd11), label=f"{prefix}Sdd11", **kwargs)
+            y = self._magnitude_db(self.sdd11)
+            plotted.append(y)
+            ax.plot(self.freqs / 1e9, y, label=f"{prefix}Sdd11", **kwargs)
         elif port == "output":
-            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd22), label=f"{prefix}Sdd22", **kwargs)
+            y = self._magnitude_db(self.sdd22)
+            plotted.append(y)
+            ax.plot(self.freqs / 1e9, y, label=f"{prefix}Sdd22", **kwargs)
         elif port == "both":
-            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd11), label=f"{prefix}Sdd11", **kwargs)
-            ax.plot(self.freqs / 1e9, self._magnitude_db(self.sdd22), label=f"{prefix}Sdd22", **kwargs)
+            y11 = self._magnitude_db(self.sdd11)
+            y22 = self._magnitude_db(self.sdd22)
+            plotted.extend([y11, y22])
+            ax.plot(self.freqs / 1e9, y11, label=f"{prefix}Sdd11", **kwargs)
+            ax.plot(self.freqs / 1e9, y22, label=f"{prefix}Sdd22", **kwargs)
         else:
             raise ValueError('port must be "input", "output", or "both".')
         if logx:
@@ -1388,7 +2217,8 @@ class SparamModel:
         ax.set_ylabel("RL (dB)")
         ax.set_title("Return Loss")
         ax.legend()
-        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        y_values = np.vstack(plotted) if plotted else None
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9, y_values=y_values, auto_ylim=auto_ylim)
         return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_phase(
@@ -1399,6 +2229,7 @@ class SparamModel:
         xlim: Optional[tuple[float, float]] = None,
         save_path: str = "",
         label: str | None = None,
+        auto_ylim: bool = True,
         **kwargs: Any,
     ) -> Any:
         """
@@ -1419,6 +2250,8 @@ class SparamModel:
             Optional output path. If provided, save the figure and close it.
         label:
             Optional curve label. Useful when overlaying multiple channels.
+        auto_ylim:
+            If True, set y-limits from the plotted frequency range.
         **kwargs:
             Additional keyword arguments passed to matplotlib ``plot``.
         """
@@ -1428,14 +2261,15 @@ class SparamModel:
         phase = np.angle(self.sdd21)
         if unwrap:
             phase = np.unwrap(phase)
-        ax.plot(self.freqs / 1e9, np.rad2deg(phase), label=label or "Sdd21 phase", **kwargs)
+        phase_deg = np.rad2deg(phase)
+        ax.plot(self.freqs / 1e9, phase_deg, label=label or "Sdd21 phase", **kwargs)
         if logx:
             ax.set_xscale("log")
         ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("Phase (deg)")
         ax.set_title("Sdd21 Phase")
         ax.legend()
-        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9)
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9, y_values=phase_deg, auto_ylim=auto_ylim)
         return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_sdd(
@@ -1443,6 +2277,7 @@ class SparamModel:
         logx: bool = False,
         xlim: Optional[tuple[float, float]] = None,
         save_path: str = "",
+        auto_ylim: bool = True,
     ) -> Any:
         """
         Plot Sdd11, Sdd12, Sdd21, and Sdd22 magnitude in dB on one figure.
@@ -1456,20 +2291,28 @@ class SparamModel:
         save_path:
             Optional output path. If provided, save the figure and close it;
             otherwise show the figure immediately.
+        auto_ylim:
+            If True, set y-limits from the plotted frequency range.
         """
         plt = self._plt()
         fig, ax = plt.subplots()
-        ax.plot(self.freqs, self._magnitude_db(self.sdd11), label="Sdd11")
-        ax.plot(self.freqs, self._magnitude_db(self.sdd12), label="Sdd12")
-        ax.plot(self.freqs, self._magnitude_db(self.sdd21), label="Sdd21")
-        ax.plot(self.freqs, self._magnitude_db(self.sdd22), label="Sdd22")
+        y_values = np.vstack([
+            self._magnitude_db(self.sdd11),
+            self._magnitude_db(self.sdd12),
+            self._magnitude_db(self.sdd21),
+            self._magnitude_db(self.sdd22),
+        ])
+        ax.plot(self.freqs / 1e9, y_values[0], label="Sdd11")
+        ax.plot(self.freqs / 1e9, y_values[1], label="Sdd12")
+        ax.plot(self.freqs / 1e9, y_values[2], label="Sdd21")
+        ax.plot(self.freqs / 1e9, y_values[3], label="Sdd22")
         if logx:
             ax.set_xscale("log")
-        ax.set_xlabel("Frequency (Hz)")
+        ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("Magnitude (dB)")
         ax.set_title("Sdd Parameters")
         ax.legend()
-        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1.0)
+        self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9, y_values=y_values, auto_ylim=auto_ylim)
         fig.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
@@ -2203,6 +3046,7 @@ class LinkSegment:
         save_path: str = "",
         xlim: Optional[tuple[float, float]] = None,
         ylim: Optional[tuple[float, float]] = None,
+        auto_ylim: bool = True,
         label: str | None = None,
     ) -> Axes:
         """
@@ -2220,6 +3064,9 @@ class LinkSegment:
             in-band view from 0 to cfg.fb.
         ylim:
             Optional y-axis limits in dB.
+        auto_ylim:
+            If True and ylim is None, set y-limits from the plotted frequency
+            range. The default in-band range is [0, fb].
         label:
             Optional curve label. Useful when plotting multiple transfer
             functions on the same Axes.
@@ -2263,6 +3110,20 @@ class LinkSegment:
             if not np.isfinite(lo_db) or not np.isfinite(hi_db) or lo_db >= hi_db:
                 raise ValueError("ylim must be finite and strictly increasing.")
             ax.set_ylim(lo_db, hi_db)
+        elif auto_ylim:
+            visible = mag_db[mask]
+            visible = visible[np.isfinite(visible)]
+            above_floor = visible[visible > -300.0]
+            if above_floor.size > 0:
+                visible = above_floor
+            if visible.size > 0:
+                y_min = float(np.min(visible))
+                y_max = float(np.max(visible))
+                if np.isclose(y_min, y_max):
+                    pad = max(1.0, abs(y_min) * 0.05)
+                else:
+                    pad = (y_max - y_min) * 0.05
+                ax.set_ylim(y_min - pad, y_max + pad)
         ax.grid(True)
 
         return self._finish_plot(ax, save_path, show=created_ax)
@@ -2321,6 +3182,31 @@ class LinkSegment:
 
         ax.set_ylim(y_min, y_max)
         return ax
+
+    def frequency_at_gain(self, gain_db: float = -3.0) -> Optional[float]:
+        """
+        Return first frequency where |H(f)| drops to a relative gain target.
+
+        Parameters
+        ----------
+        gain_db:
+            Relative gain in dB with respect to H(0).
+        """
+        tf = self.validate_tf(self.tf)
+        mag_db = 20 * np.log10(np.maximum(np.abs(tf), np.finfo(float).tiny))
+        rel_db = mag_db - mag_db[0]
+        target = float(gain_db)
+        crossing = np.where(rel_db <= target)[0]
+        if len(crossing) == 0:
+            return None
+        idx = int(crossing[0])
+        if idx == 0:
+            return float(self.cfg.freqs[0])
+        x0, x1 = float(self.cfg.freqs[idx - 1]), float(self.cfg.freqs[idx])
+        y0, y1 = float(rel_db[idx - 1]), float(rel_db[idx])
+        if np.isclose(y0, y1):
+            return x1
+        return float(x0 + (target - y0) * (x1 - x0) / (y1 - y0))
 
     def _response_x_axis(
         self,
@@ -3284,3 +4170,4 @@ class LinkSegment:
                 sr[n] += sr[n - D]
 
         return sr
+

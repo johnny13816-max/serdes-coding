@@ -31,6 +31,11 @@
 
 ## COM / 93A Core
 
+28. Formal 93A validation case
+   - 尋找或整理真正對應 93A 的 channel / config baseline。
+   - 建立獨立 template，不與 `debug_case_93a_style` 混用。
+   - 驗證 package/filter/noise/jitter/search parameters 是否逐項對應 93A。
+
 5. FOM validation
    - 檢查 93A.1.6 imp statistics。
    - 檢查 FOM formula 與 sign convention。
@@ -56,7 +61,7 @@
    - residual ISI vector
 
 9. 93A sampling phase validation
-   - 檢查 `_find_sampling_phase_93a()`。
+   - 檢查 `_find_sampling_phase_93A()`。
    - 檢查 `h_J` boundary handling。
    - 檢查 `pos == 0` / `pos == per_ui - 1` edge cases。
 
@@ -131,8 +136,8 @@
    - 用於 Monte Carlo waveform debug。
 
 24. ADC quantization noise helper
-   - 不放在 `OneSidePSD` constructor。
-   - 建立 helper 將 ADC setup 轉成 `OneSidePSD.from_sigma()` 或 `from_constant()` 輸入。
+   - 不放在 `ContinuousPSD` constructor。
+   - 建立 helper 將 ADC setup 轉成 `ContinuousPSD.from_sigma()` 或 `from_constant()` 輸入。
 
 ## PMF Handler
 

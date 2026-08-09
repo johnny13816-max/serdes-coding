@@ -54,7 +54,7 @@ channels
 1. 手動修改 Excel 內的固定參數、search range、channel paths。
 2. Python 直接呼叫 `excel_to_config()` 建立 `COMConfig`。
 3. Python 直接呼叫 `excel_to_search_config()` 建立 `COMSearchConfig`。
-4. 執行 `COM(cfg).run(search)`。
+4. 執行 `COM_93A(cfg).run(search)`。
 
 ### Preprocess Boundary
 
@@ -154,7 +154,7 @@ Description
 沒有傳入 search object 時：
 
 ```text
-COM(cfg).run()
+COM_93A(cfg).run()
 ```
 
 輸出完整 `COMStatus`，用於 debug/study。
@@ -174,7 +174,7 @@ durable export 格式尚未定案，候選包含 pickle / npz / json / Excel sum
 有傳入 search object 時：
 
 ```text
-COM(cfg).run(search)
+COM_93A(cfg).run(search)
 ```
 
 輸出 `COMSearchStatus`。

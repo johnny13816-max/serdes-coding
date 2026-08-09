@@ -1,4 +1,4 @@
-# SerDes Coding Project Contracts
+﻿# SerDes Coding Project Contracts
 
 ## 目的
 
@@ -52,7 +52,7 @@ from serdes_coding.com_excel_io import excel_to_config, excel_to_search_config
 - `LinkSegment`
 - `SparamModel`
 - `SparamProcessor`
-- `OneSidePSD`
+- `OneSidePSD`（後續改名為 `ContinuousPSD`，並新增 `SampledPSD`）
 - FFT / IFFT / resample / plot helpers
 
 整理方向：
@@ -60,7 +60,7 @@ from serdes_coding.com_excel_io import excel_to_config, excel_to_search_config
 - `LinkConfig` + `LinkSegment` 可以保留為 core signal-grid domain。
 - `SparamModel` 與 S4P/Sdd 處理適合移到 `sparam_model.py`。
 - `SparamProcessor` 適合移到 `sparam_preprocess.py`。
-- `OneSidePSD` 適合移到 `psd.py`。
+- `ContinuousPSD` / `SampledPSD` 適合移到 `psd.py`。
 - plot helper 可先留在 class，等 API 穩定後再考慮 `plotting.py`。
 
 ### `pmf_handler.py`
@@ -130,7 +130,7 @@ serdes_coding/
 - single run: `COMStatus`
 - search run: `COMSearchStatus`
 
-`COM.run()` contract：
+`COM_93A.run()` contract：
 
 - `search is None`：跑一組完整 pipeline，包含 PMF/COM。
 - `search is not None`：掃描 search candidates，用 FOM 找 best candidate，再對 best candidate 跑完整 PMF/COM。
@@ -171,17 +171,28 @@ search_status.plot_summary(save_path="report/search_run")
 
 數值輸出也放在 status object，不放在 `COM` calculator。
 
-Single-run export：
+Config export：
 
 ```python
-status.export("report/single_run", include_plots=True)
+cfg.export("report/single_run")
 ```
 
 輸出：
 
-- `summary.json`：可讀的 scalar metadata、path 階層、array keys。
+- `config_summary.txt`：human-readable `COMConfig` summary，方便報告/debug 快速確認設定。
+
+Single-run export：
+
+```python
+status.export("report/single_run", include_plots=False)
+COMReport(cfg, status).plot_single_run("report/single_run/plots")
+```
+
+輸出：
+
+- `report_summary.txt`：human-readable single-run scalar summary，包含 FOM/COM、path overview、DFE、imp、PMF 主要數值。
 - `arrays.npz`：所有大型 numpy arrays。
-- `plots/`：如果 `include_plots=True`，輸出 standard plot set。
+- `plots/`：single-run detail plots。
 
 Search export：
 
@@ -192,7 +203,7 @@ search_status.export("report/search_run", include_plots=True)
 輸出：
 
 - `search_summary.json`：search rows、best row、candidate settings。
-- `best/summary.json`：best candidate 的完整 single-run summary。
+- `best/report_summary.txt`：best candidate 的 human-readable single-run summary。
 - `best/arrays.npz`：best candidate 的完整 numeric arrays。
 - `plots/`：search-level plots 與 best candidate plots。
 
@@ -262,14 +273,107 @@ p_combined = p_ISI.combine(p_G).combine(p_DD).combine(p_XT)
 
 ## PSD Contract
 
-`OneSidePSD` 代表 one-sided PSD。
+PSD utility 之後分成兩個 domain class：
 
-目前設計重點：
+```python
+ContinuousPSD
+SampledPSD
+```
 
-- 可建立 arbitrary frequency grid 的 PSD。
-- 若 frequency grid 對齊 `LinkConfig.freqs`，則 `ifftable=True`。
-- `to_sigma()` 回傳 integrated RMS。
-- `filtered_by(LinkSegment)` 要求 PSD 與 filter frequency grid 相容或先 aligned/resampled。
+目前程式已建立 `ContinuousPSD` 與 `SampledPSD` 骨架；`OneSidePSD` 暫時保留為
+`ContinuousPSD` 的 backward-compatible alias，讓既有 93A code 不會立即破壞。
+
+共同 convention：
+
+- 兩個 class 都使用 one-sided PSD representation。
+- `to_sigma()` 一律回傳 integrated RMS。
+- PSD 數值不得為負值，frequency axis 必須單調遞增。
+- filtering 使用 `S_out = S_in * |H|^2`。
+
+`ContinuousPSD` contract：
+
+- 代表 continuous-time one-sided PSD。
+- `freqs` 單位為 Hz，範圍為 `f >= 0`。
+- `psd` 單位為 quantity^2/Hz。
+- `to_sigma()` 使用 `sqrt(integral_0^inf S_ct,1(f) df)`。
+- `aligned_to(LinkConfig)` 將 PSD 對齊 `LinkConfig.freqs`，用於和 `LinkSegment` filter 相乘。
+- `filtered_by(LinkSegment)` 要求 PSD 與 filter frequency grid 相同。
+- `to_sampled(fb, theta=None, alias_kmax=None, theta_points=None)` 轉成 `SampledPSD`；sampling aliasing 是 method 內部責任，不提供 `alias=True/False` 開關。
+- 當 `theta is None` 時，自動產生 uniform sampled-domain one-sided grid `np.linspace(0, pi, theta_points)`，保證包含 DC 與 Nyquist endpoint。
+- 若 `theta_points is None`，預設使用 CT PSD 在 `[0, fb/2]` 內的 sample count，且至少為 2。
+- 若 user 提供 `theta`，則使用 user-provided axis；只有當該 axis 實際包含 `0` 或 `pi` 時才做 endpoint correction。
+
+`SampledPSD` contract：
+
+- 代表 sampled/discrete-time one-sided PSD。
+- `theta` 單位為 rad/sample，範圍為 `[0, pi]`。
+- `fb` 是 sampling rate / baud rate，單位 Hz。
+- `psd` 單位為 quantity^2/rad。
+- `freqs` 可以作為 debug property：`freqs = theta * fb / (2*pi)`。
+- `to_sigma()` 使用 `sqrt(integral_0^pi S_dt,1(theta) d theta)`。
+- 多個 178A.1.7 impairment PSD 應先轉成 `SampledPSD` 再相加。
+- `to_continuous_baseband()` 只能回傳 baseband-equivalent `ContinuousPSD`；若前面做過 aliasing，不能恢復原本的 high-frequency continuous PSD。
+
+`SampledResponse` contract：
+
+- 代表 sampled/discrete-time LTI response。
+- `theta` 單位為 rad/sample，使用 one-sided rfft-style grid：`0..pi`，且必須 uniform。
+- `tf` 是 `H(e^jtheta)`；`ir` 是 discrete-time impulse response `h[n]`。
+- `nfft` 是 even-length rfft FFT length；`len(tf) = nfft//2 + 1`。
+- `from_tf(theta, tf, fb, nfft=None)` 使用 `np.fft.irfft()`；若 `nfft is None`，預設 `nfft = 2*(len(tf)-1)`。
+- `from_ir(ir, fb, nfft=None)` 使用 `np.fft.rfft()`；若 `nfft is None`，預設 `nfft = len(ir)`，且目前要求 even length。
+- 不做 continuous-time `Fs` scaling；這裡的 convolution 語意是 `y[n] = sum h[k]x[n-k]`。
+- `SampledPSD.filtered_by(SampledResponse)` 使用 `S_out(theta)=S_in(theta)*|H(e^jtheta)|^2`。
+- `SampledPSD.filtered_by(SampledResponse)` 嚴格要求 `fb` 相同且 `theta` grid 相同；不同 grid 先 raise error，之後再補 `aligned_to()`。
+- `SampledPSD.add(other)` / `psd_a + psd_b` 用於相加互不相關的 sampled-domain PSD component；要求 `fb` 與 `theta` grid 完全相同，不做隱式 resample。
+- 不取代 `LinkSegment`；`LinkSegment` 仍代表 continuous-time / rfft-Hz grid response。
+
+One-sided 轉換公式：
+
+```text
+theta = 2*pi*f/fb
+df = fb/(2*pi) d theta
+
+S_dt,1(theta) = fb/(2*pi) * S_ct,1(f)
+f = theta*fb/(2*pi)
+```
+
+若需要 broadband aliasing，先在 continuous frequency 上做 aliasing sum：
+
+```text
+S_dt,2(theta) = fb/(2*pi) * sum_k S_ct,2((theta + 2*pi*k)*fb/(2*pi))
+```
+
+對 real-valued signal，可再轉成 one-sided discrete PSD：
+
+```text
+S_dt,1(theta) = 2*S_dt,2(theta), 0 < theta < pi
+S_dt,1(0)     = S_dt,2(0)
+S_dt,1(pi)    = S_dt,2(pi), if Nyquist bin exists
+```
+
+如果 continuous PSD 一開始就是 one-sided，則 aliasing sum 要用偶對稱展開：
+
+```text
+S_ct,2(f) = 0.5*S_ct,1(|f|), f != 0
+```
+
+程式中可不顯式建立 two-sided PSD，而是用 one-sided direct form：
+
+```text
+f0 = theta*fb/(2*pi)
+S_dt,1(theta) = fb/(2*pi) * sum_k S_ct,1(|f0 + k*fb|), 0 < theta < pi
+```
+
+`k` 掃過正負整數時，`|f0+k*fb|` 已經隱含 two-sided folding，不需要再額外加
+`|-f0+k*fb|` branch，否則會 double count。DC 與 Nyquist endpoint 需要除以 2：
+
+```text
+S_dt,1(0)  *= 0.5
+S_dt,1(pi) *= 0.5, if Nyquist bin exists
+```
+
+最後保證 `integral_0^pi S_dt,1(theta)dtheta` 等於 sampled-domain variance。
 
 ## 近期整理原則
 
@@ -336,7 +440,7 @@ Plot/export helper 不得呼叫 `matplotlib.use(..., force=True)` 或改變全�
 
 ## COM Downsample Debug Contract
 
-`COM` exposes these debug proxies after `COM.run()` or `_run_once()`:
+`COM_93A` exposes these debug proxies after `COM_93A.run()` or `_run_once()`:
 
 - `com.h_dsamp`: victim pulse sampled at the selected DFE sampling phase.
 - `com.t_dsamp_ui`: discrete UI time axis for `h_dsamp` and `h_ISI`, with main cursor at 0.
@@ -351,7 +455,123 @@ Debug plot methods:
 
 ## COM Report Plot Contract
 
+New report entry:
+
+```python
+report = COMReport(cfg, status)
+report.plot_single_run("reports/single_run/plots")
+report.plot_COMPath(path_idx=0, save_path="reports/single_run/plots")
+```
+
+`COMReport` owns plots that need both `COMConfig` and `COMStatus`:
+- config annotation on figures
+- path detail figures
+- DFE detail figures
+- impairment detail figures
+- PMF detail figures
+- Matplotlib backend-safe plot helpers: `_plt`, `_subplots`, `_plot_save_path`, `_finish_figure`, path display labels
+
+`COM` should remain computation-oriented. `COMStatus.plot_*()` remains for
+backward-compatible compact summaries, but new detailed report work should go
+through `COMReport`.
+
+Export/helper boundary:
+- JSON scalar/value conversion and JSON file writing belong to `_PrettyDataclass`.
+- `COMConfig` owns its own config snapshot construction.
+- `COMStatus` owns array metadata export plus S-parameter / LinkSegment / PMF export helpers.
+- COM search-flow helpers belong inside the calculator class, e.g. `_config_with_search_candidate()`, `_search_row_from_status()`, `_select_search_rows()`, and `_format_duration()`.
+- `IEEECOMsparam._cascade_sdd_93A()` owns the raw Eq. 93A-4 through Eq. 93A-7 Sdd cascade formula.
+- These helpers should not be reintroduced as free module-level functions unless they become intentionally public APIs.
+
 - `COMStatus.plot_dfe_summary()` plots residual `h_ISI` on a main-cursor-centered UI axis and defaults to `xlim_ui=(-5, 20)`.
 - `LinkSegment.plot_tf()` supports `ylim=(min_db, max_db)`.
-- `COMStatus.plot_path_H21_tf()` defaults to `ylim=(-80, 5)` so high-frequency taper values do not dominate the report view.
+- `COMStatus.plot_path_H21_tf()` defaults to automatic in-band y-limit; explicit `ylim=(min_db, max_db)` is still supported.
 - PMF FIR convolution uses `keep_mass=0.99999` by default to prevent long-tail convolution from dominating report x-axis range.
+
+## Reference Case Contract
+
+- `templates/com_v1_params_template.xlsx` 目前標記為 `debug_case_93a_style`。
+- 這個 workbook 只作為 93A-style quick-run/debug case。
+- 它使用 PyChOpMarg IEEE 802.3dj example2 channel family，但將 `fb` 改成 `53.125e9 Hz` 方便目前 93A pipeline debug。
+- 不可把這個 case 當成正式 IEEE 93A validation、MATLAB COM correlation、或規格 compliance evidence。
+- 詳細註記放在 `docs/reference_cases.md`。
+
+## Frequency Plot Contract
+
+- `LinkSegment.plot_tf()` 預設顯示 `0 ~ fb` 的 in-band view。
+- `SparamModel.plot_*()` 支援 `xlim=(f_start, f_stop)`，COM report 預設傳入 `0 ~ fb`。
+- 頻域圖的 automatic y-limit 只根據目前 x 軸範圍內的資料決定。
+- 低於 `-300 dB` 的點視為 numerical floor，例如 ideal zero 或 high-frequency zero padding，不參與 automatic y-limit；原始曲線不會被 clipping。
+- `SparamModel.plot_IL()` 可用 `annotate_f=fb` 標註 `IL@fb`。
+- COM report 的 `S_all_IL` 圖會在 `fb` 落在 S-parameter measured grid 內時標註 `IL@fb`；若 `fb` 超出 measured band，只標示此限制，不外插假資料當作 IL。
+- COM report detail plots should use figure-specific annotations. Filter plots show the relevant filter parameter in the subtitle, and channel/transfer plots mark `fb` or the first relative `-3 dB` point when available.
+- Detail plot title style: main title uses larger font; parameter subtitle uses smaller gray text. Generic run-level config notes are reserved for overview plots, not every detail plot.
+
+## COM Spec Version Contract
+
+目前 93A 與 178A 要明確分流，避免不同 Annex 的公式與流程混在同一個 method 裡。
+
+命名規則：
+- 93A calculator 使用 `COM_93A`。
+- 178A calculator 使用 `COM_178A`。
+- 直接實作 spec 公式或 spec procedure 的 function/method 需要加版本後綴，例如 `_build_paths_93A()`、`calculate_imp_93A()`、`cascade_com_93A()`。
+- 共用 infrastructure 不加版本後綴，例如 `COMConfig`、`COMStatus`、`COMReport`、`SparamModel`、`LinkSegment`、`Pmf1D`。
+
+目前 `COM_93A` 的主流程：
+```text
+run()
+  -> _run_once()
+      -> build_all_paths_93A()
+      -> find_pos_and_dfe_93A()
+      -> calculate_imp_93A()
+      -> _calculate_FOM_93A()
+      -> calculate_COM_93A()
+```
+
+Public import contract：
+```python
+from serdes_coding import COM_93A, COM_178A
+```
+
+178A implementation status：
+- `COM_178A` 已建立 class 與 run pipeline 接口。
+- `COMConfig178A`、`COMFilterConfig178A`、`COMPkgConfig178A` 已建立，用來承接 178A path-building 所需的 filter/package 參數。
+- `build_all_paths_178A()` 已完成第一版接線：
+  - `_build_channel_under_test_178A()` 讀取 measured-domain S4P，順序沿用 victim、NEXT、FEXT。
+  - `_build_shared_path_178A()` 建立 shared blocks：`H_ffe`、`H_ffe_next`、`H_t`、`S_rx`、`H_r`、`H_ctf`。
+  - `_build_path_178A()` 依 path kind 選擇 `txpkg_victim`、`txpkg_next`、`txpkg_fext`，再串接 `S_tx + S_ch + S_rx`，最後轉成 `H_21` / `H_all` / `pulse`。
+- 178A helper 已建立 `_find_sampling_phase_178A()`、`_calculate_*_178A()`、`_build_pmf_*_178A()` 的 IO skeleton，但 DFE、impairment、FOM、PMF 公式尚未填入。
+- `IEEECOMsparam` 已建立 178A S-parameter builders：
+  - `device_termination_178A()`：Eq. 178A-7 N-stage LC ladder，輸入 L/C vectors 與 bump capacitance。
+  - `device_package_178A()`：Eq. 178A-9 N-stage package transmission line，輸入 TL length / impedance vectors 與 package capacitance。
+  - `partial_host_channel_178A()`：Eq. 178A-10 synthetic partial host channel，輸入 C0 / C1 / TL parameters。
+- `IEEECOMFilter.rx_equalizer_178A()` 已建立三 pole / two zero 的 178A CTF formula interface。
+- 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 仍會在 DFE/FOM 等尚未實作階段丟出 `NotImplementedError`。
+
+178A-4 path transfer contract：
+- Eq. 178A-4 與目前 `SparamModel.to_LinkSegment()` 的 reference mismatch / voltage transfer conversion 觀念相同。
+- 不額外建立 `to_LinkSegment_178A()`，避免暗示 178A 有不同轉換公式。
+- 178A path builder 之後應直接呼叫 `S_all.to_LinkSegment(link_cfg, gamma_src=..., gamma_load=...)`。
+
+178A package primitive policy：
+- 單顆 shunt C、series L、single TL primitive 先沿用 93A method 名稱，不額外複製 `_178A` primitive。
+- 178A 的版本差異先放在 stage-level builder，例如 `device_termination_178A()` 與 `device_package_178A()`。
+- 依照目前 IEEE 802.3dj COM adhoc config/code，N-stage package TL 的 `zp` 與 `Zc` 是 stage-specific，`gamma0/a1/a2/tau` 是 package-level shared propagation model。
+- 若後續確認 178A 修改了單顆 primitive 的公式或單位，再新增對應 `_178A` primitive。
+## PSD / Sampled Response Theta Contract
+
+本節是目前 PSD / sampled-domain response 的有效命名與 grid contract。
+
+- sampled-domain frequency axis 一律命名為 `theta`，單位是 rad/sample，範圍是 one-sided rFFT grid `[0, pi]`。
+- `LinkConfig` 同時定義 continuous-time grid 與 sampled-domain grid：
+  - `freqs`, `df`: continuous-time rFFT grid，單位 Hz。
+  - `theta`, `theta_freqs`: sampled-domain rFFT grid，以及對應的 Hz baseband axis。
+  - `sampled_nfft`, `sampled_df`: symbol-rate sampled-domain FFT 長度與 Hz spacing。
+- 預設 `LinkConfig` 會讓 `Nfft` 對齊 `2*per_ui` 的倍數，因此 `sampled_df == df`。
+- 在預設 `LinkConfig` 下，CT/DT grid 具有封閉性：`sampled_nfft == Nfft/per_ui`，且任意 phase 的 `h[pos::per_ui]` 長度都等於 `sampled_nfft`。因此從 `LinkSegment` impulse response downsample 出來的 sampled-domain response 可以直接使用 `SampledResponse.from_ir(h_dsamp, cfg)`。
+- `LinkConfig.from_Nfft()` 用於 linear convolution 等任意長度結果；若長度無法剛好對齊 `per_ui`，則使用最接近的 even sampled-domain grid。
+- `SampledResponse.from_ir(ir, cfg)` 使用 `cfg.sampled_nfft` zero-pad impulse response，並使用 `cfg.theta` 建立 `H(e^jtheta)`。
+- `SampledPSD.filtered_by(SampledResponse)` 要求 `fb` 與 `theta` grid 完全相容；不同 grid 需要先明確 resample/aligned，不能隱式處理。
+- `SampledPSD.add(other)` / `psd_a + psd_b` 只代表 uncorrelated PSD component 的功率相加；若 grid 不同要先明確對齊。
+- `ContinuousPSD.to_sampled(fb, theta=..., theta_points=...)` 以 one-sided direct aliasing sum 產生 `SampledPSD`；若要與 `LinkConfig` 對齊，caller 應傳入 `cfg.theta`。
+
