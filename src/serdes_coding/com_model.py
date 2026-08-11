@@ -1166,7 +1166,28 @@ class COMImpairmentConfig(_PrettyDataclass):
     SNR_TX: float                   # unit: dB, transmitter signal-to-noise ratio
     sigma_RJ: float                 # unit: UI, random jitter RMS
     A_DD: float                     # unit: UI, dual-Dirac jitter amplitude
-    eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density
+    eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density in internal units
+    N_qb: Optional[int] = None      # unit: bits, 178A quantization-equivalent bits; None disables S_qn in current flow
+    P_qc: Optional[float] = None    # unit: probability, 178A quantization clipping probability; None disables S_qn in current flow
+
+    def __post_init__(self) -> None:
+        for name in ("R_LM", "SNR_TX", "sigma_RJ", "A_DD", "eta_0"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value):
+                raise ValueError(f"COMImpairmentConfig.{name} must be finite.")
+            setattr(self, name, value)
+        if self.R_LM <= 0.0:
+            raise ValueError("COMImpairmentConfig.R_LM must be positive.")
+        if self.sigma_RJ < 0.0 or self.A_DD < 0.0 or self.eta_0 < 0.0:
+            raise ValueError("COMImpairmentConfig jitter and noise parameters must be non-negative.")
+        if self.N_qb is not None:
+            self.N_qb = int(self.N_qb)
+            if self.N_qb <= 0:
+                raise ValueError("COMImpairmentConfig.N_qb must be positive when provided.")
+        if self.P_qc is not None:
+            self.P_qc = float(self.P_qc)
+            if not np.isfinite(self.P_qc) or self.P_qc <= 0.0 or self.P_qc >= 1.0:
+                raise ValueError("COMImpairmentConfig.P_qc must be in (0, 1) when provided.")
 
 @dataclass(repr=False)
 class COMPMFConfig(_PrettyDataclass):
@@ -1425,6 +1446,74 @@ class COMDFEStatus(_PrettyDataclass):
     h_ISI: np.ndarray               # unit: V, sampled residual ISI response
 
 @dataclass(repr=False)
+class COMDTEConfig(_PrettyDataclass):
+    """
+    178A receiver discrete-time equalizer configuration.
+
+    This is the 178A replacement for using COMDFEConfig directly. It owns the
+    receiver sampled-domain equalizer search/limit parameters for the MMSE
+    feed-forward and feedback filter solve.
+    """
+    d_w: int                         # unit: taps, number of pre-cursor FFE taps
+    N_fix: int                       # unit: taps, number of fixed-position FFE taps
+    N_wg: int = 0                    # unit: groups, number of floating FFE tap groups
+    N_wf: int = 0                    # unit: taps/group, taps per floating group
+    N_max: Optional[int] = None      # unit: tap index, highest allowed FFE tap index
+    N_b: int = 0                     # unit: taps, number of DFE feedback taps
+    w_max: Optional[np.ndarray] = None # unit: dimensionless, normalized FFE upper limits
+    w_min: Optional[np.ndarray] = None # unit: dimensionless, normalized FFE lower limits
+    b_max: Optional[np.ndarray] = None # unit: dimensionless, DFE upper limits
+    b_min: Optional[np.ndarray] = None # unit: dimensionless, DFE lower limits
+
+    @classmethod
+    def from_dfe_config(cls, dfe_cfg: COMDFEConfig) -> 'COMDTEConfig':
+        """
+        Temporary adapter from the existing 93A-style COMDFEConfig.
+
+        This keeps old Excel/config sources usable while COMConfig178A migrates
+        toward explicit 178A DTE parameters.
+        """
+        return cls(
+            d_w=0,
+            N_fix=max(1, int(dfe_cfg.N_f) if int(dfe_cfg.N_f) > 0 else int(dfe_cfg.N_b) + 1),
+            N_wg=int(dfe_cfg.N_bg),
+            N_wf=int(dfe_cfg.N_bf),
+            N_max=int(dfe_cfg.N_ts),
+            N_b=int(dfe_cfg.N_b),
+            b_max=np.asarray(dfe_cfg.fixed_upper, dtype=float) if int(dfe_cfg.N_f) > 0 else dfe_cfg.b_max * np.ones(int(dfe_cfg.N_b)),
+            b_min=np.asarray(dfe_cfg.fixed_lower, dtype=float) if int(dfe_cfg.N_f) > 0 else -dfe_cfg.b_max * np.ones(int(dfe_cfg.N_b)),
+        )
+
+    def __post_init__(self) -> None:
+        for name in ("d_w", "N_fix", "N_wg", "N_wf", "N_b"):
+            value = int(getattr(self, name))
+            if value < 0:
+                raise ValueError(f"COMDTEConfig.{name} must be non-negative.")
+            setattr(self, name, value)
+        if self.N_fix <= 0:
+            raise ValueError("COMDTEConfig.N_fix must be positive.")
+        if self.N_max is None:
+            self.N_max = self.N_fix
+        self.N_max = int(self.N_max)
+        if self.N_max < self.N_fix:
+            raise ValueError("COMDTEConfig.N_max must be greater than or equal to N_fix.")
+        if (self.N_wg == 0) != (self.N_wf == 0):
+            raise ValueError("COMDTEConfig.N_wg and N_wf must both be zero or both be positive.")
+
+@dataclass(repr=False)
+class COMDTEStatus(_PrettyDataclass):
+    """
+    178A receiver discrete-time equalizer result for one sampling phase.
+    """
+    ts: int                         # unit: sample index on cfg.times
+    pos: int                        # unit: sample phase index, 0 <= pos < per_ui
+    w_coeff: np.ndarray             # unit: dimensionless, FFE coefficients w
+    b_coeff: np.ndarray             # unit: dimensionless, DFE coefficients b
+    tap_indices: np.ndarray         # unit: tap index, selected FFE tap index vector i
+    h_ISI: np.ndarray               # unit: V, residual ISI samples after DTE
+    mse: float                      # unit: V^2, mean-square error from 178A-35
+
+@dataclass(repr=False)
 class COMImpairmentStatus_93A(_PrettyDataclass):
     As: float                       # unit: V, signal amplitude
     sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
@@ -1459,8 +1548,8 @@ class COMPMFStatus(_PrettyDataclass):
 @dataclass(repr=False)
 class COMStatus(_PrettyDataclass):
     paths: list[COMPath]
-    dfe: Optional['COMDFEStatus'] = None
-    imp: Optional['COMImpairmentStatus_93A'] = None
+    dfe: Optional['COMDFEStatus | COMDTEStatus'] = None
+    imp: Optional['COMImpairmentStatus_93A | COMImpairmentStatus_178A'] = None
     pmf: Optional['COMPMFStatus'] = None
     FOM: Optional[float] = None        # unit: dB, 93A.1.6 figure of merit
 
@@ -4401,7 +4490,7 @@ class COMConfig178A(_PrettyDataclass):
     txpkg_fext: COMPkgConfig178A      # unit contract: 178A FEXT aggressor TX package
     txpkg_next: COMPkgConfig178A      # unit contract: 178A NEXT aggressor TX package
     rxpkg: COMPkgConfig178A           # unit contract: 178A shared RX package
-    dfe: COMDFEConfig                 # unit contract: DFE tap limits and spans
+    dte: COMDTEConfig                 # unit contract: 178A receiver discrete-time equalizer search/limits
     imp: COMImpairmentConfig          # unit contract: V/UI/noise PSD units
     DER_0: float                      # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
@@ -4438,17 +4527,43 @@ class COMConfig178A(_PrettyDataclass):
         }
 
 @dataclass(repr=False)
+class COMImpairmentCommon_178A(_PrettyDataclass):
+    """
+    178A impairment components that are independent of sampling phase.
+
+    This object is computed once per concrete path/filter configuration and
+    reused across the sampling-phase loop in COM_178A._run_once().
+    """
+    S_rn: SampledPSD                # unit: V^2/Hz, receiver input noise PSD, theta-indexed one-sided equivalent
+    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
+    S_xn: SampledPSD                # unit: V^2/Hz, crosstalk PSD using each path's worst sampling phase
+    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
+    h_XTs_dsamp: list[np.ndarray]   # unit: V, worst-phase sampled crosstalk responses
+
+@dataclass(repr=False)
 class COMImpairmentStatus_178A(_PrettyDataclass):
+    pos: int                        # unit: sample phase index, 0 <= pos < per_ui
+    ts: int                         # unit: sample index on cfg.times
     As: float                       # unit: V, signal amplitude
     sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
     sigma_TX: float                 # unit: V, TX noise amplitude standard deviation
     h_ISI: np.ndarray               # unit: V, residual ISI pulse samples
     sigma_ISI: float                # unit: V, ISI amplitude standard deviation
-    h_J: np.ndarray
+    h_TN: np.ndarray                # unit: V, no-FFE TX-noise pulse samples at selected phase
+    h_J: np.ndarray                 # unit: V/UI, sampled jitter sensitivity at selected phase
     sigma_J: float                  # unit: V, jitter-induced amplitude standard deviation
     h_XTs_dsamp: list[np.ndarray]
     sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
     sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
+    sigma_qn: float                 # unit: V, quantization noise standard deviation
+    sigma_total: float              # unit: V, total sampled-domain PSD standard deviation
+    S_rn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    S_xn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    S_tn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    S_jn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    S_qn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    S_total: SampledPSD             # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
+    R_n: np.ndarray                 # unit: V^2, sampled-domain noise autocorrelation
 
 def _build_txpkg_178A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig178A, *, isNext: bool = False) -> IEEECOMsparam:
     """
@@ -4715,45 +4830,142 @@ def _build_paths_178A(
 
     return paths
 
-def _calculate_float_dfe_178A(h_dsamp: np.ndarray, dfe_cfg: COMDFEConfig) -> np.ndarray:
-    """Calculate 178A floating DFE coefficients from downsampled victim pulse."""
-    raise NotImplementedError("_calculate_float_dfe_178A() skeleton is defined; implement 178A floating DFE.")
-
-def _calculate_h_ISI_178A(h_dsamp: np.ndarray, dfe_coeff: np.ndarray) -> np.ndarray:
-    """Calculate 178A residual ISI vector."""
-    raise NotImplementedError("_calculate_h_ISI_178A() skeleton is defined; implement 178A residual ISI.")
-
-def _find_sampling_phase_178A(
+def _candidate_positions_178A(
     h: np.ndarray,
     link_cfg: LinkConfig,
-    dfe_cfg: COMDFEConfig,
-) -> tuple[int, int]:
+    dte_cfg: COMDTEConfig,
+) -> list[tuple[int, int]]:
     """
-    Find 178A sampling instant and phase.
+    Return 178A sampling phase candidates for outer-loop MMSE search.
 
     Returns
     -------
-    tuple[int, int]
-        (ts, pos), where ts is the sample index on link_cfg.times and pos is
-        the sample phase index in [0, link_cfg.per_ui).
+    list[tuple[int, int]]
+        Candidate (ts, pos) pairs. ``ts`` is the sample index on
+        link_cfg.times and ``pos`` is the sample phase index in
+        [0, link_cfg.per_ui).
+
+    Notes
+    -----
+    178A does not choose a final sampling phase before PSD/MMSE evaluation.
+    The final phase is selected by the MSE minimization across these
+    candidates. This first skeleton enumerates all possible phases and anchors
+    each phase at the local maximum on that phase.
     """
-    raise NotImplementedError("_find_sampling_phase_178A() skeleton is defined; implement 178A sampling phase.")
+    h = np.asarray(h, dtype=float)
+    if h.ndim != 1 or len(h) == 0:
+        raise ValueError("h must be a non-empty 1D array.")
+    candidates: list[tuple[int, int]] = []
+    for pos in range(link_cfg.per_ui):
+        samples = h[pos::link_cfg.per_ui]
+        if len(samples) == 0:
+            continue
+        main_ui = int(np.argmax(np.abs(samples)))
+        ts = pos + main_ui * link_cfg.per_ui
+        # Need enough post-cursor samples for feedback taps in the later MMSE
+        # solve. This is a guard only; full 178A tap-index legality is checked
+        # in calculate_MMSE_DTE_178A().
+        if main_ui + int(dte_cfg.N_b) < len(samples):
+            candidates.append((int(ts), int(pos)))
+    if not candidates:
+        raise ValueError("No valid 178A sampling phase candidates were found.")
+    return candidates
+
+def _calculate_MMSE_DTE_178A(
+    victim: COMPath,
+    imp_status: COMImpairmentStatus_178A,
+    pos: int,
+    ts: int,
+    dte_cfg: COMDTEConfig,
+) -> COMDTEStatus:
+    """
+    Calculate 178A receiver discrete-time equalizer by MMSE.
+
+    Reference target:
+    - IEEE 802.3 Annex 178A.1.8.1, Eq. 178A-30 to Eq. 178A-34.
+
+    This skeleton is intentionally separated from impairment calculation
+    because 178A searches sampling phase candidates. Each candidate first
+    builds its own PSD/ACF at ``pos``, then solves the MMSE FFE/DFE system.
+    """
+    raise NotImplementedError("calculate_MMSE_DTE_178A() skeleton is defined; implement 178A-31..34.")
 
 def _build_rx_noise_psd_178A(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_cfg: COMFilterConfig178A) -> SampledPSD:
+    # 178A-17 uses eta_0/2 as the two-sided white-noise density. ContinuousPSD
+    # stores one-sided CT PSD, so the corresponding positive-frequency value is
+    # eta_0.
     S_rn_broadband = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0)
     H_rn = _build_H_r_178A(link_cfg, ft_cfg).cascade_tf(_build_H_ctf_178A(link_cfg, ft_cfg))
     S_rn_filtered = S_rn_broadband.filtered_by(H_rn)
     return S_rn_filtered.to_sampled(link_cfg.fb, link_cfg.theta)
 
+def _zero_sampled_psd_178A(link_cfg: LinkConfig) -> SampledPSD:
+    """Return a zero-valued sampled-domain PSD on link_cfg.theta."""
+    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+
+def _build_response_noise_psd_178A(
+    h_dsamp: np.ndarray,
+    link_cfg: LinkConfig,
+    variance: float,
+) -> SampledPSD:
+    """
+    Build one sampled-domain PSD component from a sampled impulse response.
+
+    This implements the 178A PSD terms that have the form:
+        variance * |DFT(h[n])|^2 / fb
+
+    SampledPSD stores the rfft one-sided equivalent of the spec's two-sided
+    theta-indexed Hz-density PSD. Therefore the source PSD constant passed to
+    SampledPSD.from_constant() is the spec value ``variance / fb``; no
+    Jacobian/radian-density scaling is applied here.
+    """
+    variance = float(variance)
+    if not np.isfinite(variance) or variance < 0.0:
+        raise ValueError("variance must be finite and non-negative.")
+    S_base = SampledPSD.from_constant(link_cfg.theta, variance / link_cfg.fb, link_cfg.fb)
+    H = SampledResponse.from_ir(h_dsamp, link_cfg)
+    return S_base.filtered_by(H)
+
+def _build_tx_noise_psd_178A(
+    victim: COMPath,
+    link_cfg: LinkConfig,
+    ft_cfg: COMFilterConfig178A,
+    imp_cfg: COMImpairmentConfig,
+    pos: int,
+) -> tuple[SampledPSD, np.ndarray]:
+    """
+    Build transmitter output noise PSD and the sampled no-FFE pulse response.
+
+    Reference:
+    - IEEE 802.3 Annex 178A.1.7.3, Eq. 178A-19 and Eq. 178A-20.
+    """
+    H_noffe = (
+        victim.H_t
+        .cascade_tf(victim.H_21)
+        .cascade_tf(victim.H_r)
+        .cascade_tf(victim.H_ctf)
+    )
+    X_v = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
+    h_tn = H_noffe.cascade_tf(X_v).ir[int(pos)::link_cfg.per_ui]
+    variance = 10 ** (-imp_cfg.SNR_TX / 10)
+    return _build_response_noise_psd_178A(h_tn, link_cfg, variance), h_tn
+
 def _find_pos_xtalk_178A(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
-    """Find 178A crosstalk sampling phase and downsampled crosstalk response."""
+    """
+    Find the 178A-18 crosstalk worst-case sampling phase.
+
+    Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
+    maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
+    the victim sampling phase candidate.
+    """
     return _find_pos_xtalk_93A(h_XT, per_ui)
 
 def _build_xtalk_psd_178A(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x: float) -> SampledPSD:
 
-    # spec defined psd constant = sigma_x^2/fb in continuous-time two-sided domain
-    # converting to discrete-time one-sided doamin: constant = sigma_x^2/fb * (fb/2*pi) * 2
-    S_xn_base = SampledPSD.from_constant(link_cfg.theta, (sigma_x**2/np.pi), link_cfg.fb)
+    # IEEE 178A-18: S_xn(theta) = sigma_x^2/fb * |DFT(h_xn[n])|^2.
+    # SampledPSD.from_constant() accepts this spec two-sided Hz-density value
+    # and stores the rfft one-sided equivalent internally.
+    S_xn_base = SampledPSD.from_constant(link_cfg.theta, (sigma_x**2/link_cfg.fb), link_cfg.fb)
 
     # initialized with psd_constant = 0.0
     S_xn_all = SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
@@ -4765,9 +4977,30 @@ def _build_xtalk_psd_178A(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x
 
     return S_xn_all
 
-def _calculate_h_J_178A(h: np.ndarray, ts: int, per_ui: int) -> np.ndarray:
-    """Calculate 178A sampled jitter sensitivity."""
-    raise NotImplementedError("_calculate_h_J_178A() skeleton is defined; implement 178A jitter sensitivity.")
+def _calculate_h_J_178A(h: np.ndarray, ts: int, link_cfg: LinkConfig) -> np.ndarray:
+    """
+    Calculate 178A sampled jitter sensitivity.
+
+    Reference:
+    - IEEE 802.3 Annex 178A.1.7.4, Eq. 178A-21.
+
+    The returned samples are in V/UI because COM jitter parameters A_DD and
+    sigma_RJ are specified in UI. Eq. 178A-21 is evaluated with
+    Delta t = link_cfg.dt, the waveform sample interval.
+    """
+    per_ui = link_cfg.per_ui
+    pos = int(ts) % per_ui
+    center_idx = np.arange(pos, len(h), per_ui)
+    valid = (center_idx > 0) & (center_idx < len(h) - 1)
+    center_idx = center_idx[valid]
+    if len(center_idx) == 0:
+        raise ValueError("No valid samples for 178A h_J finite difference.")
+
+    delta_t_ui = link_cfg.dt / link_cfg.bt
+    h_m1 = h[center_idx - 1]
+    h_p1 = h[center_idx + 1]
+    h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
+    return h_J
 
 
 def _build_pmf_interference_178A(
@@ -4780,7 +5013,7 @@ def _build_pmf_interference_178A(
     raise NotImplementedError("_build_pmf_interference_178A() skeleton is defined; implement 178A PMF interference.")
 
 def _build_pmf_G_178A(
-    imp_stat: COMImpairmentStatus,
+    imp_stat: COMImpairmentStatus_178A,
     imp_cfg: COMImpairmentConfig,
     pmf_cfg: COMPMFRuntimeConfig,
 ) -> Pmf1D:
@@ -4795,8 +5028,8 @@ def _build_pmf_XT_all_178A(
     """Build combined 178A crosstalk PMF."""
     raise NotImplementedError("_build_pmf_XT_all_178A() skeleton is defined; implement 178A XT PMF.")
 
-def _calculate_FOM_178A(imp_status: COMImpairmentStatus) -> float:
-    """Calculate 178A FOM/search metric from impairment status."""
+def _calculate_FOM_178A(imp_status: COMImpairmentStatus_178A, dte_status: COMDTEStatus) -> float:
+    """Calculate 178A FOM/search metric from selected MMSE DTE status."""
     raise NotImplementedError("_calculate_FOM_178A() skeleton is defined; implement 178A FOM/search metric.")
 
 class COM_178A(COM_93A):
@@ -4807,8 +5040,11 @@ class COM_178A(COM_93A):
     --------------
     COM_178A owns the versioned 178A algorithm pipeline:
     - build_all_paths_178A()
-    - find_pos_and_dfe_178A()
-    - calculate_imp_178A()
+    - outer-loop sampling phase search
+    - calculate_psd_common_178A()
+    - calculate_psd_pre_dte_178A()
+    - calculate_psd_post_dte_178A()
+    - calculate_MMSE_DTE_178A()
     - calculate_COM_178A()
 
     This class intentionally reuses COM_93A's shared proxy/report/search shell
@@ -4825,20 +5061,52 @@ class COM_178A(COM_93A):
         """
         Run one concrete 178A COMConfig point.
 
-        Pipeline shape mirrors COM_93A:
-        paths -> DFE/sample phase -> imp -> FOM -> optional PMF/COM.
+        178A pipeline:
+        paths -> sampling phase candidates -> common PSD ->
+        for-loop pre-DTE PSD(pos) -> MMSE DTE(pos) -> post-DTE PSD ->
+        MSE/FOM selection ->
+        optional PMF/COM for best pos.
         """
         paths = self.build_all_paths_178A()
-        self._validate_victim_time_alignment(paths[0])
-        dfe_status = self.find_pos_and_dfe_178A(h=paths[0].pulse.ir)
-        imp_status = self.calculate_imp_178A(
-            h=paths[0].pulse.ir,
-            dfe_status=dfe_status,
-            h_XTs=[path.pulse.ir for path in paths[1:]],
-        )
-        FOM = _calculate_FOM_178A(imp_status)
-        pmf_status = self.calculate_COM_178A(imp_status) if calculate_pmf else None
-        return COMStatus(paths=paths, dfe=dfe_status, imp=imp_status, pmf=pmf_status, FOM=FOM)
+        victim = paths[0]
+        xtalk_paths = paths[1:]
+
+        self._validate_victim_time_alignment(victim)
+        h_XTs = [path.pulse.ir for path in xtalk_paths]
+        candidates = _candidate_positions_178A(victim.pulse.ir, self.cfg.link, self.cfg.dte)
+        psd_common = self.calculate_psd_common_178A(victim=victim, h_XTs=h_XTs)
+
+        best_dte: Optional[COMDTEStatus] = None
+        best_imp: Optional[COMImpairmentStatus_178A] = None
+        best_FOM: Optional[float] = None
+        for ts, pos in candidates:
+            imp_pre = self.calculate_psd_pre_dte_178A(
+                victim=victim,
+                pos=pos,
+                ts=ts,
+                common=psd_common,
+            )
+            dte_status = self.calculate_MMSE_DTE_178A(
+                victim=victim,
+                imp_status=imp_pre,
+                pos=pos,
+                ts=ts,
+            )
+            imp_status = self.calculate_psd_post_dte_178A(
+                imp_status=imp_pre,
+                dte_status=dte_status,
+            )
+            FOM = _calculate_FOM_178A(imp_status, dte_status)
+            if best_FOM is None or FOM > best_FOM:
+                best_FOM = FOM
+                best_imp = imp_status
+                best_dte = dte_status
+
+        if best_imp is None or best_dte is None or best_FOM is None:
+            raise RuntimeError("COM 178A run did not produce any valid sampling-phase candidate.")
+
+        pmf_status = self.calculate_COM_178A(best_imp, best_dte) if calculate_pmf else None
+        return COMStatus(paths=paths, dfe=best_dte, imp=best_imp, pmf=pmf_status, FOM=best_FOM)
 
     def _require_status(self) -> COMStatus:
         if self.status is None:
@@ -4958,50 +5226,236 @@ class COM_178A(COM_93A):
         shared = _build_shared_path_178A(self.cfg, channels[0].freqs)
         return _build_paths_178A(self.cfg, shared, channels)
 
-    def find_pos_and_dfe_178A(self, h: np.ndarray) -> COMDFEStatus:
+    def calculate_MMSE_DTE_178A(
+        self,
+        victim: COMPath,
+        imp_status: COMImpairmentStatus_178A,
+        pos: int,
+        ts: int,
+    ) -> COMDTEStatus:
         """
-        Find 178A sampling phase and DFE coefficients.
+        Calculate 178A receiver discrete-time equalizer for one sampling phase.
 
         Parameters
         ----------
-        h:
-            Victim pulse response in V, sampled on self.cfg.link time grid.
+        victim:
+            Victim COMPath for the current TX FFE/CTLE/channel candidate.
+        imp_status:
+            178A impairment status computed at the same sampling phase.
+        pos:
+            Sample phase index in [0, cfg.link.per_ui).
+        ts:
+            Main-cursor sample index on cfg.link.times for this candidate.
         """
-        raise NotImplementedError("find_pos_and_dfe_178A() skeleton is defined; implement 178A DFE/sampling flow.")
+        return _calculate_MMSE_DTE_178A(victim, imp_status, pos, ts, self.cfg.dte)
 
-    def calculate_imp_178A(
+    def calculate_psd_common_178A(
         self,
+        victim: COMPath,
         h_XTs: list[np.ndarray],
+    ) -> COMImpairmentCommon_178A:
+        """
+        Calculate 178A PSD components that do not depend on sampling phase.
+
+        Parameters
+        ----------
+        victim:
+            Victim COMPath for the current TX FFE/CTLE/channel candidate.
+        h_XTs:
+            Crosstalk pulse responses in V. Each crosstalk PSD uses its own
+            worst-case sampling phase as defined below Eq. 178A-18.
+
+        Returns
+        -------
+        COMImpairmentCommon_178A
+            Cached receiver-noise and crosstalk PSD terms reused by every sampling-phase
+            candidate in the current _run_once() call.
+        """
+        del victim
+        link_cfg = self.cfg.link
+        imp_cfg = self.cfg.imp
+        ft_cfg = self.cfg.filter
+        L = self.cfg.L
+        sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
+
+        # Receiver input noise PSD, Eq. 178A-17. It depends on H_r/H_ctf
+        # magnitude and broadband noise density, but not on sampling phase.
+        S_rn = _build_rx_noise_psd_178A(link_cfg, imp_cfg, ft_cfg)
+        sigma_N = S_rn.to_sigma()
+
+        # Crosstalk PSD, Eq. 178A-18. Each crosstalk path selects its own
+        # sampling time t_s^(k) that maximizes sum_n [h_xn^(k)(n)]^2, so it is
+        # independent of the victim sampling-phase candidate.
+        S_xn = _build_xtalk_psd_178A(h_XTs, link_cfg, sigma_X)
+        sigma_XT = S_xn.to_sigma()
+        h_XTs_dsamp = [
+            _find_pos_xtalk_178A(h_XT, link_cfg.per_ui)[1]
+            for h_XT in h_XTs
+        ]
+
+        return COMImpairmentCommon_178A(
+            S_rn=S_rn,
+            sigma_N=sigma_N,
+            S_xn=S_xn,
+            sigma_XT=sigma_XT,
+            h_XTs_dsamp=h_XTs_dsamp,
+        )
+
+    def calculate_psd_pre_dte_178A(
+        self,
+        victim: COMPath,
+        pos: int,
+        ts: int,
+        common: COMImpairmentCommon_178A,
     ) -> COMImpairmentStatus_178A:
         """
-        Calculate 178A impairment status.
+        Calculate 178A pre-DTE PSD status for one sampling phase candidate.
+
+        This stage builds PSD components available before solving the receiver
+        discrete-time equalizer. Quantization noise is finalized in
+        calculate_psd_post_dte_178A() because 178A-26/27/28 determines the
+        quantization step from the pre-quantization signal/noise distribution.
 
         Parameters
         ----------
-        h:
-            Victim pulse response in V.
-        dfe_status:
-            178A DFE/sampling result.
-        h_XTs:
-            Crosstalk pulse responses in V.
+        victim:
+            Victim COMPath. The method uses victim.pulse.ir for the signal
+            pulse and victim.H_t/H_21/H_r/H_ctf for the no-FFE TX-noise pulse.
+        pos:
+            Sample phase index in [0, cfg.link.per_ui).
+        ts:
+            Main-cursor sample index on cfg.link.times for this candidate.
+        common:
+            Sampling-phase-independent impairment components computed once by
+            calculate_psd_common_178A().
         """
         link_cfg = self.cfg.link
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
         L = self.cfg.L
+        h = victim.pulse.ir
+        ts = int(ts)
+        pos = int(pos)
+        h_dsamp = h[pos::link_cfg.per_ui]
+        num_pre = (ts - pos) // link_cfg.per_ui
+        if num_pre < 0 or num_pre >= len(h_dsamp):
+            raise ValueError("178A sampling candidate points outside the downsampled victim pulse.")
+        h_main = float(h_dsamp[num_pre])
 
+        # As
+        As = imp_cfg.R_LM * h_main / (L - 1)
+        
         # sigma_x
         sigma_X = np.sqrt( (L**2 - 1) / (3 * (L-1)**2) )
 
-        # psd
-        S_rn = _build_rx_noise_psd_178A(link_cfg, imp_cfg, ft_cfg)
-        S_xn_all = _build_xtalk_psd_178A(h_XTs, link_cfg, sigma_X)
-        raise NotImplementedError(
-            "calculate_imp_178A() currently builds S_rn and S_xn_all; "
-            "complete the 178A impairment scalar/status calculations before returning COMImpairmentStatus_178A."
+        # Residual ISI is determined after the MMSE DTE solve, not in the
+        # impairment PSD stage. Keep placeholders for COMStatus/report shape
+        # until calculate_MMSE_DTE_178A() is implemented and can feed final PMF.
+        h_ISI = np.zeros(0, dtype=float)
+        sigma_ISI = float("nan")
+
+        # Receiver input noise PSD, Eq. 178A-17, and crosstalk PSD,
+        # Eq. 178A-18, are independent of the victim sampling phase candidate
+        # and are cached outside the loop.
+        S_rn = common.S_rn
+        sigma_N = common.sigma_N
+        S_xn = common.S_xn
+        sigma_XT = common.sigma_XT
+        h_XTs_dsamp = common.h_XTs_dsamp
+
+        # transmitter output noise PSD, Eq. 178A-19 and Eq. 178A-20.
+        S_tn, h_TN = _build_tx_noise_psd_178A(victim, link_cfg, ft_cfg, imp_cfg, pos)
+        sigma_TX = S_tn.to_sigma()
+
+        # transmitter jitter-induced noise PSD, Eq. 178A-21 and Eq. 178A-22.
+        h_J = _calculate_h_J_178A(h, ts, link_cfg)
+        jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
+        S_jn = _build_response_noise_psd_178A(h_J, link_cfg, jitter_variance)
+        sigma_J = S_jn.to_sigma()
+
+        # Interference source, 178A.1.7.5, is intentionally ignored in the
+        # current project scope. Quantization noise is finalized after DTE.
+        S_qn = _zero_sampled_psd_178A(link_cfg)
+        sigma_qn = 0.0
+
+        S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
+        sigma_total = S_total.to_sigma()
+        R_n = S_total.to_autocorrelation()
+
+        return COMImpairmentStatus_178A(
+            pos=pos,
+            ts=ts,
+            As=As,
+            sigma_X=sigma_X,
+            sigma_TX=sigma_TX,
+            h_ISI=h_ISI,
+            sigma_ISI=sigma_ISI,
+            h_TN=h_TN,
+            h_J=h_J,
+            sigma_J=sigma_J,
+            h_XTs_dsamp=h_XTs_dsamp,
+            sigma_XT=sigma_XT,
+            sigma_N=sigma_N,
+            sigma_qn=sigma_qn,
+            sigma_total=sigma_total,
+            S_rn=S_rn,
+            S_xn=S_xn,
+            S_tn=S_tn,
+            S_jn=S_jn,
+            S_qn=S_qn,
+            S_total=S_total,
+            R_n=R_n,
         )
 
-    def calculate_COM_178A(self, imp_status: COMImpairmentStatus) -> COMPMFStatus:
+    def calculate_psd_post_dte_178A(
+        self,
+        imp_status: COMImpairmentStatus_178A,
+        dte_status: COMDTEStatus,
+    ) -> COMImpairmentStatus_178A:
+        """
+        Finalize 178A post-DTE PSD status.
+
+        This stage owns quantization noise, Eq. 178A-26 to Eq. 178A-28. When
+        quantization parameters are not provided, S_qn is zero. When they are
+        provided, the implementation must determine V_qc from the spec-defined
+        pre-quantization noisy-signal CDF; no project-specific approximation is
+        used here.
+        """
+        del dte_status
+        link_cfg = self.cfg.link
+        imp_cfg = self.cfg.imp
+
+        if imp_cfg.N_qb is None and imp_cfg.P_qc is None:
+            S_qn = _zero_sampled_psd_178A(link_cfg)
+            sigma_qn = 0.0
+        elif imp_cfg.N_qb is None or imp_cfg.P_qc is None:
+            raise ValueError("178A quantization PSD requires both N_qb and P_qc.")
+        else:
+            raise NotImplementedError(
+                "S_qn per 178A-26 requires V_qc from 178A-27/28 pre-quantization "
+                "signal/noise CDF. This branch is intentionally not approximated."
+            )
+
+        S_total = (
+            imp_status.S_rn
+            .add(imp_status.S_xn)
+            .add(imp_status.S_tn)
+            .add(imp_status.S_jn)
+            .add(S_qn)
+        )
+        sigma_total = S_total.to_sigma()
+        R_n = S_total.to_autocorrelation()
+
+        return replace(
+            imp_status,
+            S_qn=S_qn,
+            sigma_qn=sigma_qn,
+            S_total=S_total,
+            sigma_total=sigma_total,
+            R_n=R_n,
+        )
+
+    def calculate_COM_178A(self, imp_status: COMImpairmentStatus_178A, dte_status: COMDTEStatus) -> COMPMFStatus:
         """
         Calculate 178A final PMF/COM result from impairment status.
 
@@ -5009,6 +5463,8 @@ class COM_178A(COM_93A):
         ----------
         imp_status:
             178A impairment status.
+        dte_status:
+            Selected 178A receiver DTE result.
         """
         raise NotImplementedError("calculate_COM_178A() skeleton is defined; implement 178A PMF/COM flow.")
 

@@ -750,17 +750,21 @@ class ContinuousPSD:
 
         Notes
         -----
-        Sampling always aliases continuous-time PSD. This method performs the
-        aliasing sum directly in one-sided form:
+        Sampling always aliases continuous-time PSD. This method follows the
+        IEEE 802.3 178A convention used by Equations 178A-17/18:
             theta = 2*pi*f/fb
             f0 = theta*fb/(2*pi)
-            S_dt,1 = fb/(2*pi) * sum_k S_ct,1(| f0 + k*fb |)
+            S_spec(theta) = sum_k S_ct,1(| f0 + k*fb |)
 
-        The absolute-value lookup is the implicit one-sided view of the
-        two-sided alias branches. The DC and Nyquist endpoints are halved to
-        avoid double-counting the mirrored branch. If the input has no
-        out-of-band energy, the aliasing
-        sum naturally reduces to the baseband variable transform.
+        The stored SampledPSD values remain PSD densities in quantity^2/Hz,
+        indexed by theta. They are not converted to quantity^2/rad here. The
+        only scale conversion is applied by SampledPSD.to_sigma() and
+        SampledPSD.to_autocorrelation().
+
+        ContinuousPSD itself stores one-sided CT PSD values. Therefore the
+        direct one-sided alias sum already produces the SampledPSD one-sided
+        equivalent. DC and Nyquist bins are halved for rfft-style endpoint
+        accounting; interior bins are not doubled here.
         """
         fb = float(fb)
         if not np.isfinite(fb) or fb <= 0.0:
@@ -795,8 +799,7 @@ class ContinuousPSD:
             kfb = k * fb
             folded += interp_ct_psd(np.abs(f0 + kfb))
 
-        psd_dt = (fb / (2 * np.pi)) * folded
-
+        psd_dt = folded
         if len(psd_dt) > 0 and np.isclose(theta[0], 0.0):
             psd_dt[0] *= 0.5
         if len(psd_dt) > 1 and np.isclose(theta[-1], np.pi):
@@ -1036,7 +1039,13 @@ class SampledResponse:
             zero-padded to cfg.sampled_nfft and uses cfg.theta as its
             one-sided sampled-domain frequency axis.
         """
-        ir = cls.validate_ir(ir)
+        ir = np.asarray(ir, dtype=float)
+        if ir.ndim != 1:
+            raise ValueError("ir must be a 1D array.")
+        if len(ir) < 1:
+            raise ValueError("ir must contain at least one sample.")
+        if not np.all(np.isfinite(ir)):
+            raise ValueError("ir contains non-finite values.")
         nfft = int(cfg.sampled_nfft)
         if nfft < len(ir):
             raise ValueError("cfg.sampled_nfft must be greater than or equal to len(ir).")
@@ -1203,16 +1212,28 @@ class SampledPSD:
 
     Class boundary
     --------------
-    SampledPSD owns scalar one-sided PSD samples S_dt,1(theta) on the
-    normalized sampled-domain frequency axis [0, pi]. It is the one-sided
-    equivalent of the spec-style two-sided PSD on [-pi, pi) for real-valued
-    signals.
+    SampledPSD owns scalar rfft-style one-sided PSD samples on the normalized
+    sampled-domain frequency axis [0, pi].
 
-    The stored PSD unit is quantity^2/rad, so integrated power is approximated
-    by integral S_dt,1(theta) d theta.
+    Important 178A convention
+    -------------------------
+    IEEE 802.3 178A writes sampled-domain PSDs as S(theta), but Equations
+    178A-17/18/19/22/28 use PSD densities in quantity^2/Hz. This class follows
+    that spec-compatible convention:
+        - axis: theta in rad/sample
+        - stored value unit: quantity^2/Hz, not quantity^2/rad
+
+    The stored array is the one-sided equivalent of the spec's two-sided
+    theta-indexed Hz-density PSD. Interior rfft bins are doubled; DC and
+    Nyquist are not. Components can therefore be added directly only when they
+    all follow this same contract.
+
+    Scale conversion is centralized:
+        - to_sigma(): power = df * sum(one-sided PSD), df = fb/Nfft
+        - to_autocorrelation(): R[n] = fb * ifft(two-sided spec PSD)
     """
     theta: np.ndarray                # unit: rad/sample, one-sided axis [0, pi]
-    psd: np.ndarray                  # unit: quantity^2/rad, one-sided PSD samples
+    psd: np.ndarray                  # unit: quantity^2/Hz, rfft one-sided equivalent PSD samples
     fb: float                        # unit: Hz, sampling rate / baud rate
 
     def __post_init__(self) -> None:
@@ -1254,7 +1275,7 @@ class SampledPSD:
         Parameters
         ----------
         psd:
-            One-sided PSD samples in quantity^2/rad.
+            One-sided PSD samples in quantity^2/Hz.
         theta:
             Sampled-domain frequency axis used only for shape checking.
         """
@@ -1277,14 +1298,16 @@ class SampledPSD:
         fb: float,
     ) -> 'SampledPSD':
         """
-        Build a flat one-sided sampled PSD from a constant density.
+        Build a flat sampled PSD from a spec two-sided constant density.
 
         Parameters
         ----------
         theta:
             Sampled-domain frequency axis in rad/sample.
         psd_value:
-            Constant one-sided PSD density in quantity^2/rad.
+            Constant spec-compatible two-sided PSD density in quantity^2/Hz.
+            The returned object stores the rfft one-sided equivalent, so
+            interior bins are doubled automatically.
         fb:
             Sampling rate / baud rate in Hz.
         """
@@ -1292,7 +1315,10 @@ class SampledPSD:
         psd_value = float(psd_value)
         if not np.isfinite(psd_value) or psd_value < 0.0:
             raise ValueError("psd_value must be finite and non-negative.")
-        return cls(theta=theta, psd=psd_value * np.ones_like(theta, dtype=float), fb=fb)
+        psd = psd_value * np.ones_like(theta, dtype=float)
+        one_sided_interior = (theta > 0.0) & (theta < np.pi)
+        psd[one_sided_interior] *= 2.0
+        return cls(theta=theta, psd=psd, fb=fb)
 
     @property
     def freqs(self) -> np.ndarray:
@@ -1307,11 +1333,11 @@ class SampledPSD:
 
         This is not an inverse of broadband aliasing. It only maps the stored
         sampled-domain PSD back to the equivalent 0..fb/2 continuous baseband:
-            S_ct,1(f) = 2*pi/fb * S_dt,1(theta)
+            S_ct,1(f) = S_sampled,1(theta)
         """
         return ContinuousPSD(
             freqs=self.freqs,
-            psd=(2 * np.pi / self.fb) * self.psd,
+            psd=self.psd,
             ifftable=False,
         )
 
@@ -1361,10 +1387,41 @@ class SampledPSD:
 
     def to_sigma(self) -> float:
         """
-        Integrate one-sided sampled PSD over theta and return RMS amplitude.
+        Integrate sampled PSD and return RMS amplitude.
+
+        The stored PSD is a theta-indexed Hz-density one-sided equivalent.
+        With an rfft grid of even Nfft, df = fb/Nfft and:
+            sigma^2 = df * sum(S_one_sided)
         """
-        power = float(np.trapezoid(self.psd, self.theta))
+        nfft = 2 * (len(self.theta) - 1)
+        df = self.fb / nfft
+        power = float(df * np.sum(self.psd))
         return float(np.sqrt(power))
+
+    def to_autocorrelation(self) -> np.ndarray:
+        """
+        Return discrete-time autocorrelation R[n] from the sampled PSD.
+
+        Returns
+        -------
+        np.ndarray
+            Real-valued autocorrelation sequence with length Nfft.
+
+        Notes
+        -----
+        The stored one-sided equivalent is converted back to the spec-style
+        two-sided theta-indexed Hz-density PSD before IDFT:
+            R[n] = fb * ifft(S_two_sided)[n]
+        """
+        nfft = 2 * (len(self.theta) - 1)
+        psd_two = np.empty(nfft, dtype=float)
+        psd_two[0] = self.psd[0]
+        psd_two[nfft // 2] = self.psd[-1]
+        if len(self.theta) > 2:
+            interior = 0.5 * self.psd[1:-1]
+            psd_two[1:nfft // 2] = interior
+            psd_two[nfft // 2 + 1:] = interior[::-1]
+        return np.real(np.fft.ifft(psd_two) * self.fb)
 
     def plot(
         self,
@@ -1408,7 +1465,7 @@ class SampledPSD:
         if label is not None:
             ax.legend()
         ax.set_xlabel("Frequency (rad/sample)")
-        ax.set_ylabel("One-sided sampled PSD")
+        ax.set_ylabel("One-sided sampled PSD (quantity^2/Hz)")
         ax.set_title("Sampled PSD")
         ax.grid(True)
 

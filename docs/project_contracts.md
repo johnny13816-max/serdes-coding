@@ -308,9 +308,20 @@ SampledPSD
 - 代表 sampled/discrete-time one-sided PSD。
 - `theta` 單位為 rad/sample，範圍為 `[0, pi]`。
 - `fb` 是 sampling rate / baud rate，單位 Hz。
-- `psd` 單位為 quantity^2/rad。
+- `psd` 單位為 quantity^2/Hz，不是 quantity^2/rad。
+- 這裡刻意對齊 IEEE 802.3 Annex 178A 的 convention：spec 用 `theta`
+  當 sampled-domain frequency coordinate，但 Eq. 178A-17/18/19/22/28 的
+  PSD density scale 仍是 per-Hz。
+- 內部儲存 rfft-style one-sided equivalent：interior bins 已經相對 spec
+  two-sided PSD 加倍，DC/Nyquist 不加倍。
 - `freqs` 可以作為 debug property：`freqs = theta * fb / (2*pi)`。
-- `to_sigma()` 使用 `sqrt(integral_0^pi S_dt,1(theta) d theta)`。
+- `from_constant(theta, psd_value, fb)` 的 `psd_value` 是 spec two-sided
+  Hz-density value，例如 178A-18 的 `sigma_x^2/fb`；method 內部會轉成
+  one-sided equivalent。
+- `to_sigma()` 使用 `sqrt(df * sum(S_one_sided))`，其中
+  `df = fb/Nfft`。
+- `to_autocorrelation()` 先還原 spec two-sided Hz-density PSD，再用
+  `R[n] = fb * ifft(S_two_sided)[n]`。
 - 多個 178A.1.7 impairment PSD 應先轉成 `SampledPSD` 再相加。
 - `to_continuous_baseband()` 只能回傳 baseband-equivalent `ContinuousPSD`；若前面做過 aliasing，不能恢復原本的 high-frequency continuous PSD。
 
@@ -328,52 +339,61 @@ SampledPSD
 - `SampledPSD.add(other)` / `psd_a + psd_b` 用於相加互不相關的 sampled-domain PSD component；要求 `fb` 與 `theta` grid 完全相同，不做隱式 resample。
 - 不取代 `LinkSegment`；`LinkSegment` 仍代表 continuous-time / rfft-Hz grid response。
 
-One-sided 轉換公式：
+178A sampled PSD 尺度規則：
 
 ```text
 theta = 2*pi*f/fb
 df = fb/(2*pi) d theta
-
-S_dt,1(theta) = fb/(2*pi) * S_ct,1(f)
 f = theta*fb/(2*pi)
 ```
 
-若需要 broadband aliasing，先在 continuous frequency 上做 aliasing sum：
+不要把 178A sampled PSD source 轉成 quantity^2/rad。程式採用
+theta-indexed Hz-density：
 
 ```text
-S_dt,2(theta) = fb/(2*pi) * sum_k S_ct,2((theta + 2*pi*k)*fb/(2*pi))
+S_spec(theta): quantity^2/Hz, indexed by theta
+power = df * sum(S_one_sided) = fb * mean(S_two_sided)
 ```
 
-對 real-valued signal，可再轉成 one-sided discrete PSD：
+178A source PSD 在 code 中要照 spec scale 寫：
 
 ```text
-S_dt,1(theta) = 2*S_dt,2(theta), 0 < theta < pi
-S_dt,1(0)     = S_dt,2(0)
-S_dt,1(pi)    = S_dt,2(pi), if Nyquist bin exists
+S_rn(theta) = eta_0/2 * alias_sum(|H_rn(f_alias)|^2)
+S_xn(theta) = sigma_x^2/fb * |DFT(h_xn[n])|^2
+S_tn(theta) = 10^(-SNR_TX/10)/fb * |DFT(h_tn[n])|^2
+S_jn(theta) = sigma_x^2*(A_DD^2+sigma_RJ^2)/fb * |DFT(h_J[n])|^2
+S_qn(theta) = (Delta^2/12)/fb
 ```
 
-如果 continuous PSD 一開始就是 one-sided，則 aliasing sum 要用偶對稱展開：
+混淆點：
 
 ```text
-S_ct,2(f) = 0.5*S_ct,1(|f|), f != 0
+純數學 theta-density 會使用 quantity^2/rad，並在 PSD source 乘
+fb/(2*pi)。這不是目前 SampledPSD contract。
+
+因此 code 中不要出現：
+sigma_x^2/pi
+sigma_x^2/(2*pi)
+eta_0/2 * fb/(2*pi)
 ```
 
-程式中可不顯式建立 two-sided PSD，而是用 one-sided direct form：
+`ContinuousPSD.to_sampled()` 的 aliasing sum 也不做 Jacobian scaling；它輸出
+theta-indexed Hz-density。注意 `ContinuousPSD` 本身已經是 one-sided CT
+PSD，因此這個入口和 `SampledPSD.from_constant()` 不同：
+
+- `SampledPSD.from_constant(theta, psd_value, fb)` 的 `psd_value` 是 178A
+  spec two-sided constant，例如 `sigma_x^2/fb`，method 內部會 double
+  interior bins。
+- `ContinuousPSD.to_sampled()` 的輸入已經是 one-sided CT PSD，所以 direct
+  aliasing sum 已經是 one-sided equivalent；method 只對 DC/Nyquist 做
+  rfft endpoint accounting，不再 double interior bins。
 
 ```text
 f0 = theta*fb/(2*pi)
-S_dt,1(theta) = fb/(2*pi) * sum_k S_ct,1(|f0 + k*fb|), 0 < theta < pi
+S_one_sided(theta) = sum_k S_ct,1(|f0 + k*fb|), 0 < theta < pi
+S_one_sided(0)  *= 0.5
+S_one_sided(pi) *= 0.5, if Nyquist bin exists
 ```
-
-`k` 掃過正負整數時，`|f0+k*fb|` 已經隱含 two-sided folding，不需要再額外加
-`|-f0+k*fb|` branch，否則會 double count。DC 與 Nyquist endpoint 需要除以 2：
-
-```text
-S_dt,1(0)  *= 0.5
-S_dt,1(pi) *= 0.5, if Nyquist bin exists
-```
-
-最後保證 `integral_0^pi S_dt,1(theta)dtheta` 等於 sampled-domain variance。
 
 ## 近期整理原則
 
@@ -536,17 +556,45 @@ from serdes_coding import COM_93A, COM_178A
 178A implementation status：
 - `COM_178A` 已建立 class 與 run pipeline 接口。
 - `COMConfig178A`、`COMFilterConfig178A`、`COMPkgConfig178A` 已建立，用來承接 178A path-building 所需的 filter/package 參數。
+- `COMConfig178A` 使用 `dte: COMDTEConfig`，不再使用 93A-style `dfe` 欄位描述 178A receiver discrete-time equalizer。
 - `build_all_paths_178A()` 已完成第一版接線：
   - `_build_channel_under_test_178A()` 讀取 measured-domain S4P，順序沿用 victim、NEXT、FEXT。
   - `_build_shared_path_178A()` 建立 shared blocks：`H_ffe`、`H_ffe_next`、`H_t`、`S_rx`、`H_r`、`H_ctf`。
   - `_build_path_178A()` 依 path kind 選擇 `txpkg_victim`、`txpkg_next`、`txpkg_fext`，再串接 `S_tx + S_ch + S_rx`，最後轉成 `H_21` / `H_all` / `pulse`。
-- 178A helper 已建立 `_find_sampling_phase_178A()`、`_calculate_*_178A()`、`_build_pmf_*_178A()` 的 IO skeleton，但 DFE、impairment、FOM、PMF 公式尚未填入。
+- `COM_178A._run_once()` 與 `_run_search()` 的流程已明確包含 sampling phase outer loop：
+  ```text
+  build_all_paths_178A()
+    -> calculate_psd_common_178A(victim, h_XTs)
+  -> for (ts, pos) in _candidate_positions_178A(...)
+         -> calculate_psd_pre_dte_178A(victim, pos, ts, common)
+         -> calculate_MMSE_DTE_178A(victim, imp_pre, pos, ts)
+         -> calculate_psd_post_dte_178A(imp_pre, dte_status)
+         -> _calculate_FOM_178A(imp_status, dte_status)
+    -> select best candidate
+    -> optional calculate_COM_178A(best_imp, best_dte)
+  ```
+- `calculate_psd_common_178A()` 計算 sampling-phase-independent PSD cache；目前包含 `S_rn`、`S_xn`、`sigma_N`、`sigma_XT`，避免每個 `pos` 重複建立 receiver noise PSD 與 crosstalk PSD。
+- `calculate_psd_pre_dte_178A()` 不吃 DFE/DTE result；它吃 `pos` / `ts` 與 `common`，用該 sampling phase 建立 178A.1.7 pre-DTE PSD status。
+- `calculate_psd_post_dte_178A()` 吃 pre-DTE PSD status 與 selected DTE result，負責 post-DTE PSD finalization；目前主要保留給 Eq. 178A-26 quantization noise。
+- `calculate_MMSE_DTE_178A()` 是 178A.1.8 receiver FFE/DFE MMSE solve 的正式入口，取代舊的 `find_pos_and_dfe_178A()` 名稱。
+- 178A helper 已建立 `_candidate_positions_178A()`、`_calculate_MMSE_DTE_178A()`、`_build_pmf_*_178A()` 的 IO skeleton，但 MMSE solve、FOM、PMF 公式尚未填入。
 - `IEEECOMsparam` 已建立 178A S-parameter builders：
   - `device_termination_178A()`：Eq. 178A-7 N-stage LC ladder，輸入 L/C vectors 與 bump capacitance。
   - `device_package_178A()`：Eq. 178A-9 N-stage package transmission line，輸入 TL length / impedance vectors 與 package capacitance。
   - `partial_host_channel_178A()`：Eq. 178A-10 synthetic partial host channel，輸入 C0 / C1 / TL parameters。
 - `IEEECOMFilter.rx_equalizer_178A()` 已建立三 pole / two zero 的 178A CTF formula interface。
-- 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 仍會在 DFE/FOM 等尚未實作階段丟出 `NotImplementedError`。
+- `calculate_psd_pre_dte_178A()` 已建立 178A.1.7 sampled-domain PSD flow：
+  - `S_rn`: receiver input noise PSD, Eq. 178A-17。
+  - `S_xn`: crosstalk PSD summed over all aggressor paths, Eq. 178A-18；每條 crosstalk path 使用自己的 `t_s^(k)`，並選擇使 `sum_n [h_xn^(k)(n)]^2` 最大的 worst-case phase，不跟 victim candidate `pos` 綁定。
+  - `S_tn`: transmitter output noise PSD, Eq. 178A-19 / 178A-20。
+  - `S_jn`: transmitter jitter-induced noise PSD, Eq. 178A-21 / 178A-22；finite difference 使用 `Delta t = link_cfg.dt`，並輸出 V/UI 的 sampled jitter sensitivity。
+  - `S_qn`: finalized in `calculate_psd_post_dte_178A()` according to Eq. 178A-26 to Eq. 178A-28; if `N_qb/P_qc` are not provided, it is explicit zero。
+  - `S_total`: sum of enabled PSD components on `cfg.theta`。
+  - `R_n`: sampled-domain noise autocorrelation derived from `S_total` for MMSE use。
+- Interference source Eq. 178A-24/25 is intentionally ignored in the current project scope and is not represented as a status field。
+- 178A residual ISI is not finalized in `calculate_psd_pre_dte_178A()`; it belongs to the selected DTE result from `calculate_MMSE_DTE_178A()` and later PMF flow。
+- `COMImpairmentConfig.eta_0` is stored in internal SI units `V^2/Hz`; IEEE 178A Table 178A-9 lists `eta_0` in `V^2/GHz`, so Excel/reference adapters must convert before constructing `COMImpairmentConfig`。
+- 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 仍會在 MMSE DTE / FOM / PMF 等尚未實作階段丟出 `NotImplementedError`。
 
 178A-4 path transfer contract：
 - Eq. 178A-4 與目前 `SparamModel.to_LinkSegment()` 的 reference mismatch / voltage transfer conversion 觀念相同。
