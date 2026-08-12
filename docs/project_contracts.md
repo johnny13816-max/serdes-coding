@@ -575,9 +575,9 @@ from serdes_coding import COM_93A, COM_178A
   ```
 - `calculate_psd_common_178A()` 計算 sampling-phase-independent PSD cache；目前包含 `S_rn`、`S_xn`、`sigma_N`、`sigma_XT`，避免每個 `pos` 重複建立 receiver noise PSD 與 crosstalk PSD。
 - `calculate_psd_pre_dte_178A()` 不吃 DFE/DTE result；它吃 `pos` / `ts` 與 `common`，用該 sampling phase 建立 178A.1.7 pre-DTE PSD status。
-- `calculate_psd_post_dte_178A()` 吃 pre-DTE PSD status 與 selected DTE result，負責 post-DTE PSD finalization；目前主要保留給 Eq. 178A-26 quantization noise。
-- `calculate_MMSE_DTE_178A()` 是 178A.1.8 receiver FFE/DFE MMSE solve 的正式入口，取代舊的 `find_pos_and_dfe_178A()` 名稱。
-- 178A helper 已建立 `_candidate_positions_178A()`、`_calculate_MMSE_DTE_178A()`、`_build_pmf_*_178A()` 的 IO skeleton，但 MMSE solve、FOM、PMF 公式尚未填入。
+- `calculate_psd_post_dte_178A()` 吃 pre-DTE PSD status 與 selected DTE result，負責 post-DTE finalization；其中 residual `h_ISI` / `sigma_ISI` 在這裡由 `w_coeff`、`b_coeff`、`tap_indices` 重建，不存放在 `COMDTEStatus`。
+- `calculate_MMSE_DTE_178A()` 是 178A.1.8 receiver FFE/DFE MMSE solve 的正式入口，取代舊的 `find_pos_and_dfe_178A()` 名稱；它輸出 `COMDTEStatus(ts, pos, w_coeff, b_coeff, tap_indices, mse)`。
+- 178A helper 已建立 `_candidate_positions_178A()`、`_calculate_MMSE_DTE_178A()`、`_build_pmf_*_178A()` 的 IO skeleton；目前 MMSE DTE 已接線，FOM 與 PMF 公式仍待填入。
 - `IEEECOMsparam` 已建立 178A S-parameter builders：
   - `device_termination_178A()`：Eq. 178A-7 N-stage LC ladder，輸入 L/C vectors 與 bump capacitance。
   - `device_package_178A()`：Eq. 178A-9 N-stage package transmission line，輸入 TL length / impedance vectors 與 package capacitance。
@@ -588,13 +588,13 @@ from serdes_coding import COM_93A, COM_178A
   - `S_xn`: crosstalk PSD summed over all aggressor paths, Eq. 178A-18；每條 crosstalk path 使用自己的 `t_s^(k)`，並選擇使 `sum_n [h_xn^(k)(n)]^2` 最大的 worst-case phase，不跟 victim candidate `pos` 綁定。
   - `S_tn`: transmitter output noise PSD, Eq. 178A-19 / 178A-20。
   - `S_jn`: transmitter jitter-induced noise PSD, Eq. 178A-21 / 178A-22；finite difference 使用 `Delta t = link_cfg.dt`，並輸出 V/UI 的 sampled jitter sensitivity。
-  - `S_qn`: finalized in `calculate_psd_post_dte_178A()` according to Eq. 178A-26 to Eq. 178A-28; if `N_qb/P_qc` are not provided, it is explicit zero。
+- `S_qn`: according to Eq. 178A-26 to Eq. 178A-28; current implementation flow is still being stabilized, but final `COMImpairmentStatus_178A` is assembled in `calculate_psd_post_dte_178A()`。
   - `S_total`: sum of enabled PSD components on `cfg.theta`。
   - `R_n`: sampled-domain noise autocorrelation derived from `S_total` for MMSE use。
 - Interference source Eq. 178A-24/25 is intentionally ignored in the current project scope and is not represented as a status field。
-- 178A residual ISI is not finalized in `calculate_psd_pre_dte_178A()`; it belongs to the selected DTE result from `calculate_MMSE_DTE_178A()` and later PMF flow。
+- 178A residual ISI is not finalized in `calculate_psd_pre_dte_178A()` and is not stored in `COMDTEStatus`; it belongs to `calculate_psd_post_dte_178A()` / `COMImpairmentStatus_178A` and later PMF flow。
 - `COMImpairmentConfig.eta_0` is stored in internal SI units `V^2/Hz`; IEEE 178A Table 178A-9 lists `eta_0` in `V^2/GHz`, so Excel/reference adapters must convert before constructing `COMImpairmentConfig`。
-- 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 仍會在 MMSE DTE / FOM / PMF 等尚未實作階段丟出 `NotImplementedError`。
+- 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 已可進入 MMSE DTE 階段，但仍會在 FOM / PMF 等尚未實作階段丟出 `NotImplementedError`。
 
 178A-4 path transfer contract：
 - Eq. 178A-4 與目前 `SparamModel.to_LinkSegment()` 的 reference mismatch / voltage transfer conversion 觀念相同。

@@ -1454,16 +1454,22 @@ class COMDTEConfig(_PrettyDataclass):
     receiver sampled-domain equalizer search/limit parameters for the MMSE
     feed-forward and feedback filter solve.
     """
+    b_max: float                     # unit: dimensionless, DFE upper coefficient limit
+    b_min: float                     # unit: dimensionless, DFE lower coefficient limit
+    w_max: float                     # unit: dimensionless, FFE upper coefficient limit
+    w_min: float                     # unit: dimensionless, FFE lower coefficient limit
     d_w: int                         # unit: taps, number of pre-cursor FFE taps
     N_fix: int                       # unit: taps, number of fixed-position FFE taps
     N_wg: int = 0                    # unit: groups, number of floating FFE tap groups
     N_wf: int = 0                    # unit: taps/group, taps per floating group
     N_max: Optional[int] = None      # unit: tap index, highest allowed FFE tap index
     N_b: int = 0                     # unit: taps, number of DFE feedback taps
-    w_max: Optional[np.ndarray] = None # unit: dimensionless, normalized FFE upper limits
-    w_min: Optional[np.ndarray] = None # unit: dimensionless, normalized FFE lower limits
-    b_max: Optional[np.ndarray] = None # unit: dimensionless, DFE upper limits
-    b_min: Optional[np.ndarray] = None # unit: dimensionless, DFE lower limits
+
+    # derived coefficient-limit arrays used by COM_MMSE_DTE
+    w_upper: np.ndarray = field(init=False)
+    w_lower: np.ndarray = field(init=False)
+    b_upper: np.ndarray = field(init=False)
+    b_lower: np.ndarray = field(init=False)
 
     @classmethod
     def from_dfe_config(cls, dfe_cfg: COMDFEConfig) -> 'COMDTEConfig':
@@ -1474,14 +1480,16 @@ class COMDTEConfig(_PrettyDataclass):
         toward explicit 178A DTE parameters.
         """
         return cls(
+            b_max=float(np.max(dfe_cfg.fixed_upper)) if len(dfe_cfg.fixed_upper) else 0.0,
+            b_min=float(np.min(dfe_cfg.fixed_lower)) if len(dfe_cfg.fixed_lower) else 0.0,
+            w_max=1.0,
+            w_min=-1.0,
             d_w=0,
             N_fix=max(1, int(dfe_cfg.N_f) if int(dfe_cfg.N_f) > 0 else int(dfe_cfg.N_b) + 1),
             N_wg=int(dfe_cfg.N_bg),
             N_wf=int(dfe_cfg.N_bf),
-            N_max=int(dfe_cfg.N_ts),
+            N_max=int(dfe_cfg.N_ts) if dfe_cfg.N_ts is not None else None,
             N_b=int(dfe_cfg.N_b),
-            b_max=np.asarray(dfe_cfg.fixed_upper, dtype=float) if int(dfe_cfg.N_f) > 0 else dfe_cfg.b_max * np.ones(int(dfe_cfg.N_b)),
-            b_min=np.asarray(dfe_cfg.fixed_lower, dtype=float) if int(dfe_cfg.N_f) > 0 else -dfe_cfg.b_max * np.ones(int(dfe_cfg.N_b)),
         )
 
     def __post_init__(self) -> None:
@@ -1492,6 +1500,8 @@ class COMDTEConfig(_PrettyDataclass):
             setattr(self, name, value)
         if self.N_fix <= 0:
             raise ValueError("COMDTEConfig.N_fix must be positive.")
+        if self.d_w >= self.N_fix:
+            raise ValueError("COMDTEConfig.d_w must point to a fixed FFE tap.")
         if self.N_max is None:
             self.N_max = self.N_fix
         self.N_max = int(self.N_max)
@@ -1499,6 +1509,23 @@ class COMDTEConfig(_PrettyDataclass):
             raise ValueError("COMDTEConfig.N_max must be greater than or equal to N_fix.")
         if (self.N_wg == 0) != (self.N_wf == 0):
             raise ValueError("COMDTEConfig.N_wg and N_wf must both be zero or both be positive.")
+        for name in ("b_max", "b_min", "w_max", "w_min"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value):
+                raise ValueError(f"COMDTEConfig.{name} must be finite.")
+            setattr(self, name, value)
+        if self.b_min > self.b_max:
+            raise ValueError("COMDTEConfig.b_min must be <= b_max.")
+        if self.w_min > self.w_max:
+            raise ValueError("COMDTEConfig.w_min must be <= w_max.")
+
+        num_ffe_limits = self.N_fix + self.N_wg * self.N_wf
+        self.w_upper = self.w_max * np.ones(num_ffe_limits, dtype=float)
+        self.w_lower = self.w_min * np.ones(num_ffe_limits, dtype=float)
+        self.w_upper[self.d_w] = 1.0
+        self.w_lower[self.d_w] = 1.0
+        self.b_upper = self.b_max * np.ones(self.N_b, dtype=float)
+        self.b_lower = self.b_min * np.ones(self.N_b, dtype=float)
 
 @dataclass(repr=False)
 class COMDTEStatus(_PrettyDataclass):
@@ -1510,8 +1537,12 @@ class COMDTEStatus(_PrettyDataclass):
     w_coeff: np.ndarray             # unit: dimensionless, FFE coefficients w
     b_coeff: np.ndarray             # unit: dimensionless, DFE coefficients b
     tap_indices: np.ndarray         # unit: tap index, selected FFE tap index vector i
-    h_ISI: np.ndarray               # unit: V, residual ISI samples after DTE
     mse: float                      # unit: V^2, mean-square error from 178A-35
+
+    @property
+    def dfe_coeff(self) -> np.ndarray:
+        """Compatibility proxy for report code that plots feedback taps."""
+        return self.b_coeff
 
 @dataclass(repr=False)
 class COMImpairmentStatus_93A(_PrettyDataclass):
@@ -1809,8 +1840,9 @@ class COMStatus(_PrettyDataclass):
 
         per_ui = self.victim.pulse.cfg.per_ui
         num_pre = (self.dfe.ts - self.dfe.pos) // per_ui
-        isi_ui = np.arange(len(self.dfe.h_ISI), dtype=float) - float(num_pre)
-        axes[1].bar(isi_ui, self.dfe.h_ISI, width=0.8)
+        h_isi = self.imp.h_ISI if self.imp is not None else self.dfe.h_ISI
+        isi_ui = np.arange(len(h_isi), dtype=float) - float(num_pre)
+        axes[1].bar(isi_ui, h_isi, width=0.8)
         axes[1].set_title("Residual ISI Samples")
         axes[1].set_xlabel("Discrete time (UI, main cursor = 0)")
         axes[1].set_ylabel("Amplitude (V)")
@@ -1967,7 +1999,8 @@ class COMStatus(_PrettyDataclass):
             lines.append(f"pos: {self.dfe.pos}")
             lines.append(f"num_dfe_taps: {len(self.dfe.dfe_coeff)}")
             lines.append(f"dfe_coeff: {np.array2string(self.dfe.dfe_coeff, precision=6, separator=', ')}")
-            lines.append(f"h_ISI_len: {len(self.dfe.h_ISI)}")
+            h_isi = self.imp.h_ISI if self.imp is not None else self.dfe.h_ISI
+            lines.append(f"h_ISI_len: {len(h_isi)}")
             lines.append("")
 
         if self.imp is not None:
@@ -2055,7 +2088,6 @@ class COMStatus(_PrettyDataclass):
                 "ts": self.dfe.ts,
                 "pos": self.dfe.pos,
                 "dfe_coeff": self._array_meta(arrays, "dfe.dfe_coeff", self.dfe.dfe_coeff),
-                "h_ISI": self._array_meta(arrays, "dfe.h_ISI", self.dfe.h_ISI),
             }
 
         if self.imp is not None:
@@ -2659,6 +2691,14 @@ class COMReport:
             raise RuntimeError("COMStatus.dfe is not available.")
         return self.status.victim.pulse.ir[dfe.pos::self.cfg.link.per_ui]
 
+    def _h_isi(self) -> np.ndarray:
+        if self.status.imp is not None:
+            return self.status.imp.h_ISI
+        dfe = self.status.dfe
+        if dfe is None or not hasattr(dfe, "h_ISI"):
+            raise RuntimeError("Residual ISI is not available. Run post-DTE impairment calculation first.")
+        return dfe.h_ISI
+
     def _t_dsamp_ui(self) -> np.ndarray:
         dfe = self.status.dfe
         if dfe is None:
@@ -3018,7 +3058,7 @@ class COMReport:
         axes[0].set_xlim(0.5, max(1.5, len(self.status.dfe.dfe_coeff) + 0.5))
         axes[0].grid(True)
 
-        axes[1].bar(self._t_dsamp_ui(), self.status.dfe.h_ISI, width=0.8)
+        axes[1].bar(self._t_dsamp_ui(), self._h_isi(), width=0.8)
         axes[1].set_title("Residual ISI Samples")
         axes[1].set_xlabel("Discrete time (UI, main cursor = 0)")
         axes[1].set_ylabel("Amplitude (V)")
@@ -3059,7 +3099,7 @@ class COMReport:
             raise RuntimeError("COMStatus.dfe is not available.")
         return self._plot_discrete_time_response(
             self._t_dsamp_ui(),
-            self.status.dfe.h_ISI,
+            self._h_isi(),
             title="Residual ISI Samples",
             ylabel="h_ISI (V)",
             ax=ax,
@@ -4527,20 +4567,6 @@ class COMConfig178A(_PrettyDataclass):
         }
 
 @dataclass(repr=False)
-class COMImpairmentCommon_178A(_PrettyDataclass):
-    """
-    178A impairment components that are independent of sampling phase.
-
-    This object is computed once per concrete path/filter configuration and
-    reused across the sampling-phase loop in COM_178A._run_once().
-    """
-    S_rn: SampledPSD                # unit: V^2/Hz, receiver input noise PSD, theta-indexed one-sided equivalent
-    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
-    S_xn: SampledPSD                # unit: V^2/Hz, crosstalk PSD using each path's worst sampling phase
-    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
-    h_XTs_dsamp: list[np.ndarray]   # unit: V, worst-phase sampled crosstalk responses
-
-@dataclass(repr=False)
 class COMImpairmentStatus_178A(_PrettyDataclass):
     pos: int                        # unit: sample phase index, 0 <= pos < per_ui
     ts: int                         # unit: sample index on cfg.times
@@ -4564,6 +4590,10 @@ class COMImpairmentStatus_178A(_PrettyDataclass):
     S_qn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
     S_total: SampledPSD             # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
     R_n: np.ndarray                 # unit: V^2, sampled-domain noise autocorrelation
+
+# ----------------------------------------
+# bulid_all_paths_178A(): private helpers
+# ----------------------------------------
 
 def _build_txpkg_178A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig178A, *, isNext: bool = False) -> IEEECOMsparam:
     """
@@ -4873,10 +4903,11 @@ def _candidate_positions_178A(
 
 def _calculate_MMSE_DTE_178A(
     victim: COMPath,
-    imp_status: COMImpairmentStatus_178A,
+    imp_status: "COMImpairmentAtPos",
     pos: int,
     ts: int,
     dte_cfg: COMDTEConfig,
+    sigma_x: float,
 ) -> COMDTEStatus:
     """
     Calculate 178A receiver discrete-time equalizer by MMSE.
@@ -4884,13 +4915,40 @@ def _calculate_MMSE_DTE_178A(
     Reference target:
     - IEEE 802.3 Annex 178A.1.8.1, Eq. 178A-30 to Eq. 178A-34.
 
-    This skeleton is intentionally separated from impairment calculation
-    because 178A searches sampling phase candidates. Each candidate first
-    builds its own PSD/ACF at ``pos``, then solves the MMSE FFE/DFE system.
+    This helper is intentionally separated from impairment calculation because
+    178A searches sampling phase candidates. Each candidate first builds its
+    own PSD/ACF at ``pos``, then solves the MMSE FFE/DFE system.
     """
-    raise NotImplementedError("calculate_MMSE_DTE_178A() skeleton is defined; implement 178A-31..34.")
+    link_cfg = victim.pulse.cfg
+    h_dsamp = victim.pulse.ir[int(pos)::link_cfg.per_ui]
+    solver = COM_MMSE_DTE(dte_cfg)
+    return solver.run(
+        h_dsamp=h_dsamp,
+        R_n=imp_status.R_n,
+        sigma_x=sigma_x,
+        pos=pos,
+        ts=ts,
+    )
 
-def _build_rx_noise_psd_178A(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_cfg: COMFilterConfig178A) -> SampledPSD:
+# --------------------------------------------
+# calculate_psd_common_178A(): private helpers
+# --------------------------------------------
+@dataclass(repr=False)
+class COMImpairmentCommon_178A(_PrettyDataclass):
+    """
+    178A impairment components that are independent of sampling phase.
+
+    This object is computed once per concrete path/filter configuration and
+    reused across the sampling-phase loop in COM_178A._run_once().
+    """
+    sigma_X: float
+    S_rn: SampledPSD                # unit: V^2/Hz, receiver input noise PSD, theta-indexed one-sided equivalent
+    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
+    S_xn: SampledPSD                # unit: V^2/Hz, crosstalk PSD using each path's worst sampling phase
+    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
+    h_XTs_dsamp: list[np.ndarray]   # unit: V, worst-phase sampled crosstalk responses
+
+def _build_psd_rx_noise_178A(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_cfg: COMFilterConfig178A) -> SampledPSD:
     # 178A-17 uses eta_0/2 as the two-sided white-noise density. ContinuousPSD
     # stores one-sided CT PSD, so the corresponding positive-frequency value is
     # eta_0.
@@ -4899,11 +4957,56 @@ def _build_rx_noise_psd_178A(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig,
     S_rn_filtered = S_rn_broadband.filtered_by(H_rn)
     return S_rn_filtered.to_sampled(link_cfg.fb, link_cfg.theta)
 
-def _zero_sampled_psd_178A(link_cfg: LinkConfig) -> SampledPSD:
-    """Return a zero-valued sampled-domain PSD on link_cfg.theta."""
-    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+def _find_pos_xtalk_178A(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
+    """
+    Find the 178A-18 crosstalk worst-case sampling phase.
 
-def _build_response_noise_psd_178A(
+    Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
+    maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
+    the victim sampling phase candidate.
+    """
+    return _find_pos_xtalk_93A(h_XT, per_ui)
+
+def _build_psd_xtalk_178A(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x: float) -> tuple[SampledPSD, list[np.ndarray]]:
+
+    # initialized with psd_constant = 0.0
+    S_xn_all = SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+    h_XTs_dsamp = []
+    for h_XT in h_XTs:
+        _, h_XT_dsamp = _find_pos_xtalk_178A(h_XT, link_cfg.per_ui)
+        S_xn_temp = _build_psd_from_DFT_response_178A(h_XT_dsamp, link_cfg, sigma_x**2)
+        h_XTs_dsamp.append(h_XT_dsamp)
+        S_xn_all = S_xn_all.add(S_xn_temp)
+
+    return S_xn_all, h_XTs_dsamp
+
+# ---------------------------------------------
+# calculate_psd_pre_dte_178A: private helpers
+# ---------------------------------------------
+@dataclass(repr=False)
+class COMImpairmentAtPos(_PrettyDataclass):
+    pos: int
+    As: float
+    sigma_X: float
+    h_dsamp: np.ndarray
+    S_rn: SampledPSD
+    sigma_N: float
+    S_xn: SampledPSD
+    sigma_XT: float
+    h_XTs_dsamp: list[np.ndarray]
+    S_tn: SampledPSD
+    sigma_tn: float
+    h_tn: np.ndarray
+    S_jn: SampledPSD
+    sigma_J: float
+    h_J: np.ndarray
+
+    S_qn: SampledPSD
+    S_total: SampledPSD
+    sigma_total: float
+    R_n: np.ndarray
+
+def _build_psd_from_DFT_response_178A(
     h_dsamp: np.ndarray,
     link_cfg: LinkConfig,
     variance: float,
@@ -4926,7 +5029,7 @@ def _build_response_noise_psd_178A(
     H = SampledResponse.from_ir(h_dsamp, link_cfg)
     return S_base.filtered_by(H)
 
-def _build_tx_noise_psd_178A(
+def _build_psd_tx_noise_178A(
     victim: COMPath,
     link_cfg: LinkConfig,
     ft_cfg: COMFilterConfig178A,
@@ -4948,36 +5051,9 @@ def _build_tx_noise_psd_178A(
     X_v = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
     h_tn = H_noffe.cascade_tf(X_v).ir[int(pos)::link_cfg.per_ui]
     variance = 10 ** (-imp_cfg.SNR_TX / 10)
-    return _build_response_noise_psd_178A(h_tn, link_cfg, variance), h_tn
+    return _build_psd_from_DFT_response_178A(h_tn, link_cfg, variance), h_tn
 
-def _find_pos_xtalk_178A(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
-    """
-    Find the 178A-18 crosstalk worst-case sampling phase.
-
-    Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
-    maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
-    the victim sampling phase candidate.
-    """
-    return _find_pos_xtalk_93A(h_XT, per_ui)
-
-def _build_xtalk_psd_178A(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x: float) -> SampledPSD:
-
-    # IEEE 178A-18: S_xn(theta) = sigma_x^2/fb * |DFT(h_xn[n])|^2.
-    # SampledPSD.from_constant() accepts this spec two-sided Hz-density value
-    # and stores the rfft one-sided equivalent internally.
-    S_xn_base = SampledPSD.from_constant(link_cfg.theta, (sigma_x**2/link_cfg.fb), link_cfg.fb)
-
-    # initialized with psd_constant = 0.0
-    S_xn_all = SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
-    for h_XT in h_XTs:
-        _, h_XT_dsamp = _find_pos_xtalk_178A(h_XT, link_cfg.per_ui)
-        H_xn = SampledResponse.from_ir(h_XT_dsamp, link_cfg)
-        S_xn_temp = S_xn_base.filtered_by(H_xn)
-        S_xn_all = S_xn_all.add(S_xn_temp)
-
-    return S_xn_all
-
-def _calculate_h_J_178A(h: np.ndarray, ts: int, link_cfg: LinkConfig) -> np.ndarray:
+def _calculate_h_J_178A(h: np.ndarray, pos: int, link_cfg: LinkConfig) -> np.ndarray:
     """
     Calculate 178A sampled jitter sensitivity.
 
@@ -4989,7 +5065,6 @@ def _calculate_h_J_178A(h: np.ndarray, ts: int, link_cfg: LinkConfig) -> np.ndar
     Delta t = link_cfg.dt, the waveform sample interval.
     """
     per_ui = link_cfg.per_ui
-    pos = int(ts) % per_ui
     center_idx = np.arange(pos, len(h), per_ui)
     valid = (center_idx > 0) & (center_idx < len(h) - 1)
     center_idx = center_idx[valid]
@@ -5002,6 +5077,212 @@ def _calculate_h_J_178A(h: np.ndarray, ts: int, link_cfg: LinkConfig) -> np.ndar
     h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
     return h_J
 
+def _build_psd_tx_jitter_178A(
+    victim: COMPath,
+    link_cfg: LinkConfig,
+    imp_cfg: COMImpairmentConfig,
+    pos: int,
+    sigma_X: float
+) -> tuple[SampledPSD, np.ndarray]:
+
+    h_J = _calculate_h_J_178A(victim.pulse, pos, link_cfg)
+    jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
+    S_jn = _build_psd_from_DFT_response_178A(h_J, link_cfg, jitter_variance)
+    return S_jn, h_J
+
+def _build_psd_adc_qn_178A(
+    p_sig: Pmf1D, 
+    h_dsamp: np.ndarray, 
+    sigma_ga: float, 
+    P_qc: float,
+    N_qb: int,
+    pmf_cfg: COMPMFConfig, 
+    link_cfg: LinkConfig
+) -> SampledPSD:
+    # calculate quantization clipping amplitude
+    pmf_s = _build_pmf_interference_93A(
+        p_sig, 
+        h_dsamp, 
+        pmf_cfg,
+        name="Noiseless signal",
+    )
+
+    pmf_ga = Pmf1D.gaussian(
+        mu=0,
+        sigma=sigma_ga,
+        dx=pmf_cfg.dy,
+        n_sigma=pmf_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="Noise"
+    )
+
+    pmf_sn = pmf_s.combine(pmf_ga, "Noisy signal")
+    V_qc = -(pmf_sn.quantile(P_qc/2))
+
+    # 178A-27
+    delta = 2 * V_qc / (2**N_qb - 1)
+
+    # 178A-26
+    S_qn = SampledPSD.from_constant(link_cfg.theta, (delta**2/12)/link_cfg.fb, link_cfg.fb)
+
+    return S_qn
+
+# for psd fallback
+def _zero_sampled_psd_178A(link_cfg: LinkConfig) -> SampledPSD:
+    """Return a zero-valued sampled-domain PSD on link_cfg.theta."""
+    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+
+class COM_MMSE_DTE:
+    def __init__(self, cfg: COMDTEConfig):
+        self.cfg = cfg
+        
+    def run(self, h_dsamp: np.ndarray, R_n: np.ndarray, sigma_x: float, pos: int, ts: int) -> COMDTEStatus:
+
+        # collect some input infomation
+        self.h_dsamp = h_dsamp
+        self.R_n = R_n[:self.cfg.N_max]
+        self.d_h = np.argmax(abs(h_dsamp))
+        self.N = len(h_dsamp)
+        self.d = int(self.d_h + self.cfg.d_w)    # total delay of FFE output pulse
+        self.var_x = sigma_x**2
+
+        # step 1: build full matrice
+        self.build_mmse_matrice()
+
+        # step 2: build pruned matrice
+        if (self.cfg.N_wg == 0):
+            self.pruned_index = range(self.cfg.N_fix)
+            self.build_mmse_pruned_matrice()
+        else:
+            self.select_floating_tap_indices()
+            self.build_mmse_pruned_matrice()
+
+        # step 3: solve the constrained MMSE system and decompose results
+        self.solve_mmse_kkt_system()
+
+        # step 4: apply dfe limiter and recalculate ffe
+        self.apply_dte_limiter()
+
+        # step 5: calculate MSE
+        self.calculate_mse() 
+        return COMDTEStatus(
+            ts=int(ts),
+            pos=int(pos),
+            w_coeff=np.asarray(self.w_lim, dtype=float),
+            b_coeff=np.asarray(self.b_lim, dtype=float),
+            tap_indices=np.asarray(self.pruned_index, dtype=int),
+            mse=float(self.var_e),
+        )
+
+    def build_mmse_matrice(self) -> None:
+        from scipy.linalg import toeplitz
+        self.H_all = toeplitz(self.h_dsamp, np.zeros(self.cfg.N_max))
+        self.Rnn_all = toeplitz(self.R_n, self.R_n)
+
+    def select_floating_tap_indices(self) -> None:
+        fixed_index = np.arange(self.cfg.N_fix, dtype=int)
+        float_start = self.cfg.N_fix
+        float_stop = self.cfg.N_max
+        candidate_index = np.arange(float_start, float_stop, dtype=int)
+        if len(candidate_index) < self.cfg.N_wg:
+            raise ValueError("COMDTEConfig.N_max does not provide enough floating-tap candidates.")
+
+        metric = np.zeros(len(candidate_index), dtype=float)
+        h_index = self.d - candidate_index
+        valid = (0 <= h_index) & (h_index < len(self.h_dsamp))
+        metric[valid] = np.abs(self.h_dsamp[h_index[valid]])
+        group_centers = candidate_index[np.argsort(metric)[::-1][:self.cfg.N_wg]]
+        floating_index: list[int] = []
+        for center in np.sort(group_centers):
+            start = int(center)
+            stop = min(start + self.cfg.N_wf, self.cfg.N_max)
+            floating_index.extend(range(start, stop))
+
+        floating_index = sorted(set(floating_index) - set(fixed_index))
+        self.pruned_index = np.array([*fixed_index, *floating_index], dtype=int)
+
+    def build_mmse_pruned_matrice(self) -> None:
+        self.H = self.H_all[:, self.pruned_index]
+        self.R_nn = self.Rnn_all[self.pruned_index, self.pruned_index]
+        dfe_index = range(self.d+1, self.d+self.cfg.N_b+1)    # post 1 ~ post N_b
+        self.H_b = self.H[dfe_index, :]
+        self.h_0 = self.H[self.d, :]
+
+    def solve_mmse_kkt_system(self) -> None:
+        "eq. 178A-31"
+        self.R = self.H.T @ self.H + self.R_nn / self.var_x
+        N_w = len(self.pruned_index)
+        N_b = self.cfg.N_b
+        self.system_matrix = np.block([
+            [self.R,                   -self.H_b.T,        -self.h_0.reshape(N_w, 1)],
+            [-self.H_b,                np.eye(N_b),        np.zeros((N_b, 1))      ],
+            [self.h_0.reshape(1, N_w), np.zeros((1, N_b)), np.zeros((1, 1))        ],
+        ])
+        self.system_column = np.concatenate([
+            self.h_0,                   # shape (Nw,)
+            np.zeros(N_b),              # shape (Nb,)
+            np.array([1.0]),            # shape (1,)
+        ])
+        self.system_sol = np.linalg.solve(self.system_matrix, self.system_column)
+        self.w = self.system_sol[:N_w]
+        self.b = self.system_sol[N_w: N_w + N_b]
+        self.lam = self.system_sol[-1]
+
+    def apply_dte_limiter(self) -> None:
+        "eq. 178A-32~34"
+        # dfe limiter
+        self.b_lim = np.clip(self.b, self.cfg.b_lower, self.cfg.b_upper)
+
+        # recalculate ffe
+        if not np.allclose(self.b, self.b_lim, rtol=0.0, atol=1e-12):
+            self.solve_mmse_kkt_system_ffe()
+
+        # ffe limiter
+        self.w_lim = np.clip(self.w, self.cfg.w_lower[:len(self.w)], self.cfg.w_upper[:len(self.w)])
+
+        # refine ffe and dfe
+        if not np.allclose(self.w, self.w_lim, rtol=0.0, atol=1e-12):
+            gain = self.w_lim.dot(self.h_0)
+            self.w_lim = self.w_lim / gain
+            self.b_lim = self.H_b @ self.w_lim
+
+    def solve_mmse_kkt_system_ffe(self) -> None:
+        "eq. 178A-33"
+        N_w = len(self.pruned_index)
+        self.system_matrix_1 = np.block([
+            [self.R,                   -self.h_0.reshape(N_w, 1)],
+            [self.h_0.reshape(1, N_w), np.zeros((1, 1))        ],
+        ])
+        self.system_column_1 = np.concatenate([
+            self.h_0 + self.H_b.T @ self.b_lim,                     # shape (Nw,)
+            np.array([1.0]),                                        # shape (1,)
+        ])
+        self.system_sol_1 = np.linalg.solve(self.system_matrix_1, self.system_column_1)
+        self.w = self.system_sol_1[:N_w]
+        self.lam = self.system_sol_1[-1]
+
+    def calculate_mse(self) -> None:
+        "eq. 178A-35"
+        var_e = self.var_x*(
+            self.w_lim.reshape(1,-1) @ self.R @ self.w_lim.reshape(-1,1) +
+            1 + self.b_lim.dot(self.b_lim) 
+            - 2*self.w_lim.dot(self.h_0)
+            - 2*self.w_lim.reshape(1,-1) @ self.H_b.T @ self.b_lim.reshape(-1,1)
+        )
+        self.var_e = float(np.asarray(var_e).squeeze())
+
+# ----------------------------
+# pmf
+# ----------------------------
+def _build_pmf_pam_L(L: int, pmf_cfg: COMPMFConfig) -> Pmf1D:
+    # Base PAM4 signal pmf
+    return Pmf1D.multi_dirac(
+        values = np.array([2*l/(L-1)-1 for l in range(L)]),
+        probs = 1/L * np.ones(L),
+        dx = pmf_cfg.dy,
+        unit = "",
+        name = f"PAM{L}_signal"
+    )
 
 def _build_pmf_interference_178A(
     p_sig: Pmf1D,
@@ -5226,34 +5507,7 @@ class COM_178A(COM_93A):
         shared = _build_shared_path_178A(self.cfg, channels[0].freqs)
         return _build_paths_178A(self.cfg, shared, channels)
 
-    def calculate_MMSE_DTE_178A(
-        self,
-        victim: COMPath,
-        imp_status: COMImpairmentStatus_178A,
-        pos: int,
-        ts: int,
-    ) -> COMDTEStatus:
-        """
-        Calculate 178A receiver discrete-time equalizer for one sampling phase.
-
-        Parameters
-        ----------
-        victim:
-            Victim COMPath for the current TX FFE/CTLE/channel candidate.
-        imp_status:
-            178A impairment status computed at the same sampling phase.
-        pos:
-            Sample phase index in [0, cfg.link.per_ui).
-        ts:
-            Main-cursor sample index on cfg.link.times for this candidate.
-        """
-        return _calculate_MMSE_DTE_178A(victim, imp_status, pos, ts, self.cfg.dte)
-
-    def calculate_psd_common_178A(
-        self,
-        victim: COMPath,
-        h_XTs: list[np.ndarray],
-    ) -> COMImpairmentCommon_178A:
+    def calculate_psd_common_178A(self, victim: COMPath, h_XTs: list[np.ndarray]) -> COMImpairmentCommon_178A:
         """
         Calculate 178A PSD components that do not depend on sampling phase.
 
@@ -5276,29 +5530,25 @@ class COM_178A(COM_93A):
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
         L = self.cfg.L
+
+        # input signal power
         sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
 
-        # Receiver input noise PSD, Eq. 178A-17. It depends on H_r/H_ctf
-        # magnitude and broadband noise density, but not on sampling phase.
-        S_rn = _build_rx_noise_psd_178A(link_cfg, imp_cfg, ft_cfg)
+        # Receiver input noise PSD
+        S_rn = _build_psd_rx_noise_178A(link_cfg, imp_cfg, ft_cfg)
         sigma_N = S_rn.to_sigma()
 
-        # Crosstalk PSD, Eq. 178A-18. Each crosstalk path selects its own
-        # sampling time t_s^(k) that maximizes sum_n [h_xn^(k)(n)]^2, so it is
-        # independent of the victim sampling-phase candidate.
-        S_xn = _build_xtalk_psd_178A(h_XTs, link_cfg, sigma_X)
+        # Crosstalk PSD
+        S_xn, h_XTs_dsamp = _build_psd_xtalk_178A(h_XTs, link_cfg, sigma_X)
         sigma_XT = S_xn.to_sigma()
-        h_XTs_dsamp = [
-            _find_pos_xtalk_178A(h_XT, link_cfg.per_ui)[1]
-            for h_XT in h_XTs
-        ]
 
         return COMImpairmentCommon_178A(
-            S_rn=S_rn,
-            sigma_N=sigma_N,
-            S_xn=S_xn,
-            sigma_XT=sigma_XT,
-            h_XTs_dsamp=h_XTs_dsamp,
+            sigma_X = sigma_X,
+            S_rn = S_rn,
+            sigma_N = sigma_N,
+            S_xn = S_xn,
+            sigma_XT = sigma_XT,
+            h_XTs_dsamp = h_XTs_dsamp,
         )
 
     def calculate_psd_pre_dte_178A(
@@ -5307,7 +5557,7 @@ class COM_178A(COM_93A):
         pos: int,
         ts: int,
         common: COMImpairmentCommon_178A,
-    ) -> COMImpairmentStatus_178A:
+    ) -> COMImpairmentAtPos:
         """
         Calculate 178A pre-DTE PSD status for one sampling phase candidate.
 
@@ -5329,87 +5579,105 @@ class COM_178A(COM_93A):
             Sampling-phase-independent impairment components computed once by
             calculate_psd_common_178A().
         """
+        del ts
         link_cfg = self.cfg.link
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
+        pmf_cfg = self.cfg.pmf
         L = self.cfg.L
-        h = victim.pulse.ir
-        ts = int(ts)
         pos = int(pos)
-        h_dsamp = h[pos::link_cfg.per_ui]
-        num_pre = (ts - pos) // link_cfg.per_ui
+        
+        # As
+        h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
+        num_pre = np.argmax(abs(h_dsamp))
         if num_pre < 0 or num_pre >= len(h_dsamp):
             raise ValueError("178A sampling candidate points outside the downsampled victim pulse.")
         h_main = float(h_dsamp[num_pre])
-
-        # As
         As = imp_cfg.R_LM * h_main / (L - 1)
         
-        # sigma_x
-        sigma_X = np.sqrt( (L**2 - 1) / (3 * (L-1)**2) )
-
-        # Residual ISI is determined after the MMSE DTE solve, not in the
-        # impairment PSD stage. Keep placeholders for COMStatus/report shape
-        # until calculate_MMSE_DTE_178A() is implemented and can feed final PMF.
-        h_ISI = np.zeros(0, dtype=float)
-        sigma_ISI = float("nan")
-
-        # Receiver input noise PSD, Eq. 178A-17, and crosstalk PSD,
-        # Eq. 178A-18, are independent of the victim sampling phase candidate
-        # and are cached outside the loop.
+        # From common_psd
+        sigma_X = common.sigma_X
         S_rn = common.S_rn
-        sigma_N = common.sigma_N
         S_xn = common.S_xn
-        sigma_XT = common.sigma_XT
-        h_XTs_dsamp = common.h_XTs_dsamp
 
         # transmitter output noise PSD, Eq. 178A-19 and Eq. 178A-20.
-        S_tn, h_TN = _build_tx_noise_psd_178A(victim, link_cfg, ft_cfg, imp_cfg, pos)
-        sigma_TX = S_tn.to_sigma()
+        S_tn, h_tn = _build_psd_tx_noise_178A(victim, link_cfg, ft_cfg, imp_cfg, pos)
+        sigma_tn = S_tn.to_sigma()
 
         # transmitter jitter-induced noise PSD, Eq. 178A-21 and Eq. 178A-22.
-        h_J = _calculate_h_J_178A(h, ts, link_cfg)
-        jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
-        S_jn = _build_response_noise_psd_178A(h_J, link_cfg, jitter_variance)
+        S_jn, h_J = _build_psd_tx_jitter_178A(victim, link_cfg, imp_cfg, pos, sigma_X)
         sigma_J = S_jn.to_sigma()
 
-        # Interference source, 178A.1.7.5, is intentionally ignored in the
-        # current project scope. Quantization noise is finalized after DTE.
-        S_qn = _zero_sampled_psd_178A(link_cfg)
-        sigma_qn = 0.0
+        # quantization noise
+        p_sig = _build_pmf_pam_L(L, pmf_cfg)
+        S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
+        sigma_ga = S_ga.to_sigma()
+        S_qn = _build_psd_adc_qn_178A(
+            p_sig = p_sig, 
+            h_dsamp = h_dsamp, 
+            sigma_ga = sigma_ga, 
+            P_qc = imp_cfg.P_qc,
+            N_qb = imp_cfg.N_qb,
+            pmf_cfg = pmf_cfg, 
+            link_cfg = link_cfg
+        )
 
-        S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
+        # summation and IDFT
+        # 但如果 N_max 太接近 FFT 長度，或者 noise correlation 在長時間 lag 還沒衰減完，
+        # R_n 尾端的能量會 circular wrap 回前面，使得前幾個 lag 被污染。
+        S_total = S_ga.add(S_qn)
         sigma_total = S_total.to_sigma()
         R_n = S_total.to_autocorrelation()
 
-        return COMImpairmentStatus_178A(
+        return COMImpairmentAtPos(
+            pos = pos,
+            As = As,
+            sigma_X = sigma_X,
+            h_dsamp = h_dsamp,
+            S_rn = S_rn,
+            sigma_N = common.sigma_N,
+            S_xn = S_xn,
+            sigma_XT = common.sigma_XT,
+            h_XTs_dsamp = common.h_XTs_dsamp,
+            S_tn = S_tn,
+            sigma_tn = sigma_tn,
+            h_tn = h_tn,
+            S_jn = S_jn,
+            h_J = h_J,
+            sigma_J = sigma_J,
+            S_qn = S_qn,
+            S_total = S_total,
+            sigma_total = sigma_total,
+            R_n = R_n
+        )
+
+    def calculate_MMSE_DTE_178A(
+        self,
+        victim: COMPath,
+        imp_status: COMImpairmentAtPos,
+        pos: int,
+        ts: int,
+    ) -> COMDTEStatus:
+        """
+        Calculate 178A MMSE DTE status for one sampling-phase candidate.
+
+        This stage only owns FFE/DFE coefficient solving and MSE. Residual ISI
+        response construction belongs to the post-DTE impairment/PMF path, not
+        COMDTEStatus.
+        """
+        sigma_x = np.sqrt((self.cfg.L**2 - 1) / (3 * (self.cfg.L - 1)**2))
+        return _calculate_MMSE_DTE_178A(
+            victim=victim,
+            imp_status=imp_status,
             pos=pos,
             ts=ts,
-            As=As,
-            sigma_X=sigma_X,
-            sigma_TX=sigma_TX,
-            h_ISI=h_ISI,
-            sigma_ISI=sigma_ISI,
-            h_TN=h_TN,
-            h_J=h_J,
-            sigma_J=sigma_J,
-            h_XTs_dsamp=h_XTs_dsamp,
-            sigma_XT=sigma_XT,
-            sigma_N=sigma_N,
-            sigma_qn=sigma_qn,
-            sigma_total=sigma_total,
-            S_rn=S_rn,
-            S_xn=S_xn,
-            S_tn=S_tn,
-            S_jn=S_jn,
-            S_qn=S_qn,
-            S_total=S_total,
-            R_n=R_n,
+            dte_cfg=self.cfg.dte,
+            sigma_x=sigma_x,
         )
 
     def calculate_psd_post_dte_178A(
         self,
-        imp_status: COMImpairmentStatus_178A,
+        imp_status: COMImpairmentAtPos,
         dte_status: COMDTEStatus,
     ) -> COMImpairmentStatus_178A:
         """
@@ -5421,21 +5689,25 @@ class COM_178A(COM_93A):
         pre-quantization noisy-signal CDF; no project-specific approximation is
         used here.
         """
-        del dte_status
-        link_cfg = self.cfg.link
-        imp_cfg = self.cfg.imp
+        from scipy.linalg import toeplitz
 
-        if imp_cfg.N_qb is None and imp_cfg.P_qc is None:
-            S_qn = _zero_sampled_psd_178A(link_cfg)
-            sigma_qn = 0.0
-        elif imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            raise ValueError("178A quantization PSD requires both N_qb and P_qc.")
-        else:
-            raise NotImplementedError(
-                "S_qn per 178A-26 requires V_qc from 178A-27/28 pre-quantization "
-                "signal/noise CDF. This branch is intentionally not approximated."
-            )
+        h_dsamp = imp_status.h_dsamp
+        d_h = int(np.argmax(np.abs(h_dsamp)))
+        d = int(d_h + self.cfg.dte.d_w)
+        H_all = toeplitz(h_dsamp, np.zeros(self.cfg.dte.N_max))
+        H = H_all[:, dte_status.tap_indices]
+        h_eq = H @ dte_status.w_coeff
+        h_ISI = np.asarray(h_eq, dtype=float).copy()
+        if 0 <= d < len(h_ISI):
+            h_ISI[d] = 0.0
+        post_start = d + 1
+        post_stop = min(post_start + len(dte_status.b_coeff), len(h_ISI))
+        if post_start < post_stop:
+            h_ISI[post_start:post_stop] -= dte_status.b_coeff[:post_stop - post_start]
+        sigma_ISI = float(imp_status.sigma_X * np.sqrt(np.sum(h_ISI**2)))
 
+        S_qn = imp_status.S_qn
+        sigma_qn = S_qn.to_sigma()
         S_total = (
             imp_status.S_rn
             .add(imp_status.S_xn)
@@ -5446,12 +5718,28 @@ class COM_178A(COM_93A):
         sigma_total = S_total.to_sigma()
         R_n = S_total.to_autocorrelation()
 
-        return replace(
-            imp_status,
+        return COMImpairmentStatus_178A(
+            pos=imp_status.pos,
+            ts=dte_status.ts,
+            As=imp_status.As,
+            sigma_X=imp_status.sigma_X,
+            sigma_TX=imp_status.sigma_tn,
+            h_ISI=h_ISI,
+            sigma_ISI=sigma_ISI,
+            h_TN=imp_status.h_tn,
+            h_J=imp_status.h_J,
+            sigma_J=imp_status.sigma_J,
+            h_XTs_dsamp=imp_status.h_XTs_dsamp,
+            sigma_XT=imp_status.sigma_XT,
+            sigma_N=imp_status.sigma_N,
             S_qn=S_qn,
             sigma_qn=sigma_qn,
             S_total=S_total,
             sigma_total=sigma_total,
+            S_rn=imp_status.S_rn,
+            S_xn=imp_status.S_xn,
+            S_tn=imp_status.S_tn,
+            S_jn=imp_status.S_jn,
             R_n=R_n,
         )
 
