@@ -318,8 +318,59 @@ class Pmf1D:
     # constructors
     # --------------------------------
     @classmethod
-    def uniform(cls):
-        pass
+    def uniform(cls, delta: float, pmf_cfg: object, *, unit: str = "volt", name: str = "") -> 'Pmf1D':
+        """
+        Build a zero-mean uniform PMF over [-delta/2, delta/2).
+
+        This constructor uses bin-integrated probability mass, consistent with
+        gaussian_from_bin_integral(). It is intended for ADC quantization noise
+        where the continuous quantization error is uniform over one step.
+
+        Parameters
+        ----------
+        delta:
+            Uniform distribution width. For quantization noise this is the ADC
+            quantization step.
+        pmf_cfg:
+            PMF runtime/config object with a ``dy`` attribute used as the
+            amplitude grid spacing.
+        unit:
+            Optional x-axis unit label.
+        name:
+            Optional PMF name for debug / plotting.
+        """
+        delta = float(delta)
+        if not np.isfinite(delta) or delta <= 0:
+            raise ValueError("delta must be a finite positive value.")
+
+        if not hasattr(pmf_cfg, "dy"):
+            raise TypeError("pmf_cfg must provide a dy attribute.")
+        dx = cls._validate_dx(getattr(pmf_cfg, "dy"))
+
+        half = 0.5 * delta
+        st_idx = int(np.floor((-half - 0.5 * dx) / dx))
+        end_idx = int(np.ceil((half + 0.5 * dx) / dx))
+        idx = np.arange(st_idx, end_idx + 1)
+        x = idx * dx
+
+        bin_lo = x - 0.5 * dx
+        bin_hi = x + 0.5 * dx
+        overlap = np.maximum(0.0, np.minimum(bin_hi, half) - np.maximum(bin_lo, -half))
+        keep = overlap > 0.0
+        if not np.any(keep):
+            raise RuntimeError("Uniform PMF construction produced no nonzero bins.")
+
+        idx = idx[keep]
+        pmf = overlap[keep] / delta
+        pmf = pmf / np.sum(pmf)
+
+        return cls(
+            dx=dx,
+            st_idx=int(idx[0]),
+            pmf=pmf,
+            unit=unit,
+            name=name or "uniform",
+        )
 
     @classmethod
     def gaussian(
