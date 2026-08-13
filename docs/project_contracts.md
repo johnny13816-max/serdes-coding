@@ -598,8 +598,21 @@ from serdes_coding import COM_93A, COM_178A
 - 若 DTE 有 floating tap gap，`w_lim` 不是連續 FIR impulse。需要先用 `pruned_index` 補成完整 `w_ir`，再用於 `h_w`、`h_XTs_w`、`h_w_J` 或 `SampledResponse.from_ir()`。
 - `COMImpairmentConfig.eta_0` is stored in internal SI units `V^2/Hz`; IEEE 178A Table 178A-9 lists `eta_0` in `V^2/GHz`, so Excel/reference adapters must convert before constructing `COMImpairmentConfig`。
 - 目前可直接呼叫 `COM_178A(cfg).build_all_paths_178A()` 檢查 178A path-building；呼叫完整 `COM_178A.run()` 已可通過 FOM selection，下一個主要風險在 final PMF/COM flow 的數值驗證。
-- `com_model.py` 的 `run_mode="single_178A"` 是 debug/smoke-test 入口：目前用 `_debug_config_178A_from_93A()` 從 93A-style workbook 暫時轉成 `COMConfig_178A`，並以 `include_quantization=True`、`quantization_vqc_method="gaussian_approx"`、`calculate_pmf=False` 測試 path/PSD/MMSE/post-DTE/FOM 接線。這不是正式 178A Excel mapping，也不代表 final PMF/COM 已完成驗證。
+- `com_model.py` 的 `run_mode="single_178A"` 是 debug/smoke-test 入口：目前用 `excel_to_config_178A()` 從 project-owned workbook 建立 `COMConfig_178A`，並以 `quantization_vqc_method="gaussian_approx"`、`calculate_pmf=False` 測試 path/PSD/MMSE/post-DTE/FOM 接線。這仍是 93A-style/project v1 欄位的 178A fallback mapping，不代表 final PMF/COM 已完成驗證。
 - `COMImpairmentConfig.quantization_vqc_method` 控制 178A pre-DTE `S_qn` 的 `V_qc` 計算方式：`"gaussian_approx"` 用 signal variance + Gaussian noise variance 快速近似 noisy signal CDF；`"pmf_exact"` 保留 spec-like `p_sn=conv[p_s,p_ga]` 的慢速 reference 路徑。
+
+178A Excel / search contract：
+- `excel_to_config_178A()` 目前只支援 project-owned workbook 格式：`fixed_config`、`channels`、可選 `search_config`。
+- COM ad hoc 原始 workbook 目前仍只作為 reference data，不是 `excel_to_config_178A()` 直接讀取的正式輸入。
+- 目前 `cases/*/config.xlsx` 仍是 93A-style/project v1 欄位，但 `excel_to_config_178A()` 會做明確 fallback mapping：
+  - `g_DC/g_DC2 -> g_1/g_2`
+  - `f_z/f_LF/f_p1/f_p2 -> f_z1/f_z2/f_p1/f_p2`，`f_p3` 若未提供則用 `link.f_nyq`
+  - `L_s/C_d -> L_s_seq/C_d_seq` 單級 LC
+  - `z_p/Z_c` 加上可選 `z_p2/Z_c2 -> z_p_seq/Z_c_seq`
+- 若 workbook 後續補上 178A-native 欄位，例如 `g_1`、`f_z1`、`N_fix`、`d_w`、`N_qb`，adapter 會優先使用 native 欄位。
+- `excel_to_search_config()` 仍使用共用 `COMSearchConfig`，Excel 欄位保持 `c_m2/c_m1/c_1/g_DC/g_DC2`；在 `COM_178A` search 內部，`g_DC/g_DC2` 會 mapping 到 178A CTF 的 `g_1/g_2`。
+- `COM_178A.run(search)` 目前是 FOM search：每個 candidate 跑 `calculate_pmf=False`，best candidate 也只重建到 FOM/DTE/PSD status，不強制執行 final PMF/COM。等 178A PMF 完整驗證後再打開 best candidate 的 final COM。
+- `com_model.py` 支援 `run_mode="single_178A"` 與 `run_mode="search_178A"`；178A search 輸出目前只包含 `config_summary.txt`、`search_rows.csv`、`best_report_summary.txt`，避免誤用 93A-oriented export/report。
 
 178A-4 path transfer contract：
 - Eq. 178A-4 與目前 `SparamModel.to_LinkSegment()` 的 reference mismatch / voltage transfer conversion 觀念相同。

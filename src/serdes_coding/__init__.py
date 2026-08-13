@@ -28,7 +28,7 @@ from .com_model import (
     IEEECOMFilter,
     IEEECOMsparam,
 )
-from .com_excel_io import excel_to_config, excel_to_search_config
+from .com_excel_io import excel_to_config, excel_to_config_178A, excel_to_search_config
 from .link_segment import ContinuousPSD, OneSidePSD, SampledPSD, SampledResponse, SparamModel
 
 __all__ = [
@@ -64,5 +64,6 @@ __all__ = [
     "SampledResponse",
     "SparamModel",
     "excel_to_config",
+    "excel_to_config_178A",
     "excel_to_search_config",
 ]

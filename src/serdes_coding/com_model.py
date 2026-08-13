@@ -187,6 +187,15 @@ def excel_to_config(excel_path: str) -> COMConfig:
 
     return _excel_to_config(excel_path)
 
+def excel_to_config_178A(excel_path: str) -> 'COMConfig_178A':
+    """Backward-compatible wrapper for 178A COM Excel input."""
+    try:
+        from .com_excel_io import excel_to_config_178A as _excel_to_config_178A
+    except ImportError:
+        from serdes_coding.com_excel_io import excel_to_config_178A as _excel_to_config_178A
+
+    return _excel_to_config_178A(excel_path)
+
 def excel_to_search_config(excel_path: str) -> 'COMSearchConfig':
     """Backward-compatible wrapper for COM search Excel input."""
     try:
@@ -1369,12 +1378,27 @@ class COMSearchConfig(_PrettyDataclass):
             raise ValueError(f"{name} search values must be finite.")
         return arr
 
-    def candidates(self, ft_cfg: COMFilterConfig) -> list['COMSearchCandidate']:
+    @staticmethod
+    def _filter_default(ft_cfg: Any, primary: str, fallback: str) -> Optional[float]:
+        value = getattr(ft_cfg, primary, None)
+        if value is not None:
+            return value
+        return getattr(ft_cfg, fallback, None)
+
+    def candidates(self, ft_cfg: Any) -> list['COMSearchCandidate']:
         c_m2 = self._values_or_default(self.c_m2_values, ft_cfg.c_m2, "c_m2")
         c_m1 = self._values_or_default(self.c_m1_values, ft_cfg.c_m1, "c_m1")
         c_1 = self._values_or_default(self.c_1_values, ft_cfg.c_1, "c_1")
-        g_DC = self._values_or_default(self.g_DC_values, ft_cfg.g_DC, "g_DC")
-        g_DC2 = self._values_or_default(self.g_DC2_values, ft_cfg.g_DC2, "g_DC2")
+        g_DC = self._values_or_default(
+            self.g_DC_values,
+            self._filter_default(ft_cfg, "g_DC", "g_1"),
+            "g_DC",
+        )
+        g_DC2 = self._values_or_default(
+            self.g_DC2_values,
+            self._filter_default(ft_cfg, "g_DC2", "g_2"),
+            "g_DC2",
+        )
 
         return [
             COMSearchCandidate(
@@ -5566,7 +5590,7 @@ class COM_178A(COM_93A):
         total = len(candidates)
         rows: list[COMSearchRow] = []
         best_row: Optional[COMSearchRow] = None
-        best_cfg: Optional[COMConfig] = None
+        best_cfg: Optional[COMConfig_178A] = None
         num_error = 0
         start_time = time.perf_counter()
         last_print_time = start_time
@@ -5618,13 +5642,13 @@ class COM_178A(COM_93A):
             raise RuntimeError("COM 178A search did not produce any successful candidate.")
 
         print(f"COM 178A search best candidate: idx={best_row.idx}, FOM={best_row.FOM:.3f} dB")
-        print("Computing full PMF/COM for best 178A candidate...")
-        best_status = COM_178A(best_cfg)._run_once(calculate_pmf=True)
+        print("Computing best 178A candidate status without final PMF/COM...")
+        best_status = COM_178A(best_cfg)._run_once(calculate_pmf=False)
         elapsed_total = time.perf_counter() - start_time
         print(
             "COM 178A search completed: "
             f"elapsed={self._format_duration(elapsed_total)}, "
-            f"best_COM={best_status.pmf.COM if best_status.pmf is not None else 'n/a'}"
+            "best_COM=n/a (calculate_pmf=False)"
         )
         return COMSearchStatus(
             best=best_status,
@@ -5652,6 +5676,34 @@ class COM_178A(COM_93A):
             g_2=candidate.g_DC2,
         )
         return replace(self.cfg, filter=new_filter)
+
+    @staticmethod
+    def _search_row_from_status(
+        idx: int,
+        candidate: COMSearchCandidate,
+        status: COMStatus,
+    ) -> COMSearchRow:
+        """Compress one 178A candidate COMStatus into one search summary row."""
+        if status.dfe is None or status.imp is None or status.FOM is None:
+            raise ValueError("Search candidate status must include DTE, imp, and FOM.")
+
+        imp = status.imp
+        dte = status.dfe
+        if not isinstance(imp, COMImpairmentStatus_178A):
+            raise TypeError("COM_178A search expects COMImpairmentStatus_178A.")
+        return COMSearchRow(
+            idx=idx,
+            candidate=candidate,
+            FOM=status.FOM,
+            As=imp.As,
+            sigma_ISI=imp.sigma_ISI,
+            sigma_J=imp.sigma_J,
+            sigma_XT=imp.sigma_XT,
+            sigma_N=imp.sigma_N,
+            sigma_TX=imp.sigma_tn,
+            ts=dte.ts,
+            pos=dte.pos,
+        )
 
     @property
     def per_ui(self) -> int:
@@ -6009,7 +6061,8 @@ if __name__ == "__main__":
     # Choose one mode:
     # - "single": use fixed_config only and export one full 93A debug/study status
     # - "search": use fixed_config + search_config and export 93A search result + best status
-    # - "single_178A": build a temporary 178A debug config from the 93A workbook
+    # - "single_178A": use project workbook through excel_to_config_178A()
+    # - "search_178A": use project workbook + search_config for 178A FOM search
     run_mode = "single_178A"
 
     if run_mode == "single":
@@ -6052,13 +6105,7 @@ if __name__ == "__main__":
             print(f"best COM: {search_status.best.pmf.COM}")
         print(outputs)
     elif run_mode == "single_178A":
-        cfg_93A = excel_to_config(str(config_path))
-
-        # Debug adapter only:
-        # - The current workbook is still 93A-style.
-        # - Quantization is enabled with the fast gaussian_approx V_qc method.
-        #   Use quantization_vqc_method="pmf_exact" only for slow reference checks.
-        cfg = _debug_config_178A_from_93A(cfg_93A, include_quantization=True)
+        cfg = excel_to_config_178A(str(config_path))
         output_path = project_root / "reports" / "single_run_178A"
         config_outputs = cfg.export(str(output_path))
 
@@ -6097,7 +6144,7 @@ if __name__ == "__main__":
 
         print("COM 178A single run completed")
         print(f"config: {config_path}")
-        print("config_adapter: _debug_config_178A_from_93A(include_quantization=True)")
+        print("config_adapter: excel_to_config_178A(project workbook)")
         print(f"quantization_vqc_method: {cfg.imp.quantization_vqc_method}")
         print(f"output: {output_path}")
         print(f"FOM: {status.FOM}")
@@ -6107,5 +6154,83 @@ if __name__ == "__main__":
             "report_summary_txt": str(summary_path),
             **config_outputs,
         })
+    elif run_mode == "search_178A":
+        cfg = excel_to_config_178A(str(config_path))
+        search = excel_to_search_config(str(config_path))
+        output_path = project_root / "reports" / "search_run_178A"
+        output_path.mkdir(parents=True, exist_ok=True)
+        config_outputs = cfg.export(str(output_path))
+
+        search_status = COM_178A(cfg).run(search)
+
+        rows_path = output_path / "search_rows.csv"
+        row_lines = [
+            "idx,status,FOM,c_m2,c_m1,c_1,g_1,g_2,As,sigma_ISI,sigma_J,sigma_XT,sigma_N,sigma_tn,ts,pos,error"
+        ]
+        for row in search_status.rows:
+            row_lines.append(
+                ",".join([
+                    str(row.idx),
+                    str(row.status),
+                    "" if row.FOM is None else f"{row.FOM:.12g}",
+                    f"{row.candidate.c_m2:.12g}",
+                    f"{row.candidate.c_m1:.12g}",
+                    f"{row.candidate.c_1:.12g}",
+                    f"{row.candidate.g_DC:.12g}",
+                    f"{row.candidate.g_DC2:.12g}",
+                    "" if row.As is None else f"{row.As:.12g}",
+                    "" if row.sigma_ISI is None else f"{row.sigma_ISI:.12g}",
+                    "" if row.sigma_J is None else f"{row.sigma_J:.12g}",
+                    "" if row.sigma_XT is None else f"{row.sigma_XT:.12g}",
+                    "" if row.sigma_N is None else f"{row.sigma_N:.12g}",
+                    "" if row.sigma_TX is None else f"{row.sigma_TX:.12g}",
+                    "" if row.ts is None else str(row.ts),
+                    "" if row.pos is None else str(row.pos),
+                    "" if row.error is None else json.dumps(row.error),
+                ])
+            )
+        rows_path.write_text("\n".join(row_lines) + "\n", encoding="utf-8")
+
+        best_summary_path = output_path / "best_report_summary.txt"
+        best = search_status.best
+        summary_lines = [
+            "COM 178A Search Best Summary",
+            "============================",
+            "",
+            f"num_candidates: {search_status.num_candidates}",
+            f"num_success: {search_status.num_success}",
+            f"num_error: {search_status.num_error}",
+            f"best_idx: {search_status.best_row.idx}",
+            f"best_FOM_dB: {best.FOM:.6g}" if best.FOM is not None else "best_FOM_dB: None",
+            "best_COM_dB: None (178A search uses calculate_pmf=False)",
+            "",
+            "Best candidate",
+            "--------------",
+            f"c_m2: {search_status.best_row.candidate.c_m2}",
+            f"c_m1: {search_status.best_row.candidate.c_m1}",
+            f"c_1: {search_status.best_row.candidate.c_1}",
+            f"g_1: {search_status.best_row.candidate.g_DC}",
+            f"g_2: {search_status.best_row.candidate.g_DC2}",
+            "",
+            "DTE",
+            "---",
+            f"ts: {best.dfe.ts if best.dfe is not None else 'None'}",
+            f"pos: {best.dfe.pos if best.dfe is not None else 'None'}",
+            f"mse: {best.dfe.mse:.6e}" if best.dfe is not None else "mse: None",
+            f"w_lim: {np.array2string(best.dfe.w_lim, precision=6, separator=', ')}" if best.dfe is not None else "w_lim: None",
+            f"b_lim: {np.array2string(best.dfe.b_lim, precision=6, separator=', ')}" if best.dfe is not None else "b_lim: None",
+        ]
+        best_summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+
+        print("COM 178A search run completed")
+        print(f"config: {config_path}")
+        print("config_adapter: excel_to_config_178A(project workbook)")
+        print(f"output: {output_path}")
+        print(f"best FOM: {search_status.best.FOM}")
+        print({
+            "search_rows_csv": str(rows_path),
+            "best_report_summary_txt": str(best_summary_path),
+            **config_outputs,
+        })
     else:
-        raise ValueError(f"Unsupported run_mode: {run_mode!r}. Use 'single', 'search', or 'single_178A'.")
+        raise ValueError(f"Unsupported run_mode: {run_mode!r}. Use 'single', 'search', 'single_178A', or 'search_178A'.")

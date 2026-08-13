@@ -8,12 +8,16 @@ from .link_segment import LinkConfig
 from .com_model import (
     COMChannelConfig,
     COMConfig,
+    COMConfig_178A,
     COMDFEConfig,
+    COMDTEConfig,
     COMFilterConfig,
+    COMFilterConfig_178A,
     COMImpairmentConfig,
     COMPMFConfig,
     COMSearchConfig,
     COMPkgConfig,
+    COMPkgConfig_178A,
 )
 
 
@@ -32,6 +36,28 @@ def excel_to_config(excel_path: str) -> COMConfig:
     if {"fixed_config", "channels"}.issubset(sheet_names):
         return _project_excel_to_config(excel_path_obj)
     return _pychopmarg_excel_to_config(excel_path_obj)
+
+
+def excel_to_config_178A(excel_path: str) -> COMConfig_178A:
+    """
+    Build COMConfig_178A from the project-owned COM workbook.
+
+    Current contract:
+    - supported input is the project workbook with fixed_config/channels sheets
+    - 178A-native field names are used when present
+    - 93A-style project fields are accepted as a debug/study fallback
+
+    Raw COM ad hoc workbooks are intentionally not parsed directly here yet.
+    They should first be converted into the project workbook shape.
+    """
+    excel_path_obj = Path(excel_path)
+    sheet_names = _excel_sheet_names(excel_path_obj)
+    if {"fixed_config", "channels"}.issubset(sheet_names):
+        return _project_excel_to_config_178A(excel_path_obj)
+    raise ValueError(
+        "excel_to_config_178A currently supports only project-owned workbooks "
+        "with fixed_config/channels sheets."
+    )
 
 
 def excel_to_search_config(excel_path: str) -> COMSearchConfig:
@@ -220,6 +246,82 @@ def _project_excel_to_search_config(excel_path: Path) -> COMSearchConfig:
     )
 
 
+def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
+    fixed = _read_project_fixed_config(excel_path)
+    channel = _read_project_channels(excel_path)
+
+    link_cfg = LinkConfig(
+        fb=_fixed_float(fixed, "fb"),
+        per_ui=int(_fixed_float(fixed, "per_ui")),
+        target_df=_fixed_float(fixed, "target_df"),
+    )
+
+    return COMConfig_178A(
+        L=int(_fixed_float(fixed, "L")),
+        link=link_cfg,
+        filter=COMFilterConfig_178A(
+            c_m3=_fixed_float(fixed, "c_m3"),
+            c_m2=_fixed_float(fixed, "c_m2"),
+            c_m1=_fixed_float(fixed, "c_m1"),
+            c_1=_fixed_float(fixed, "c_1"),
+            num_pre=int(_fixed_float(fixed, "num_pre")),
+            Tr=_fixed_optional_float(fixed, "Tr"),
+            fr=_fixed_optional_float(fixed, "fr"),
+            g_1=_fixed_optional_float_with_fallback(fixed, "g_1", "g_DC"),
+            g_2=_fixed_optional_float_with_fallback(fixed, "g_2", "g_DC2"),
+            f_z1=_fixed_optional_float_with_fallback(fixed, "f_z1", "f_z"),
+            f_z2=_fixed_optional_float_with_fallback(fixed, "f_z2", "f_LF"),
+            f_p1=_fixed_optional_float(fixed, "f_p1"),
+            f_p2=_fixed_optional_float(fixed, "f_p2"),
+            f_p3=_fixed_optional_float_with_default(fixed, "f_p3", link_cfg.f_nyq),
+            A_v=_fixed_float(fixed, "A_v"),
+            A_fe=_fixed_float(fixed, "A_fe"),
+            A_ne=_fixed_float(fixed, "A_ne"),
+        ),
+        channel=channel,
+        txpkg_victim=_fixed_pkg_config_178A(fixed, "txpkg_victim"),
+        txpkg_fext=_fixed_pkg_config_178A(fixed, "txpkg_fext"),
+        txpkg_next=_fixed_pkg_config_178A(fixed, "txpkg_next"),
+        rxpkg=_fixed_pkg_config_178A(fixed, "rxpkg"),
+        dte=COMDTEConfig(
+            b_max=_fixed_optional_float_with_default(fixed, "b_max", 0.0),
+            b_min=_fixed_optional_float_with_default(fixed, "b_min", -_fixed_optional_float_with_default(fixed, "b_max", 0.0)),
+            w_max=_fixed_optional_float_with_default(fixed, "w_max", 1.0),
+            w_min=_fixed_optional_float_with_default(fixed, "w_min", -1.0),
+            d_w=int(_fixed_optional_float_with_default(fixed, "d_w", 0.0)),
+            N_fix=int(_fixed_optional_float_with_default(fixed, "N_fix", 3.0)),
+            N_wg=int(_fixed_optional_float_with_default(fixed, "N_wg", 0.0)),
+            N_wf=int(_fixed_optional_float_with_default(fixed, "N_wf", 0.0)),
+            N_max=int(_fixed_optional_float_with_default(fixed, "N_max", _fixed_optional_float_with_default(fixed, "N_fix", 3.0))),
+            N_b=int(_fixed_float(fixed, "N_b")),
+        ),
+        imp=COMImpairmentConfig(
+            R_LM=_fixed_float(fixed, "R_LM"),
+            SNR_TX=_fixed_float(fixed, "SNR_TX"),
+            sigma_RJ=_fixed_float(fixed, "sigma_RJ"),
+            A_DD=_fixed_float(fixed, "A_DD"),
+            eta_0=_fixed_float(fixed, "eta_0"),
+            N_qb=_fixed_optional_int(fixed, "N_qb"),
+            P_qc=_fixed_optional_float(fixed, "P_qc"),
+            quantization_vqc_method=_fixed_optional_str_with_default(
+                fixed,
+                "quantization_vqc_method",
+                "gaussian_approx",
+            ),
+        ),
+        DER_0=_fixed_float(fixed, "DER_0"),
+        pmf=COMPMFConfig(
+            dy_override=_fixed_optional_float(fixed, "dy_override"),
+            dy_rel_As=_fixed_float(fixed, "dy_rel_As"),
+            dy_abs_max=_fixed_float(fixed, "dy_abs_max"),
+            tap_abs_th_override=_fixed_optional_float(fixed, "tap_abs_th_override"),
+            tap_rel_As=_fixed_float(fixed, "tap_rel_As"),
+            keep_mass=_fixed_float(fixed, "keep_mass"),
+            gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
+        ),
+    )
+
+
 def _pychopmarg_excel_to_search_config(excel_path: Path) -> COMSearchConfig:
     table = _read_excel_parameter_table(excel_path)
     return COMSearchConfig(
@@ -377,6 +479,34 @@ def _fixed_optional_float(fixed: dict[str, object], name: str) -> Optional[float
     return float(value)
 
 
+def _fixed_optional_float_with_default(fixed: dict[str, object], name: str, default: float) -> float:
+    value = _fixed_optional_float(fixed, name)
+    return float(default) if value is None else value
+
+
+def _fixed_optional_float_with_fallback(
+    fixed: dict[str, object],
+    name: str,
+    fallback_name: str,
+) -> Optional[float]:
+    value = _fixed_optional_float(fixed, name)
+    if value is not None:
+        return value
+    return _fixed_optional_float(fixed, fallback_name)
+
+
+def _fixed_optional_int(fixed: dict[str, object], name: str) -> Optional[int]:
+    value = _fixed_optional_float(fixed, name)
+    return None if value is None else int(value)
+
+
+def _fixed_optional_str_with_default(fixed: dict[str, object], name: str, default: str) -> str:
+    value = fixed.get(name)
+    if _is_blank(value):
+        return default
+    return str(value).strip()
+
+
 def _fixed_bool(fixed: dict[str, object], name: str) -> bool:
     return _coerce_bool(_fixed_value(fixed, name))
 
@@ -394,6 +524,52 @@ def _fixed_pkg_config(fixed: dict[str, object], prefix: str) -> COMPkgConfig:
         z_p2=_fixed_optional_float(fixed, f"{prefix}.z_p2"),
         Z_c2=_fixed_float(fixed, f"{prefix}.Z_c2"),
     )
+
+
+def _fixed_pkg_config_178A(fixed: dict[str, object], prefix: str) -> COMPkgConfig_178A:
+    L_s_seq = _fixed_optional_sequence(fixed, f"{prefix}.L_s_seq")
+    C_d_seq = _fixed_optional_sequence(fixed, f"{prefix}.C_d_seq")
+    z_p_seq = _fixed_optional_sequence(fixed, f"{prefix}.z_p_seq")
+    Z_c_seq = _fixed_optional_sequence(fixed, f"{prefix}.Z_c_seq")
+
+    if L_s_seq is None:
+        L_s_seq = np.asarray([_fixed_float(fixed, f"{prefix}.L_s")], dtype=float)
+    if C_d_seq is None:
+        C_d_seq = np.asarray([_fixed_float(fixed, f"{prefix}.C_d")], dtype=float)
+    if z_p_seq is None:
+        z_values = [_fixed_float(fixed, f"{prefix}.z_p")]
+        z_p2 = _fixed_optional_float(fixed, f"{prefix}.z_p2")
+        if z_p2 is not None and z_p2 > 0.0:
+            z_values.append(z_p2)
+        z_p_seq = np.asarray(z_values, dtype=float)
+    if Z_c_seq is None:
+        zc_values = [_fixed_float(fixed, f"{prefix}.Z_c")]
+        z_p2 = _fixed_optional_float(fixed, f"{prefix}.z_p2")
+        if z_p2 is not None and z_p2 > 0.0:
+            zc_values.append(_fixed_float(fixed, f"{prefix}.Z_c2"))
+        Z_c_seq = np.asarray(zc_values, dtype=float)
+
+    return COMPkgConfig_178A(
+        L_s_seq=L_s_seq,
+        C_d_seq=C_d_seq,
+        C_b=_fixed_float(fixed, f"{prefix}.C_b"),
+        C_p=_fixed_float(fixed, f"{prefix}.C_p"),
+        z_p_seq=z_p_seq,
+        Z_c_seq=Z_c_seq,
+        enable=_fixed_bool(fixed, f"{prefix}.enable"),
+        R0=_fixed_float(fixed, f"{prefix}.R0"),
+        gamma0=_fixed_optional_float_with_default(fixed, f"{prefix}.gamma0", 0.0),
+        a1=_fixed_optional_float_with_default(fixed, f"{prefix}.a1", 1.734e-3),
+        a2=_fixed_optional_float_with_default(fixed, f"{prefix}.a2", 1.455e-4),
+        tau=_fixed_optional_float_with_default(fixed, f"{prefix}.tau", 6.141e-3),
+    )
+
+
+def _fixed_optional_sequence(fixed: dict[str, object], name: str) -> Optional[np.ndarray]:
+    value = fixed.get(name)
+    if _is_blank(value):
+        return None
+    return _sequence_setting({name: value}, name)
 
 
 def _is_blank(value: object) -> bool:
