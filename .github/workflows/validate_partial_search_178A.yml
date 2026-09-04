@@ -1,6 +1,9 @@
 name: Validate 178A partial search
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       case_id:
@@ -29,7 +32,7 @@ jobs:
 
       - name: Validate split search
         env:
-          CASE_ID: ${{ inputs.case_id }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
         run: >-
           python scripts/validate_partial_search_178A.py
           --case-root "cases/${CASE_ID}"
@@ -40,5 +43,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: partial-search-${{ inputs.case_id }}-smoke
+          name: partial-search-${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}-smoke
           path: artifacts/partial_search
