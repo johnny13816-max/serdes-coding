@@ -842,7 +842,8 @@ class ContinuousPSD:
         """
         import matplotlib.pyplot as plt
 
-        if ax is None:
+        created_ax = ax is None
+        if created_ax:
             _, ax = plt.subplots()
 
         freqs = self.freqs
@@ -869,8 +870,9 @@ class ContinuousPSD:
         fig.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
+            if created_ax:
+                plt.close(fig)
+        elif created_ax:
             fig.canvas.draw_idle()
             plt.show()
 
@@ -1114,7 +1116,8 @@ class SampledResponse:
         """
         import matplotlib.pyplot as plt
 
-        if ax is None:
+        created_ax = ax is None
+        if created_ax:
             _, ax = plt.subplots()
 
         theta = self.theta
@@ -1141,8 +1144,9 @@ class SampledResponse:
         fig.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
+            if created_ax:
+                plt.close(fig)
+        elif created_ax:
             fig.canvas.draw_idle()
             plt.show()
 
@@ -1429,9 +1433,10 @@ class SampledPSD:
         save_path: str = "",
         xlim: Optional[tuple[float, float]] = None,
         label: str | None = None,
+        x_axis: Literal["CT", "DT"] = "CT",
     ) -> Axes:
         """
-        Plot one-sided sampled PSD versus theta.
+        Plot the one-sided sampled PSD versus an equivalent CT or DT axis.
 
         Parameters
         ----------
@@ -1443,28 +1448,39 @@ class SampledPSD:
             Optional theta limits in rad/sample.
         label:
             Optional curve label.
+        x_axis:
+            ``"CT"`` (default) plots the equivalent baseband frequency in Hz;
+            ``"DT"`` plots theta in rad/sample. The PSD values are unchanged
+            and remain in quantity^2/Hz for either axis.
         """
         import matplotlib.pyplot as plt
 
-        if ax is None:
+        if x_axis not in {"CT", "DT"}:
+            raise ValueError("x_axis must be either 'CT' or 'DT'.")
+
+        created_ax = ax is None
+        if created_ax:
             _, ax = plt.subplots()
 
-        theta = self.theta
+        x_values = self.freqs if x_axis == "CT" else self.theta
         psd = self.psd
         if xlim is not None:
             lo, hi = float(xlim[0]), float(xlim[1])
             if lo >= hi:
                 raise ValueError("xlim must be strictly increasing.")
-            mask = (theta >= lo) & (theta <= hi)
+            mask = (x_values >= lo) & (x_values <= hi)
             if not np.any(mask):
                 raise ValueError("xlim selects no PSD samples.")
-            theta = theta[mask]
+            x_values = x_values[mask]
             psd = psd[mask]
 
-        ax.plot(theta, psd, label=label)
+        ax.plot(x_values, psd, label=label)
         if label is not None:
             ax.legend()
-        ax.set_xlabel("Frequency (rad/sample)")
+        if x_axis == "CT":
+            ax.set_xlabel("Equivalent baseband frequency (Hz)")
+        else:
+            ax.set_xlabel("Normalized frequency (theta, rad/sample)")
         ax.set_ylabel("One-sided sampled PSD (quantity^2/Hz)")
         ax.set_title("Sampled PSD")
         ax.grid(True)
@@ -1473,8 +1489,9 @@ class SampledPSD:
         fig.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
+            if created_ax:
+                plt.close(fig)
+        elif created_ax:
             fig.canvas.draw_idle()
             plt.show()
 
@@ -1722,7 +1739,7 @@ class SparamModel:
     It should not own IEEE COM primitive model construction such as shunt
     capacitance, package transmission line, Tx package, Rx package builders, or
     IEEE COM-specific cascade formulas and primitive model builders belong in
-    com_model.py, not in this generic container.
+    com_model_93A.py or com_model_178A.py, not in this generic container.
 
     Internal storage
     ----------------
@@ -2331,6 +2348,7 @@ class SparamModel:
 
     def plot_sdd(
         self,
+        ax: Any = None,
         logx: bool = False,
         xlim: Optional[tuple[float, float]] = None,
         save_path: str = "",
@@ -2341,6 +2359,9 @@ class SparamModel:
 
         Parameters
         ----------
+        ax:
+            Optional matplotlib axes. If provided, draw on this axes and leave
+            display / close behavior to the caller unless save_path is set.
         logx:
             Whether to use a logarithmic frequency axis.
         xlim:
@@ -2351,8 +2372,9 @@ class SparamModel:
         auto_ylim:
             If True, set y-limits from the plotted frequency range.
         """
-        plt = self._plt()
-        fig, ax = plt.subplots()
+        created_ax = ax is None
+        if created_ax:
+            _, ax = self._plt().subplots()
         y_values = np.vstack([
             self._magnitude_db(self.sdd11),
             self._magnitude_db(self.sdd12),
@@ -2370,13 +2392,7 @@ class SparamModel:
         ax.set_title("Sdd Parameters")
         ax.legend()
         self._apply_frequency_plot_style(ax, xlim=xlim, x_scale=1e-9, y_values=y_values, auto_ylim=auto_ylim)
-        fig.tight_layout()
-        if save_path:
-            fig.savefig(save_path, bbox_inches="tight")
-            plt.close(fig)
-        else:
-            plt.show()
-        return ax
+        return self._finish_frequency_plot(ax, save_path, show=created_ax)
 
     def plot_smith(
         self,
@@ -2824,7 +2840,8 @@ class LinkSegment:
 
     It should not own two-port S-parameter storage, S4P-to-Sdd conversion,
     mixed-mode conversion, or IEEE COM package primitive construction. Those
-    belong in SparamModel or com_model.py before a scalar response is selected.
+    belong in SparamModel or a versioned COM module before a scalar response is
+    selected.
     """
     DEFAULT_MAIN_CURSOR_UI = 20.0
 
@@ -2836,13 +2853,14 @@ class LinkSegment:
 
         # time-domain response
         #   t-axis starts from 0, with step = dt = bt / per_ui
-        #   raw_ir is the response before causality/alignment handling. aligned_ir
-        #   is the response after the LinkSegment causality/alignment contract.
+        #   raw_ir is the response before causality handling. causal_ir is the
+        #   response after the LinkSegment causality contract.
         #   For TF-originated segments, raw_ir is the direct IFFT result and
-        #   aligned_ir may be circularly shifted. For IR/SR-originated segments,
-        #   raw_ir and aligned_ir are identical after passing causality checks.
+        #   causal_ir may be circularly shifted. For IR/SR-originated segments,
+        #   raw_ir and causal_ir are identical after passing causality checks.
         self._raw_ir = None
-        self._aligned_ir = None
+        self._causal_ir = None
+        self._causal_shift_samples = None
         self._ir = None         # impulse response alias kept for compatibility
         self._sr = None         # step response
         self._sbr = None        # single-bit response
@@ -2946,14 +2964,15 @@ class LinkSegment:
 
         Contract:
             raw_ir is computed from sr before causality checking. If the check
-            passes, aligned_ir is assigned to the same response. No automatic
+            passes, causal_ir is assigned to the same response. No automatic
             circular shift is applied to SR-originated data.
         """
         seg = cls(cfg)
         seg._sr = seg.validate_time_response(sr, "sr")
         seg._raw_ir = seg.sr2ir(seg._sr)
-        seg._aligned_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="sr")
-        seg._ir = seg._aligned_ir
+        seg._causal_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="sr")
+        seg._causal_shift_samples = 0
+        seg._ir = seg._causal_ir
         return seg
 
     @classmethod
@@ -2970,13 +2989,14 @@ class LinkSegment:
 
         Contract:
             raw_ir is the input impulse response before causality checking. If
-            the check passes, aligned_ir is assigned to the same response. No
+            the check passes, causal_ir is assigned to the same response. No
             automatic circular shift is applied to IR-originated data.
         """
         seg = cls(cfg)
         seg._raw_ir = seg.validate_ir(ir, correct_wrap=False)
-        seg._aligned_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="ir")
-        seg._ir = seg._aligned_ir
+        seg._causal_ir = seg.validate_ir_from_time_domain(seg._raw_ir, source_name="ir")
+        seg._causal_shift_samples = 0
+        seg._ir = seg._causal_ir
         return seg
 
     # ----- proxy & lazy evaluation -----
@@ -3020,16 +3040,17 @@ class LinkSegment:
 
     @property
     def ir(self) -> np.ndarray:
-        if (self._aligned_ir is None):
+        if (self._causal_ir is None):
             if (self._tf is not None):
-                self._raw_ir, self._aligned_ir = self.tf2ir(self._tf)
+                self._raw_ir, self._causal_ir = self.tf2ir(self._tf)
             elif (self._sr is not None):
                 self._raw_ir = self.sr2ir(self._sr)
-                self._aligned_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
+                self._causal_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
+                self._causal_shift_samples = 0
             else:
                 raise Exception("Error @ calling LinkSegment.ir ...")
-        self._ir = self._aligned_ir
-        return self._aligned_ir
+        self._ir = self._causal_ir
+        return self._causal_ir
 
     @property
     def raw_ir(self) -> np.ndarray:
@@ -3039,28 +3060,36 @@ class LinkSegment:
         For TF-originated segments this is the direct continuous-scaled IFFT
         result. For IR/SR-originated segments this is the input-domain impulse
         response before the causality check; after a passing check it is
-        identical to aligned_ir.
+            identical to causal_ir.
         """
         if (self._raw_ir is None):
             if (self._tf is not None):
-                self._raw_ir, self._aligned_ir = self.tf2ir(self._tf)
+                self._raw_ir, self._causal_ir = self.tf2ir(self._tf)
             elif (self._sr is not None):
                 self._raw_ir = self.sr2ir(self._sr)
-                self._aligned_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
+                self._causal_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
+                self._causal_shift_samples = 0
             else:
                 raise Exception("Error @ calling LinkSegment.raw_ir ...")
         return self._raw_ir
 
     @property
-    def aligned_ir(self) -> np.ndarray:
+    def causal_ir(self) -> np.ndarray:
         """
         Causal analysis impulse response.
 
-        For TF-originated segments this is raw_ir circularly aligned so the main
-        cursor is placed at LinkSegment's internal target location. For IR/SR
+        For TF-originated segments this is raw_ir circularly shifted to minimize
+        head/tail edge energy. For IR/SR
         originated segments this is the validated input-domain impulse response.
         """
         return self.ir
+
+    @property
+    def causal_shift_samples(self) -> int:
+        """Circular shift from raw_ir to causal_ir, in samples."""
+        _ = self.ir
+        assert self._causal_shift_samples is not None
+        return int(self._causal_shift_samples)
 
     @property
     def sbr(self) -> np.ndarray:
@@ -3104,6 +3133,7 @@ class LinkSegment:
         xlim: Optional[tuple[float, float]] = None,
         ylim: Optional[tuple[float, float]] = None,
         auto_ylim: bool = True,
+        x_scale: Literal["log", "linear"] = "log",
         label: str | None = None,
     ) -> Axes:
         """
@@ -3124,6 +3154,11 @@ class LinkSegment:
         auto_ylim:
             If True and ylim is None, set y-limits from the plotted frequency
             range. The default in-band range is [0, fb].
+        x_scale:
+            Frequency-axis scale. ``"log"`` is the default SerDes view and
+            displays from the first positive frequency bin to the selected
+            upper limit; DC remains in ``tf`` but cannot be displayed on a
+            logarithmic axis. Use ``"linear"`` to display DC at 0 Hz.
         label:
             Optional curve label. Useful when plotting multiple transfer
             functions on the same Axes.
@@ -3133,8 +3168,11 @@ class LinkSegment:
             _, ax = self._plt().subplots()
 
         tf = self.validate_tf(self.tf)
+        if x_scale not in {"log", "linear"}:
+            raise ValueError("x_scale must be either 'log' or 'linear'.")
+
         if xlim is None:
-            lo_hz = 0.0
+            lo_hz = float(self.cfg.freqs[1]) if x_scale == "log" else 0.0
             hi_hz = self.cfg.fb
         else:
             if len(xlim) != 2:
@@ -3143,6 +3181,9 @@ class LinkSegment:
             hi_hz = float(xlim[1])
             if not np.isfinite(lo_hz) or not np.isfinite(hi_hz) or lo_hz >= hi_hz:
                 raise ValueError("xlim must be finite and strictly increasing.")
+
+        if x_scale == "log" and lo_hz <= 0.0:
+            raise ValueError("Logarithmic frequency plots require xlim[0] > 0 Hz.")
 
         if lo_hz < self.cfg.freqs[0] or hi_hz > self.cfg.freqs[-1]:
             raise ValueError("xlim must stay within cfg.freqs.")
@@ -3158,6 +3199,7 @@ class LinkSegment:
         ax.set_xlabel("Frequency (GHz)")
         ax.set_ylabel("|H(f)| (dB)")
         ax.set_title("Transfer Function")
+        ax.set_xscale(x_scale)
         ax.set_xlim(lo_hz / 1e9, hi_hz / 1e9)
         if ylim is not None:
             if len(ylim) != 2:
@@ -3789,7 +3831,7 @@ class LinkSegment:
         - "tf2ir" and "ir2tf"
           Reversible when tf is on cfg.freqs, has real DC/Nyquist bins, and the
           inverse path uses the same cfg.Nfft/cfg.Fs scaling convention. This
-          debug pair uses raw_ir, not aligned_ir, because aligned_ir includes a
+          debug pair uses raw_ir, not causal_ir, because causal_ir includes a
           circular time-reference shift.
         - "tf2sr" and "sr2tf"
           Reversible only through the raw response path. The instance-owned
@@ -3985,33 +4027,32 @@ class LinkSegment:
 
         return ir
 
-    def validate_aligned_ir(
+    def validate_causal_ir(
         self,
         ir: np.ndarray,
-        source_name: str = "aligned_ir",
+        source_name: str = "causal_ir",
         tail_ui: float = 1.0,
         tail_energy_tol: float = 1e-6,
     ) -> np.ndarray:
         """
-        Validate a TF-originated aligned impulse response.
+        Validate a TF-originated causal impulse response.
 
         Parameters
         ----------
         ir:
-            Aligned impulse response sampled on cfg.times.
+            Causal impulse response sampled on cfg.times.
         source_name:
             Name used in error messages.
         tail_ui:
-            Tail window, in UI, used to detect circularly wrapped precursor
-            energy after alignment.
+            Tail window, in UI, used to detect circularly wrapped energy after
+            causality handling.
         tail_energy_tol:
             Maximum allowed energy ratio in the final tail_ui window.
 
         Contract:
-        TF-originated responses may be circularly shifted to place the main
-        cursor at a useful analysis location. After that shift, the record tail
-        should not contain significant energy. If it does, the LinkConfig time
-        window or delay alignment is not safe for ISI/PMF calculation.
+        TF-originated responses may be circularly shifted for causal analysis.
+        The record tail should not contain significant wrapped energy. If it
+        does, the LinkConfig time window is not safe for ISI/PMF calculation.
         """
         ir = self.validate_ir(ir, correct_wrap=False)
         if tail_ui <= 0.0:
@@ -4029,45 +4070,55 @@ class LinkSegment:
         tail_energy_ratio = float(np.sum(energy[-tail_len:]) / total_energy)
         if tail_energy_ratio > tail_energy_tol:
             raise ValueError(
-                f"{source_name} contains significant tail energy after alignment: "
+                f"{source_name} contains significant tail energy after causality handling: "
                 f"tail_energy_ratio={tail_energy_ratio:.3e} exceeds {tail_energy_tol:.3e}. "
                 "This usually means precursor/main-lobe energy wrapped to the end "
-                "of the IFFT record; increase LinkConfig time span or inspect delay alignment."
+                "of the IFFT record; increase LinkConfig time span or inspect the response delay."
             )
 
         return ir
 
-    def align_ir_to_main_cursor(
+    def causalize_ir(
         self,
         ir: np.ndarray,
-        target_main_cursor_ui: float | None = None,
-    ) -> np.ndarray:
+        edge_fraction: float = 0.05,
+    ) -> tuple[np.ndarray, int]:
         """
-        Circularly align an IFFT impulse response for causal time-domain analysis.
+        Circularly shift an IFFT impulse response to minimize edge energy.
 
         Parameters
         ----------
         ir:
             Direct IFFT impulse response sampled on cfg.times.
-        target_main_cursor_ui:
-            Desired main-cursor location after alignment, in UI from cfg.times[0].
+        edge_fraction:
+            Fraction of the record used at both edges for the causality score.
 
-        The operation is a circular roll. It preserves sample values but changes
-        the time reference, so it should not be used for tf <-> ir round-trip
-        checks. The raw unshifted IR must be used for that purpose.
+        The score is E_front + E_tail, where each term is the squared-magnitude
+        energy in edge_fraction of the record. The first minimum returned by
+        np.argmin is used as a deterministic tie break. This changes the time
+        reference; raw_ir remains the only TF round-trip representation.
         """
         ir = self.validate_ir(ir, correct_wrap=False)
-        if target_main_cursor_ui is None:
-            target_main_cursor_ui = self.DEFAULT_MAIN_CURSOR_UI
-        if target_main_cursor_ui < 0.0:
-            raise ValueError("target_main_cursor_ui must be non-negative.")
+        if not 0.0 < edge_fraction < 0.5:
+            raise ValueError("edge_fraction must be between 0 and 0.5.")
 
-        target_index = int(round(target_main_cursor_ui * self.cfg.per_ui))
-        if target_index >= len(ir):
-            raise ValueError("target_main_cursor_ui is outside the LinkConfig time window.")
+        edge_len = max(1, int(np.ceil(edge_fraction * len(ir))))
+        energy = np.abs(ir) ** 2
+        total_energy = float(np.sum(energy))
+        if total_energy <= 0.0:
+            raise ValueError("ir impulse-response energy is zero.")
 
-        peak_index = int(np.argmax(np.abs(ir)))
-        return np.roll(ir, target_index - peak_index)
+        # Circular length-edge_len window energies for every original start index.
+        # This evaluates all circular shifts in O(N), not O(N**2).
+        extended_energy = np.concatenate([energy, energy[:edge_len - 1]])
+        cumulative_energy = np.concatenate([[0.0], np.cumsum(extended_energy)])
+        window_energy = cumulative_energy[edge_len:edge_len + len(ir)] - cumulative_energy[:len(ir)]
+        shift_index = np.arange(len(ir), dtype=int)
+        front_start = (-shift_index) % len(ir)
+        tail_start = (front_start - edge_len) % len(ir)
+        edge_score = window_energy[front_start] + window_energy[tail_start]
+        shift = int(np.argmin(edge_score))
+        return np.roll(ir, shift), shift
 
     def validate_compatible_segment(self, other: 'LinkSegment') -> None:
         if not isinstance(other, LinkSegment):
@@ -4089,32 +4140,110 @@ class LinkSegment:
     def tf2ir(
         self,
         tf: np.ndarray,
-        target_main_cursor_ui: float | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """
-        Convert TF to both raw and aligned impulse responses.
+        Convert TF to both raw and causal impulse responses.
 
         Parameters
         ----------
         tf:
             One-sided transfer function sampled on cfg.freqs.
-        target_main_cursor_ui:
-            Main-cursor location for aligned_ir, in UI from cfg.times[0].
-
         Returns
         -------
         raw_ir:
             Direct continuous-scaled IFFT result before causality/alignment
             handling. Use this for tf <-> ir round-trip validation.
-        aligned_ir:
-            Circularly aligned analysis view with the main cursor moved to
-            target_main_cursor_ui.
+        causal_ir:
+            Circularly shifted analysis view with minimum 5% head/tail energy.
         """
         tf = self.validate_tf(tf)
         raw_ir = np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
         raw_ir = self.validate_ir(raw_ir, correct_wrap=False)
-        aligned_ir = self.align_ir_to_main_cursor(raw_ir, target_main_cursor_ui=target_main_cursor_ui)
-        return raw_ir, aligned_ir
+        causal_ir, shift = self.causalize_ir(raw_ir)
+        self._causal_shift_samples = shift
+        return raw_ir, causal_ir
+
+    def to_sampled_response(
+        self,
+        pos: int = 0,
+        source: Literal["raw", "causal"] = "causal",
+    ) -> SampledResponse:
+        """
+        Convert this continuous-time response to a symbol-rate SampledResponse.
+
+        Parameters
+        ----------
+        pos:
+            Sampling phase in continuous-time samples. Must satisfy
+            ``0 <= pos < cfg.per_ui``. The corresponding time-domain sequence
+            is ``source_ir[pos::cfg.per_ui]``.
+        source:
+            ``"raw"`` uses ``raw_ir`` as the continuous-time time reference.
+            ``"causal"`` uses ``causal_ir`` and is therefore aligned with the
+            response used by COM time-domain analysis.
+
+        Returns
+        -------
+        SampledResponse
+            Symbol-rate response on ``cfg.theta``. Its impulse response is
+            numerically equivalent to sampling the selected continuous-time
+            impulse response at ``pos`` and every ``cfg.per_ui`` samples.
+
+        Notes
+        -----
+        This implements the finite-DFT form of continuous-time to sampled-time
+        conversion. Let ``M = cfg.per_ui``, ``N = cfg.Nfft``, and
+        ``N_d = N / M``. For sampled bin ``r``:
+
+        ``H_d[r] = fb * sum_l H_c[r + l*N_d]
+                           * exp(j*2*pi*(r + l*N_d)*pos/N)``.
+
+        The sum contains every alias branch of the finite continuous-time
+        grid. The factor ``fb`` follows LinkSegment's continuous scaling
+        convention, where ``ir = irfft(tf) * Fs``. This method deliberately
+        reconstructs the full two-sided DFT spectrum so that negative-frequency
+        aliases are included exactly.
+        """
+        if source not in ("raw", "causal"):
+            raise ValueError('source must be "raw" or "causal".')
+
+        M = int(self.cfg.per_ui)
+        N = int(self.cfg.Nfft)
+        pos = int(pos)
+        if not 0 <= pos < M:
+            raise ValueError("pos must satisfy 0 <= pos < cfg.per_ui.")
+        if N % M != 0:
+            raise ValueError(
+                "CT-to-DT conversion requires cfg.Nfft to be divisible by "
+                "cfg.per_ui so the two DFT grids share df."
+            )
+
+        N_d = N // M
+        if N_d != self.cfg.sampled_nfft or N_d % 2 != 0:
+            raise ValueError(
+                "LinkConfig sampled-domain grid is not exactly compatible "
+                "with the continuous-time DFT grid."
+            )
+
+        source_ir = self.raw_ir if source == "raw" else self.causal_ir
+        H_one_sided = self.ir2tf(source_ir)
+        H_full = np.empty(N, dtype=complex)
+        H_full[: N // 2 + 1] = H_one_sided
+        H_full[N // 2 + 1 :] = np.conj(H_one_sided[1:-1][::-1])
+
+        sampled_bins = np.arange(N_d // 2 + 1, dtype=int)
+        alias_indices = sampled_bins[:, None] + N_d * np.arange(M, dtype=int)
+        phase = np.exp(2j * np.pi * alias_indices * pos / N)
+        H_sampled = self.cfg.fb * np.sum(H_full[alias_indices] * phase, axis=1)
+        H_sampled[0] = H_sampled[0].real + 0j
+        H_sampled[-1] = H_sampled[-1].real + 0j
+
+        return SampledResponse.from_tf(
+            theta=self.cfg.theta,
+            tf=H_sampled,
+            fb=self.cfg.fb,
+            nfft=N_d,
+        )
 
     def ir2sr(self, ir: np.ndarray) -> np.ndarray:
         """
@@ -4157,7 +4286,7 @@ class LinkSegment:
 
         Round-trip boundary condition with tf2ir():
         - ir must be cfg.times-length and continuous-scaled.
-        - If ir is None, use this instance's raw_ir, not aligned_ir.
+        - If ir is None, use this instance's raw_ir, not causal_ir.
         - The forward FFT divides by cfg.Fs to undo tf2ir()'s continuous scaling.
         - The returned DC/Nyquist bins are forced real for rfft/irfft consistency.
         """

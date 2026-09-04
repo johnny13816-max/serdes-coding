@@ -1,18 +1,14 @@
 """SerDes coding utilities and COM modeling experiments."""
 
-from .com_model import (
-    COM_178A,
-    COM_93A,
+from .com_model_93A import (
+    COM as COM93A,
     COMChannelConfig,
     COMConfig,
-    COMConfig_178A,
     COMDFEConfig,
     COMDFEStatus,
     COMFilterConfig,
-    COMFilterConfig_178A,
     COMImpairmentConfig,
-    COMImpairmentStatus_178A,
-    COMImpairmentStatus_93A,
+    COMImpairmentStatus,
     COMPMFConfig,
     COMPMFRuntimeConfig,
     COMPMFStatus,
@@ -23,27 +19,77 @@ from .com_model import (
     COMSearchStatus,
     COMSharedPath,
     COMPkgConfig,
-    COMPkgConfig_178A,
     COMStatus,
     IEEECOMFilter,
-    IEEECOMsparam,
+    IEEECOMSparam,
 )
-from .com_excel_io import excel_to_config, excel_to_config_178A, excel_to_search_config
 from .link_segment import ContinuousPSD, OneSidePSD, SampledPSD, SampledResponse, SparamModel
 
+
+def __getattr__(name: str):
+    """Load optional 178A public APIs without pre-importing its runnable module.
+
+    This keeps ``python -m serdes_coding.com_model_178A`` to one module
+    instance. Eagerly importing that module here would create a second class
+    identity before runpy executes it as ``__main__``.
+    """
+    if name == "COM178A":
+        from .com_model_178A import COM
+
+        return COM
+    if name == "COMReport178A":
+        from .com_report_178A import COMReport178A
+
+        return COMReport178A
+    if name in {
+        "excel_to_config",
+        "excel_to_config_93A",
+        "excel_to_config_178A",
+        "excel_to_search_config",
+        "excel_to_search_config_178A",
+    }:
+        from . import com_excel_io
+
+        return getattr(com_excel_io, name)
+    if name in {
+        "COMSearchRow178A",
+        "COMSearchStatus178A",
+        "SearchArtifacts178A",
+        "create_search_plan_178A",
+        "run_partial_group_178A",
+        "merge_partial_results_178A",
+        "finalize_search_178A",
+        "run_full_search_178A",
+    }:
+        from . import com_search_178A
+
+        source_name = {
+            "COMSearchRow178A": "COMSearchRow",
+            "COMSearchStatus178A": "COMSearchStatus",
+            "SearchArtifacts178A": "SearchArtifacts",
+            "create_search_plan_178A": "create_search_plan",
+            "run_partial_group_178A": "run_partial_group",
+            "merge_partial_results_178A": "merge_partial_results",
+            "finalize_search_178A": "finalize_search",
+            "run_full_search_178A": "run_full_search",
+        }[name]
+        return getattr(com_search_178A, source_name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 __all__ = [
-    "COM_178A",
-    "COM_93A",
+    "COM178A",
+    "COMReport178A",
+    "COM93A",
+    "COMSearchRow178A",
+    "COMSearchStatus178A",
+    "SearchArtifacts178A",
     "COMChannelConfig",
     "COMConfig",
-    "COMConfig_178A",
     "COMDFEConfig",
     "COMDFEStatus",
     "COMFilterConfig",
-    "COMFilterConfig_178A",
     "COMImpairmentConfig",
-    "COMImpairmentStatus_178A",
-    "COMImpairmentStatus_93A",
+    "COMImpairmentStatus",
     "COMPMFConfig",
     "COMPMFRuntimeConfig",
     "COMPMFStatus",
@@ -54,16 +100,22 @@ __all__ = [
     "COMSearchStatus",
     "COMSharedPath",
     "COMPkgConfig",
-    "COMPkgConfig_178A",
     "COMStatus",
     "ContinuousPSD",
     "IEEECOMFilter",
-    "IEEECOMsparam",
+    "IEEECOMSparam",
     "OneSidePSD",
     "SampledPSD",
     "SampledResponse",
     "SparamModel",
     "excel_to_config",
+    "excel_to_config_93A",
     "excel_to_config_178A",
     "excel_to_search_config",
+    "excel_to_search_config_178A",
+    "create_search_plan_178A",
+    "run_partial_group_178A",
+    "merge_partial_results_178A",
+    "finalize_search_178A",
+    "run_full_search_178A",
 ]

@@ -4,6 +4,34 @@ import numpy as np
 from typing import Optional
 from math import erf, sqrt
 
+
+def _convolve_probability_mass(left: np.ndarray, right: np.ndarray) -> np.ndarray:
+    """Convolve two normalized PMF arrays through the common FFT backend."""
+    left = np.asarray(left, dtype=float)
+    right = np.asarray(right, dtype=float)
+    if left.ndim != 1 or right.ndim != 1:
+        raise ValueError("PMF convolution inputs must be one-dimensional.")
+
+    from scipy.signal import fftconvolve
+
+    result = np.asarray(fftconvolve(left, right, mode="full"), dtype=float)
+    if not np.all(np.isfinite(result)):
+        raise FloatingPointError("FFT PMF convolution produced non-finite probability mass.")
+
+    # FFT round-off may produce tiny negative values even for two non-negative
+    # distributions. Reject a material error; only clip numerical residue.
+    scale = max(1.0, float(np.max(np.abs(result))))
+    tolerance = 64.0 * np.finfo(float).eps * scale
+    if float(np.min(result)) < -tolerance:
+        raise FloatingPointError("FFT PMF convolution produced materially negative probability mass.")
+    result = np.maximum(result, 0.0)
+
+    total_mass = float(np.sum(result))
+    if not np.isfinite(total_mass) or total_mass <= 0.0:
+        raise FloatingPointError("FFT PMF convolution produced invalid total probability mass.")
+    return result / total_mass
+
+
 # helpers
 def fir_filtered_pmf(
     p: Pmf1D,
@@ -165,6 +193,57 @@ class Pmf1D:
     def cdf(self) -> np.ndarray:
         "Don't save CDF to avoid cache invalidation in in-place operations."
         return np.cumsum(self.pmf)
+
+    def plot(
+        self,
+        ax: object = None,
+        save_path: str = "",
+        *,
+        quantity: str = "pmf",
+        label: Optional[str] = None,
+    ) -> object:
+        """Plot probability mass or CDF using the PMF's native amplitude grid.
+
+        Parameters
+        ----------
+        ax:
+            Optional matplotlib axes. An externally supplied axes is not shown
+            or closed unless ``save_path`` is also supplied.
+        save_path:
+            Optional output image path.
+        quantity:
+            ``"pmf"`` plots probability mass; ``"cdf"`` plots cumulative mass.
+        label:
+            Optional curve label for overlays.
+        """
+        if quantity not in {"pmf", "cdf"}:
+            raise ValueError("quantity must be either 'pmf' or 'cdf'.")
+
+        import matplotlib.pyplot as plt
+
+        created_ax = ax is None
+        if created_ax:
+            _, ax = plt.subplots()
+
+        values = self.pmf if quantity == "pmf" else self.cdf
+        ax.plot(self.x, values, label=label or self.name or None)
+        if label is not None or self.name:
+            ax.legend()
+        ax.set_xlabel(f"Amplitude ({self.unit or 'arb.'})")
+        ax.set_ylabel("Probability mass" if quantity == "pmf" else "CDF")
+        ax.set_title("PMF" if quantity == "pmf" else "PMF CDF")
+        ax.grid(True)
+
+        fig = ax.figure
+        fig.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches="tight")
+            if created_ax:
+                plt.close(fig)
+        elif created_ax:
+            fig.canvas.draw_idle()
+            plt.show()
+        return ax
 
     # --------------------------------
     # validation
@@ -770,7 +849,7 @@ class Pmf1D:
 
             for c in coeff:
                 term = base.copy().scale_x(c, keep_dx=True, dx_ref=dx_ref)
-                out_pmf = np.convolve(out_pmf, term.pmf)
+                out_pmf = _convolve_probability_mass(out_pmf, term.pmf)
                 out_st_idx += term.st_idx
 
                 if keep_mass < 1.0:
@@ -819,7 +898,7 @@ class Pmf1D:
         return Pmf1D(
             dx=self.dx,
             st_idx=self.st_idx + other.st_idx,
-            pmf=self._validate_pmf(np.convolve(self.pmf, other.pmf)),
+            pmf=self._validate_pmf(_convolve_probability_mass(self.pmf, other.pmf)),
             unit=self.unit or other.unit,
             name=self.name if name is None else name,
         )
