@@ -13,35 +13,38 @@ from serdes_coding.com_model_178A import COM
 from serdes_coding.com_search_178A import (
     COMSearchConfig,
     _config_with_candidate,
+    create_search_plan,
     _read_csv,
     merge_partial_results,
-    run_full_search,
+    run_partial_group,
 )
 
 
 def _smoke_search(search: COMSearchConfig) -> COMSearchConfig:
     """Create a two-candidate smoke space while preserving valid workbook values."""
-    def first(values: object) -> tuple[float, ...] | None:
+    def closest_to_zero(values: object) -> tuple[float, ...] | None:
         if values is None:
             return None
         array = np.asarray(values, dtype=float).reshape(-1)
         if len(array) == 0:
             return None
-        return (float(array[0]),)
+        return (float(array[np.argmin(np.abs(array))]),)
 
-    c_m2 = first(search.c_m2_values)
+    c_m2 = closest_to_zero(search.c_m2_values)
     if c_m2 is None:
         raise ValueError("Smoke validation requires c_m2_values in search_config.")
     if search.c_m2_values is not None and len(np.asarray(search.c_m2_values).reshape(-1)) > 1:
-        c_m2 = (c_m2[0], float(np.asarray(search.c_m2_values, dtype=float).reshape(-1)[1]))
+        values = np.asarray(search.c_m2_values, dtype=float).reshape(-1)
+        second = values[np.argsort(np.abs(values))[1]]
+        c_m2 = (c_m2[0], float(second))
 
     return replace(
         search,
         c_m2_values=c_m2,
-        c_m1_values=first(search.c_m1_values),
-        c_1_values=first(search.c_1_values),
-        g_DC_values=first(search.g_DC_values),
-        g_DC2_values=first(search.g_DC2_values),
+        c_m1_values=closest_to_zero(search.c_m1_values),
+        c_1_values=closest_to_zero(search.c_1_values),
+        g_DC_values=closest_to_zero(search.g_DC_values),
+        g_DC2_values=closest_to_zero(search.g_DC2_values),
         keep_top_n=2,
         keep_all_rows=True,
         continue_on_error=True,
@@ -70,7 +73,9 @@ def validate(case_root: Path, mode: str, output_root: Path) -> None:
         )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    status = run_full_search(cfg, search, output_root, include_plots=False)
+    artifacts = create_search_plan(cfg, search, output_root)
+    for group in _read_csv(artifacts.group_plan_path, ("group_id",)):
+        run_partial_group(cfg, search, artifacts.root, int(group["group_id"]))
     rows = merge_partial_results(output_root)
     candidates = search.candidates(cfg.filter)
     if len(rows) != len(candidates):
@@ -100,14 +105,15 @@ def validate(case_root: Path, mode: str, output_root: Path) -> None:
                 f"direct={baseline_mse[row.idx]}"
             )
 
-    if status.best_row.idx != min(baseline_mse, key=baseline_mse.get):
+    best_index = min(baseline_mse, key=baseline_mse.get)
+    successful_rows = [row for row in rows if row.status == "ok"]
+    if not successful_rows:
+        raise AssertionError("Smoke validation produced no successful partial result.")
+    if min(successful_rows, key=lambda row: row.mse).idx != best_index:
         raise AssertionError("selected best candidate does not minimize direct baseline MSE")
 
-    final_path = output_root / "full_search_results.csv"
-    if not final_path.exists():
-        raise AssertionError(f"missing final result: {final_path}")
     print(f"PASS: {mode} partial-search integration; candidates={len(candidates)}")
-    print(f"best_index={status.best_row.idx}, best_mse={status.best_row.mse:.12g}")
+    print(f"best_index={best_index}, best_mse={baseline_mse[best_index]:.12g}")
 
 
 def main() -> None:
