@@ -1,0 +1,47 @@
+name: Validate 178A partial search
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: "Case directory under cases/"
+        required: true
+        default: "c2m_8023dj_4p13p0_50mm"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Validate split search
+        env:
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+        run: >-
+          python scripts/validate_partial_search_178A.py
+          --case-root "cases/${CASE_ID}"
+          --mode smoke
+          --output-root "artifacts/partial_search"
+
+      - name: Upload validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: partial-search-${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}-smoke
+          path: artifacts/partial_search

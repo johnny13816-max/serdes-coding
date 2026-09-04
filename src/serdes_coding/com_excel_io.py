@@ -5,19 +5,29 @@ from typing import Optional
 import numpy as np
 
 from .link_segment import LinkConfig
-from .com_model import (
+from .com_model_93A import (
     COMChannelConfig,
     COMConfig,
-    COMConfig_178A,
     COMDFEConfig,
-    COMDTEConfig,
     COMFilterConfig,
-    COMFilterConfig_178A,
-    COMImpairmentConfig,
+    COMImpairmentConfig as COMImpairmentConfig_93A,
     COMPMFConfig,
     COMSearchConfig,
     COMPkgConfig,
-    COMPkgConfig_178A,
+)
+
+from .com_model_178A import (
+    COMDevicePackageConfig,
+    COMDeviceTermConfig,
+    COMConfig as COMConfig_178A,
+    COMDTEConfig,
+    COMExecutionConfig,
+    COMFilterConfig as COMFilterConfig_178A,
+    COMImpairmentConfig as COMImpairmentConfig_178A,
+    COMPartialHostConfig,
+    COMPkgConfig as COMPkgConfig_178A,
+    COMRunConfig,
+    COMSearchConfig as COMSearchConfig_178A,
 )
 
 
@@ -38,26 +48,43 @@ def excel_to_config(excel_path: str) -> COMConfig:
     return _pychopmarg_excel_to_config(excel_path_obj)
 
 
+def excel_to_config_93A(excel_path: str) -> COMConfig:
+    """
+    Build COMConfig for the IEEE 802.3 Annex 93A model.
+
+    This is the version-explicit name for ``excel_to_config()``.
+    """
+    return excel_to_config(excel_path)
+
+
 def excel_to_config_178A(excel_path: str) -> COMConfig_178A:
     """
     Build COMConfig_178A from the project-owned COM workbook.
 
-    Current contract:
-    - supported input is the project workbook with fixed_config/channels sheets
-    - 178A-native field names are used when present
-    - 93A-style project fields are accepted as a debug/study fallback
+    Contract:
+    - supported input is a 178A project workbook with fixed_config/run_config/channels sheets
+    - fixed_config uses the native COMConfig / nested COMPkgConfig field names
+    - no 93A field fallback or runtime config conversion is performed
 
     Raw COM ad hoc workbooks are intentionally not parsed directly here yet.
     They should first be converted into the project workbook shape.
     """
     excel_path_obj = Path(excel_path)
     sheet_names = _excel_sheet_names(excel_path_obj)
-    if {"fixed_config", "channels"}.issubset(sheet_names):
+    if {"fixed_config", "run_config", "channels"}.issubset(sheet_names):
         return _project_excel_to_config_178A(excel_path_obj)
     raise ValueError(
         "excel_to_config_178A currently supports only project-owned workbooks "
-        "with fixed_config/channels sheets."
+        "with fixed_config/run_config/channels sheets."
     )
+
+
+def excel_to_search_config_178A(excel_path: str) -> COMSearchConfig_178A:
+    """Build native 178A COMSearchConfig from a project-owned workbook."""
+    excel_path_obj = Path(excel_path)
+    if "search_config" not in _excel_sheet_names(excel_path_obj):
+        raise ValueError("178A workbook must contain a search_config sheet.")
+    return _project_excel_to_search_config_178A(excel_path_obj)
 
 
 def excel_to_search_config(excel_path: str) -> COMSearchConfig:
@@ -111,7 +138,7 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
             N_b=int(_fixed_float(fixed, "N_b")),
             b_max=_fixed_float(fixed, "b_max"),
         ),
-        imp=COMImpairmentConfig(
+        imp=COMImpairmentConfig_93A(
             R_LM=_fixed_float(fixed, "R_LM"),
             SNR_TX=_fixed_float(fixed, "SNR_TX"),
             sigma_RJ=_fixed_float(fixed, "sigma_RJ"),
@@ -220,7 +247,7 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
             N_b=int(_scalar_setting(table, "N_b")),
             b_max=_scalar_setting(table, "b_max(1)"),
         ),
-        imp=COMImpairmentConfig(
+        imp=COMImpairmentConfig_93A(
             R_LM=_scalar_setting(table, "R_LM"),
             SNR_TX=_scalar_setting(table, "SNR_TX"),
             sigma_RJ=_scalar_setting(table, "sigma_RJ"),
@@ -264,16 +291,17 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             c_m2=_fixed_float(fixed, "c_m2"),
             c_m1=_fixed_float(fixed, "c_m1"),
             c_1=_fixed_float(fixed, "c_1"),
+            c_0_min=_fixed_float(fixed, "c_0_min"),
             num_pre=int(_fixed_float(fixed, "num_pre")),
             Tr=_fixed_optional_float(fixed, "Tr"),
             fr=_fixed_optional_float(fixed, "fr"),
-            g_1=_fixed_optional_float_with_fallback(fixed, "g_1", "g_DC"),
-            g_2=_fixed_optional_float_with_fallback(fixed, "g_2", "g_DC2"),
-            f_z1=_fixed_optional_float_with_fallback(fixed, "f_z1", "f_z"),
-            f_z2=_fixed_optional_float_with_fallback(fixed, "f_z2", "f_LF"),
-            f_p1=_fixed_optional_float(fixed, "f_p1"),
-            f_p2=_fixed_optional_float(fixed, "f_p2"),
-            f_p3=_fixed_optional_float_with_default(fixed, "f_p3", link_cfg.f_nyq),
+            g_1=_fixed_float(fixed, "g_1"),
+            g_2=_fixed_float(fixed, "g_2"),
+            f_z1=_fixed_float(fixed, "f_z1"),
+            f_z2=_fixed_float(fixed, "f_z2"),
+            f_p1=_fixed_float(fixed, "f_p1"),
+            f_p2=_fixed_float(fixed, "f_p2"),
+            f_p3=_fixed_float(fixed, "f_p3"),
             A_v=_fixed_float(fixed, "A_v"),
             A_fe=_fixed_float(fixed, "A_fe"),
             A_ne=_fixed_float(fixed, "A_ne"),
@@ -284,18 +312,23 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
         txpkg_next=_fixed_pkg_config_178A(fixed, "txpkg_next"),
         rxpkg=_fixed_pkg_config_178A(fixed, "rxpkg"),
         dte=COMDTEConfig(
-            b_max=_fixed_optional_float_with_default(fixed, "b_max", 0.0),
-            b_min=_fixed_optional_float_with_default(fixed, "b_min", -_fixed_optional_float_with_default(fixed, "b_max", 0.0)),
-            w_max=_fixed_optional_float_with_default(fixed, "w_max", 1.0),
-            w_min=_fixed_optional_float_with_default(fixed, "w_min", -1.0),
-            d_w=int(_fixed_optional_float_with_default(fixed, "d_w", 0.0)),
-            N_fix=int(_fixed_optional_float_with_default(fixed, "N_fix", 3.0)),
-            N_wg=int(_fixed_optional_float_with_default(fixed, "N_wg", 0.0)),
-            N_wf=int(_fixed_optional_float_with_default(fixed, "N_wf", 0.0)),
-            N_max=int(_fixed_optional_float_with_default(fixed, "N_max", _fixed_optional_float_with_default(fixed, "N_fix", 3.0))),
+            w_pre1_max=_fixed_float(fixed, "w_pre1_max"),
+            w_post1_max=_fixed_float(fixed, "w_post1_max"),
+            w_fixed_rest_max=_fixed_float(fixed, "w_fixed_rest_max"),
+            w_float_max=_fixed_float(fixed, "w_float_max"),
+            w_float_min=_fixed_float(fixed, "w_float_min"),
+            b_first_max=_fixed_float(fixed, "b_first_max"),
+            b_first_min=_fixed_float(fixed, "b_first_min"),
+            b_rest_max=_fixed_float(fixed, "b_rest_max"),
+            b_rest_min=_fixed_float(fixed, "b_rest_min"),
+            d_w=int(_fixed_float(fixed, "d_w")),
+            N_fix=int(_fixed_float(fixed, "N_fix")),
+            N_wg=int(_fixed_float(fixed, "N_wg")),
+            N_wf=int(_fixed_float(fixed, "N_wf")),
+            N_max=int(_fixed_float(fixed, "N_max")),
             N_b=int(_fixed_float(fixed, "N_b")),
         ),
-        imp=COMImpairmentConfig(
+        imp=COMImpairmentConfig_178A(
             R_LM=_fixed_float(fixed, "R_LM"),
             SNR_TX=_fixed_float(fixed, "SNR_TX"),
             sigma_RJ=_fixed_float(fixed, "sigma_RJ"),
@@ -303,11 +336,6 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             eta_0=_fixed_float(fixed, "eta_0"),
             N_qb=_fixed_optional_int(fixed, "N_qb"),
             P_qc=_fixed_optional_float(fixed, "P_qc"),
-            quantization_vqc_method=_fixed_optional_str_with_default(
-                fixed,
-                "quantization_vqc_method",
-                "gaussian_approx",
-            ),
         ),
         DER_0=_fixed_float(fixed, "DER_0"),
         pmf=COMPMFConfig(
@@ -319,6 +347,21 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             keep_mass=_fixed_float(fixed, "keep_mass"),
             gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
+        execution=_read_project_execution_config(excel_path),
+    )
+
+
+def _project_excel_to_search_config_178A(excel_path: Path) -> COMSearchConfig_178A:
+    search_params, search_settings = _read_project_search_config(excel_path)
+    return COMSearchConfig_178A(
+        c_m2_values=search_params.get("c_m2"),
+        c_m1_values=search_params.get("c_m1"),
+        c_1_values=search_params.get("c_1"),
+        g_DC_values=search_params.get("g_1"),
+        g_DC2_values=search_params.get("g_2"),
+        keep_top_n=int(search_settings.get("keep_top_n", 10)),
+        keep_all_rows=_coerce_bool(search_settings.get("keep_all_rows", False)),
+        continue_on_error=_coerce_bool(search_settings.get("continue_on_error", False)),
     )
 
 
@@ -354,6 +397,44 @@ def _read_project_fixed_config(excel_path: Path) -> dict[str, object]:
             continue
         fixed[str(name).strip()] = row.get("Value")
     return fixed
+
+
+def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
+    """Read 178A execution profiles from the project-owned ``run_config`` sheet."""
+    import pandas as pd
+
+    df = pd.read_excel(excel_path, sheet_name="run_config", header=2)
+    required_cols = {"Profile", "Parameter", "Value"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError("run_config must contain Profile, Parameter, and Value columns.")
+
+    profiles: dict[str, dict[str, object]] = {}
+    for _, row in df.iterrows():
+        profile = row.get("Profile")
+        parameter = row.get("Parameter")
+        if _is_blank(profile) or _is_blank(parameter):
+            continue
+        profiles.setdefault(str(profile).strip(), {})[str(parameter).strip()] = row.get("Value")
+
+    def run_profile(name: str) -> COMRunConfig:
+        values = profiles.get(name, {})
+        return COMRunConfig(
+            target=_run_str(values, name, "target"),
+            pre_dte_pmf_method=_run_str(values, name, "pre_dte_pmf_method"),
+            pmf_grid_quality=_run_str(values, name, "pmf_grid_quality"),
+            floating_mode=_run_str(values, name, "floating_mode"),
+            pos_sweep_method=_run_str(values, name, "pos_sweep_method"),
+            pos_coarse_stride=int(_run_value(values, name, "pos_coarse_stride")),
+        )
+
+    search_values = profiles.get("search", {})
+    return COMExecutionConfig(
+        single_run=run_profile("single_run"),
+        search_sweep=run_profile("search_sweep"),
+        search_final=run_profile("search_final"),
+        search_group_size=int(_run_value(search_values, "search", "group_size")),
+        search_top_k=int(_run_value(search_values, "search", "top_k")),
+    )
 
 
 def _read_project_channels(excel_path: Path) -> COMChannelConfig:
@@ -439,7 +520,7 @@ def _read_project_search_config(excel_path: Path) -> tuple[dict[str, Optional[np
     if not required_cols.issubset(df.columns):
         raise ValueError("search_config must contain Parameter, Enabled, and Values columns.")
 
-    search_param_names = {"c_m2", "c_m1", "c_1", "g_DC", "g_DC2"}
+    search_param_names = {"c_m2", "c_m1", "c_1", "g_DC", "g_DC2", "g_1", "g_2"}
     setting_names = {"keep_top_n", "keep_all_rows", "continue_on_error"}
     search_params: dict[str, Optional[np.ndarray]] = {}
     settings: dict[str, object] = {}
@@ -479,31 +560,28 @@ def _fixed_optional_float(fixed: dict[str, object], name: str) -> Optional[float
     return float(value)
 
 
-def _fixed_optional_float_with_default(fixed: dict[str, object], name: str, default: float) -> float:
-    value = _fixed_optional_float(fixed, name)
-    return float(default) if value is None else value
-
-
-def _fixed_optional_float_with_fallback(
-    fixed: dict[str, object],
-    name: str,
-    fallback_name: str,
-) -> Optional[float]:
-    value = _fixed_optional_float(fixed, name)
-    if value is not None:
-        return value
-    return _fixed_optional_float(fixed, fallback_name)
-
-
 def _fixed_optional_int(fixed: dict[str, object], name: str) -> Optional[int]:
     value = _fixed_optional_float(fixed, name)
     return None if value is None else int(value)
 
 
-def _fixed_optional_str_with_default(fixed: dict[str, object], name: str, default: str) -> str:
-    value = fixed.get(name)
+def _run_value(values: dict[str, object], profile: str, name: str) -> object:
+    if name not in values:
+        raise KeyError(f"run_config profile '{profile}' is missing required parameter: {name}")
+    value = values[name]
     if _is_blank(value):
-        return default
+        raise ValueError(f"run_config.{profile}.{name} must not be blank.")
+    return value
+
+
+def _run_str(values: dict[str, object], profile: str, name: str) -> str:
+    return str(_run_value(values, profile, name)).strip()
+
+
+def _fixed_str(fixed: dict[str, object], name: str) -> str:
+    value = _fixed_value(fixed, name)
+    if _is_blank(value):
+        raise ValueError(f"fixed_config.{name} must not be blank.")
     return str(value).strip()
 
 
@@ -527,49 +605,38 @@ def _fixed_pkg_config(fixed: dict[str, object], prefix: str) -> COMPkgConfig:
 
 
 def _fixed_pkg_config_178A(fixed: dict[str, object], prefix: str) -> COMPkgConfig_178A:
-    L_s_seq = _fixed_optional_sequence(fixed, f"{prefix}.L_s_seq")
-    C_d_seq = _fixed_optional_sequence(fixed, f"{prefix}.C_d_seq")
-    z_p_seq = _fixed_optional_sequence(fixed, f"{prefix}.z_p_seq")
-    Z_c_seq = _fixed_optional_sequence(fixed, f"{prefix}.Z_c_seq")
-
-    if L_s_seq is None:
-        L_s_seq = np.asarray([_fixed_float(fixed, f"{prefix}.L_s")], dtype=float)
-    if C_d_seq is None:
-        C_d_seq = np.asarray([_fixed_float(fixed, f"{prefix}.C_d")], dtype=float)
-    if z_p_seq is None:
-        z_values = [_fixed_float(fixed, f"{prefix}.z_p")]
-        z_p2 = _fixed_optional_float(fixed, f"{prefix}.z_p2")
-        if z_p2 is not None and z_p2 > 0.0:
-            z_values.append(z_p2)
-        z_p_seq = np.asarray(z_values, dtype=float)
-    if Z_c_seq is None:
-        zc_values = [_fixed_float(fixed, f"{prefix}.Z_c")]
-        z_p2 = _fixed_optional_float(fixed, f"{prefix}.z_p2")
-        if z_p2 is not None and z_p2 > 0.0:
-            zc_values.append(_fixed_float(fixed, f"{prefix}.Z_c2"))
-        Z_c_seq = np.asarray(zc_values, dtype=float)
-
     return COMPkgConfig_178A(
-        L_s_seq=L_s_seq,
-        C_d_seq=C_d_seq,
-        C_b=_fixed_float(fixed, f"{prefix}.C_b"),
-        C_p=_fixed_float(fixed, f"{prefix}.C_p"),
-        z_p_seq=z_p_seq,
-        Z_c_seq=Z_c_seq,
-        enable=_fixed_bool(fixed, f"{prefix}.enable"),
+        device_term=COMDeviceTermConfig(
+            C_d_seq=_fixed_sequence(fixed, f"{prefix}.device_term.C_d_seq"),
+            L_s_seq=_fixed_sequence(fixed, f"{prefix}.device_term.L_s_seq"),
+            C_b=_fixed_float(fixed, f"{prefix}.device_term.C_b"),
+        ),
+        device_pkg=COMDevicePackageConfig(
+            z_p_seq=_fixed_sequence(fixed, f"{prefix}.device_pkg.z_p_seq"),
+            Z_c_seq=_fixed_sequence(fixed, f"{prefix}.device_pkg.Z_c_seq"),
+            gamma_0=_fixed_float(fixed, f"{prefix}.device_pkg.gamma_0"),
+            a1=_fixed_float(fixed, f"{prefix}.device_pkg.a1"),
+            a2=_fixed_float(fixed, f"{prefix}.device_pkg.a2"),
+            tau=_fixed_float(fixed, f"{prefix}.device_pkg.tau"),
+            C_p=_fixed_float(fixed, f"{prefix}.device_pkg.C_p"),
+        ),
+        partial_host=COMPartialHostConfig(
+            enable=_fixed_bool(fixed, f"{prefix}.partial_host.enable"),
+            C_0=_fixed_float(fixed, f"{prefix}.partial_host.C_0"),
+            C_1=_fixed_float(fixed, f"{prefix}.partial_host.C_1"),
+            z_h=_fixed_float(fixed, f"{prefix}.partial_host.z_h"),
+            Z_h=_fixed_float(fixed, f"{prefix}.partial_host.Z_h"),
+            gamma_0=_fixed_float(fixed, f"{prefix}.partial_host.gamma_0"),
+            a1=_fixed_float(fixed, f"{prefix}.partial_host.a1"),
+            a2=_fixed_float(fixed, f"{prefix}.partial_host.a2"),
+            tau=_fixed_float(fixed, f"{prefix}.partial_host.tau"),
+        ),
         R0=_fixed_float(fixed, f"{prefix}.R0"),
-        gamma0=_fixed_optional_float_with_default(fixed, f"{prefix}.gamma0", 0.0),
-        a1=_fixed_optional_float_with_default(fixed, f"{prefix}.a1", 1.734e-3),
-        a2=_fixed_optional_float_with_default(fixed, f"{prefix}.a2", 1.455e-4),
-        tau=_fixed_optional_float_with_default(fixed, f"{prefix}.tau", 6.141e-3),
     )
 
 
-def _fixed_optional_sequence(fixed: dict[str, object], name: str) -> Optional[np.ndarray]:
-    value = fixed.get(name)
-    if _is_blank(value):
-        return None
-    return _sequence_setting({name: value}, name)
+def _fixed_sequence(fixed: dict[str, object], name: str) -> np.ndarray:
+    return _sequence_setting({name: _fixed_value(fixed, name)}, name)
 
 
 def _is_blank(value: object) -> bool:
@@ -613,6 +680,7 @@ def _resolve_channel_path(excel_path: Path, value: str) -> str:
     project_root = Path(__file__).resolve().parents[2]
     candidates = [
         excel_path.parent / path_value,
+        excel_path.parent.parent / path_value,
         project_root / path_value,
         Path.cwd() / path_value,
     ]
