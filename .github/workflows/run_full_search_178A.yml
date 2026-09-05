@@ -1,6 +1,9 @@
 name: Run 178A full search
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       case_id:
@@ -44,9 +47,9 @@ jobs:
       - name: Create search plan
         id: plan
         env:
-          CASE_ID: ${{ inputs.case_id }}
-          GROUP_SIZE: ${{ inputs.group_size }}
-          MODE: ${{ inputs.mode }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
+          MODE: ${{ inputs.mode || 'dry-run' }}
         run: >-
           python scripts/run_full_search_178A.py prepare
           --case-root "cases/${CASE_ID}"
@@ -90,8 +93,8 @@ jobs:
 
       - name: Run partial group
         env:
-          CASE_ID: ${{ inputs.case_id }}
-          GROUP_SIZE: ${{ inputs.group_size }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
         run: >-
           python scripts/run_full_search_178A.py partial
           --case-root "cases/${CASE_ID}"
@@ -136,8 +139,8 @@ jobs:
 
       - name: Merge and finalize
         env:
-          CASE_ID: ${{ inputs.case_id }}
-          MODE: ${{ inputs.mode }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          MODE: ${{ inputs.mode || 'dry-run' }}
         run: >-
           python scripts/run_full_search_178A.py finalize
           --case-root "cases/${CASE_ID}"
