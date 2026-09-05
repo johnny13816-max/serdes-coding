@@ -47,6 +47,38 @@ def _dry_run_search(search: COMSearchConfig) -> COMSearchConfig:
     )
 
 
+def _scaled_search(search: COMSearchConfig, target_candidates: int) -> COMSearchConfig:
+    """Downsample every search dimension proportionally, preserving endpoints."""
+    if target_candidates <= 0:
+        raise ValueError("target_candidates must be positive.")
+    fields = (
+        "c_m2_values",
+        "c_m1_values",
+        "c_1_values",
+        "g_DC_values",
+        "g_DC2_values",
+    )
+    arrays = [np.asarray(getattr(search, field), dtype=float).reshape(-1) for field in fields]
+    full_count = int(np.prod([len(array) for array in arrays]))
+    if target_candidates >= full_count:
+        return search
+
+    ratio = (target_candidates / full_count) ** (1.0 / len(arrays))
+    counts = [max(2, min(len(array), int(round(len(array) * ratio)))) for array in arrays]
+
+    def sampled(array: np.ndarray, count: int) -> tuple[float, ...]:
+        indices = np.rint(np.linspace(0, len(array) - 1, count)).astype(int)
+        return tuple(float(value) for value in array[np.unique(indices)])
+
+    sampled_values = [sampled(array, count) for array, count in zip(arrays, counts)]
+    return replace(
+        search,
+        **dict(zip(fields, sampled_values)),
+        keep_all_rows=True,
+        continue_on_error=True,
+    )
+
+
 def _load(case_root: Path):
     config_path = case_root / "config" / "config_178A.xlsx"
     if not config_path.exists():
@@ -64,14 +96,17 @@ def prepare(
     matrix_output: Path,
     mode: str,
     candidate_limit: int | None,
+    target_candidates: int,
 ) -> None:
     if group_size <= 0:
         raise ValueError("group_size must be positive.")
     cfg, search = _load(case_root)
     if mode == "dry-run":
         search = _dry_run_search(search)
+    elif mode == "scaled":
+        search = _scaled_search(search, target_candidates)
     elif mode != "full":
-        raise ValueError("mode must be 'dry-run' or 'full'.")
+        raise ValueError("mode must be 'dry-run', 'scaled', or 'full'.")
     cfg = replace(cfg, execution=replace(cfg.execution, search_group_size=group_size))
     artifacts = create_search_plan(
         cfg,
@@ -101,8 +136,8 @@ def finalize(case_root: Path, output_root: Path, mode: str) -> None:
     if mode == "dry-run":
         print("Dry-run complete; search_final was intentionally skipped.")
         return
-    if mode != "full":
-        raise ValueError("mode must be 'dry-run' or 'full'.")
+    if mode not in ("scaled", "full"):
+        raise ValueError("mode must be 'dry-run', 'scaled', or 'full'.")
     status = finalize_search(cfg, search, output_root, include_plots=False)
     print(f"Finalized best candidate {status.best_row.idx}; COM={status.COM}")
 
@@ -115,8 +150,9 @@ def main() -> None:
     parser.add_argument("--group-size", type=int, default=1000)
     parser.add_argument("--group-id", type=int)
     parser.add_argument("--matrix-output", type=Path)
-    parser.add_argument("--mode", choices=("dry-run", "full"), default="dry-run")
+    parser.add_argument("--mode", choices=("dry-run", "scaled", "full"), default="dry-run")
     parser.add_argument("--candidate-limit", type=int)
+    parser.add_argument("--target-candidates", type=int, default=10000)
     args = parser.parse_args()
 
     if args.command == "prepare":
@@ -129,6 +165,7 @@ def main() -> None:
             args.matrix_output,
             args.mode,
             args.candidate_limit,
+            args.target_candidates,
         )
     elif args.command == "partial":
         if args.group_id is None:
