@@ -308,9 +308,11 @@ def finalize_search(
                 raise
             final_rows.append(_final_row(row, status="error", error=str(exc)))
 
-    if not finalized:
-        raise RuntimeError("All top-K final candidates failed.")
     _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
+    if not finalized:
+        raise RuntimeError(
+            "All top-K final candidates failed; see full_search_results.csv for details."
+        )
 
     best_row, best_status = min(finalized, key=lambda item: item[0].mse)
     retained = _select_rows(partial_rows, search)
