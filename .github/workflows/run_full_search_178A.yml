@@ -11,6 +11,14 @@ on:
         description: "Candidates per matrix runner"
         required: true
         default: "1000"
+      mode:
+        description: "Use dry-run first; full executes the complete search space"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - full
+        default: dry-run
 
 permissions:
   contents: read
@@ -38,11 +46,13 @@ jobs:
         env:
           CASE_ID: ${{ inputs.case_id }}
           GROUP_SIZE: ${{ inputs.group_size }}
+          MODE: ${{ inputs.mode }}
         run: >-
           python scripts/run_full_search_178A.py prepare
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
           --group-size "${GROUP_SIZE}"
+          --mode "${MODE}"
           --matrix-output "$GITHUB_OUTPUT"
 
       - name: Upload search plan
@@ -127,10 +137,12 @@ jobs:
       - name: Merge and finalize
         env:
           CASE_ID: ${{ inputs.case_id }}
+          MODE: ${{ inputs.mode }}
         run: >-
           python scripts/run_full_search_178A.py finalize
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
+          --mode "${MODE}"
 
       - name: Upload final results
         if: always()
