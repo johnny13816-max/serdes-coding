@@ -106,7 +106,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: full-search-group-${{ matrix.group_id }}
-          path: artifacts/partial_search/group_results/group_${{ format('{0:03d}', matrix.group_id) }}.csv
+          path: artifacts/partial_search/group_results/*.csv
 
   finalize:
     needs: partial_search
