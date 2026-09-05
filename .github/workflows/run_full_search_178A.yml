@@ -1,0 +1,140 @@
+name: Run 178A full search
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: "Case directory under cases/"
+        required: true
+        default: "c2m_8023dj_4p13p0_50mm"
+      group_size:
+        description: "Candidates per matrix runner"
+        required: true
+        default: "1000"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      group_ids: ${{ steps.plan.outputs.group_ids }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Create search plan
+        id: plan
+        env:
+          CASE_ID: ${{ inputs.case_id }}
+          GROUP_SIZE: ${{ inputs.group_size }}
+        run: >-
+          python scripts/run_full_search_178A.py prepare
+          --case-root "cases/${CASE_ID}"
+          --output-root artifacts/partial_search
+          --group-size "${GROUP_SIZE}"
+          --matrix-output "$GITHUB_OUTPUT"
+
+      - name: Upload search plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-search-plan
+          path: artifacts/partial_search
+
+  partial_search:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        group_id: ${{ fromJSON(needs.prepare.outputs.group_ids) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Download search plan
+        uses: actions/download-artifact@v4
+        with:
+          name: full-search-plan
+          path: artifacts/partial_search
+
+      - name: Run partial group
+        env:
+          CASE_ID: ${{ inputs.case_id }}
+          GROUP_SIZE: ${{ inputs.group_size }}
+        run: >-
+          python scripts/run_full_search_178A.py partial
+          --case-root "cases/${CASE_ID}"
+          --output-root artifacts/partial_search
+          --group-size "${GROUP_SIZE}"
+          --group-id "${{ matrix.group_id }}"
+
+      - name: Upload partial result
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-search-group-${{ matrix.group_id }}
+          path: artifacts/partial_search/group_results/group_${{ format('{0:03d}', matrix.group_id) }}.csv
+
+  finalize:
+    needs: partial_search
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project
+        run: python -m pip install --upgrade pip && python -m pip install -e .
+
+      - name: Download search plan
+        uses: actions/download-artifact@v4
+        with:
+          name: full-search-plan
+          path: artifacts/partial_search
+
+      - name: Download partial results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: full-search-group-*
+          path: artifacts/partial_search/group_results
+          merge-multiple: true
+
+      - name: Merge and finalize
+        env:
+          CASE_ID: ${{ inputs.case_id }}
+        run: >-
+          python scripts/run_full_search_178A.py finalize
+          --case-root "cases/${CASE_ID}"
+          --output-root artifacts/partial_search
+
+      - name: Upload final results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-search-final-${{ inputs.case_id }}
+          path: artifacts/partial_search
