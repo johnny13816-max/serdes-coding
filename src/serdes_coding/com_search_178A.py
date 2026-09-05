@@ -297,6 +297,9 @@ def finalize_search(
             status = COM(candidate_cfg)._run_once(
                 run_cfg=candidate_cfg.execution.search_final,
             )
+            # 178A plotting is owned by COMReport178A, which needs the
+            # originating runtime/project config in addition to COMStatus.
+            status._config_for_report = candidate_cfg
             status.export(
                 str(artifacts.top_k_dir / f"{row.idx:06d}"),
                 include_plots=include_plots,

@@ -1012,6 +1012,32 @@ class COMStatus(com_93A.COMStatus):
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
 
+    def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
+        """Export a 178A status without invoking the legacy 93A exporter.
+
+        The inherited 93A exporter assumes the flat 93A impairment contract,
+        including ``imp.sigma_TX``. 178A impairment data is grouped by stage,
+        so top-K finalization must use a 178A-specific export boundary.
+        """
+        out_dir = Path(save_path)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = out_dir / "status_summary.txt"
+        summary_path.write_text(str(self), encoding="utf-8")
+        outputs = {"status_summary_txt": str(summary_path)}
+
+        if include_plots:
+            cfg = getattr(self, "_config_for_report", None)
+            if cfg is None:
+                raise ValueError(
+                    "178A plot export requires the originating COMConfig."
+                )
+            from .com_report_178A import COMReport178A
+
+            plot_dir = out_dir / "plots"
+            COMReport178A(cfg, self).plot_single_run(plot_dir)
+            outputs["plots"] = str(plot_dir)
+        return outputs
+
 
 # ----------------------------------------
 # bulid_all_paths(): private helpers
