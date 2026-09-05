@@ -107,6 +107,10 @@ def prepare(
         search = _scaled_search(search, target_candidates)
     elif mode != "full":
         raise ValueError("mode must be 'dry-run', 'scaled', or 'full'.")
+    if mode == "full":
+        # Full mode is an explicit request for the complete Cartesian space;
+        # do not let the limited-run UI default truncate it to 10,000 rows.
+        candidate_limit = None
     cfg = replace(cfg, execution=replace(cfg.execution, search_group_size=group_size))
     artifacts = create_search_plan(
         cfg,

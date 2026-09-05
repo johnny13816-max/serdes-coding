@@ -2562,13 +2562,28 @@ class COM(com_93A.COM):
 
         h_w_J = _calculate_h_J(h, dte_status.pos, self.cfg.link, w_ir)
 
+        # Keep post-FFE PSD components on the same sampled grid as pre-DTE.
+        # The PSD records are useful for reporting; final PMF construction
+        # still treats DDJ separately as a dual-Dirac PMF.
+        H_ffe = SampledResponse.from_ir(w_ir, self.cfg.link)
+        S_rn = imp_pre.S_rn.filtered_by(H_ffe)
+        S_xn = imp_pre.S_xn.filtered_by(H_ffe)
+        S_tn = imp_pre.S_tn.filtered_by(H_ffe)
+
+        S_jn = _build_psd_from_DFT_response(
+            h_w_J,
+            self.cfg.link,
+            pre_dte_imp_common.sigma_X**2
+            * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+        )
+
         # Separate RJ from DDJ for final PMF construction after the selected phase is known.
         S_jn_RJ = _build_psd_from_DFT_response(
-            imp_pre.h_J,
+            h_w_J,
             self.cfg.link,
             pre_dte_imp_common.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
         )
-        S_gn_adc = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ)
+        S_gn_adc = S_rn.add(S_tn).add(S_jn_RJ)
         sigma_gn_adc = S_gn_adc.to_sigma()
 
         pmf_cfg = self.cfg.pmf.resolve(As)
@@ -2588,10 +2603,32 @@ class COM(com_93A.COM):
                 pmf_cfg=pmf_cfg,
             )
 
+        if adc_input_pmf.delta is None:
+            S_qn = _zero_sampled_psd(self.cfg.link)
+        else:
+            S_qn = SampledPSD.from_constant(
+                self.cfg.link.theta,
+                (adc_input_pmf.delta**2 / 12.0) / self.cfg.link.fb,
+                self.cfg.link.fb,
+            )
+        S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
+
         return COMImpairmentStatus(
             post_ffe=COMImpStageStatus(
                 psd=COMPSDStatus(
                 As=As,
+                S_rn=S_rn,
+                sigma_rn=S_rn.to_sigma(),
+                S_xn=S_xn,
+                sigma_xn=S_xn.to_sigma(),
+                S_tn=S_tn,
+                sigma_tn=S_tn.to_sigma(),
+                S_jn=S_jn,
+                sigma_jn=S_jn.to_sigma(),
+                S_qn=S_qn,
+                sigma_qn=S_qn.to_sigma(),
+                S_total=S_total,
+                sigma_total=S_total.to_sigma(),
                 S_jn_RJ=S_jn_RJ,
                 S_gn_adc=S_gn_adc,
                 sigma_gn_adc=sigma_gn_adc,

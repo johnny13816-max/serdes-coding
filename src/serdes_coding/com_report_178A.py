@@ -194,6 +194,31 @@ class COMReport178A:
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.8},
         )
 
+    def _annotate_imp_config(self, ax: Any) -> None:
+        """Annotate impairment plots with the physical impairment inputs."""
+        imp = self.cfg.imp
+        lines = [
+            f"R_LM={imp.R_LM:.4g}",
+            f"SNR_TX={imp.SNR_TX:.3g} dB",
+            f"sigma_RJ={imp.sigma_RJ:.3e} UI",
+            f"A_DD={imp.A_DD:.3e} UI",
+            f"eta_0={imp.eta_0:.3e} V^2/Hz",
+        ]
+        if imp.N_qb is not None:
+            lines.append(f"N_qb={imp.N_qb}")
+        if imp.P_qc is not None:
+            lines.append(f"P_qc={imp.P_qc:.3e}")
+        ax.text(
+            0.01,
+            0.01,
+            "\n".join(lines),
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=8,
+            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85},
+        )
+
     def _title(self, ax: Any, title: str, subtitle: str = "") -> None:
         ax.set_title(title, fontsize=14, pad=20 if subtitle else 8)
         if subtitle:
@@ -604,7 +629,7 @@ class COMReport178A:
         outputs: dict[str, str] = {}
 
         if stage.psd is not None:
-            names = ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total") if pre_dte else ("S_jn_RJ", "S_gn_adc")
+            names = ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total")
             psd_values = [(name, getattr(stage.psd, name)) for name in names if getattr(stage.psd, name) is not None]
             if psd_values:
                 outputs["psd"] = self._plot_psd_group(psd_values, directory, "psd_components.png", f"{directory_name} PSD")
@@ -699,7 +724,7 @@ class COMReport178A:
         ax.set_ylim(0.0, max(100.0, float(np.max(percentages)) * 1.18))
         ax.grid(axis="y", alpha=0.35)
         self._title(ax, f"{stage_name} Impairment Proportion", "Percentage of total impairment variance")
-        self._annotate_config(ax)
+        self._annotate_imp_config(ax)
         self._finish(fig, output)
         return output
 
@@ -903,8 +928,25 @@ class COMReport178A:
             )
             if pmf_status.y0 is not None:
                 cdf_ax.axhline(der0, color="tab:red", linestyle=":", linewidth=0.8)
-            self._title(pdf_ax, "Total PMF PDF", f"DER_0={der0:.3e}, A_ni={abs(y0):.3e} V")
-            self._title(cdf_ax, "Total PMF CDF", "DER_0 threshold")
+            cdf_values = np.asarray(total.cdf, dtype=float)
+            positive_cdf = cdf_values[np.isfinite(cdf_values) & (cdf_values > 0.0)]
+            cdf_ax.set_yscale("log")
+            cdf_lower = max(
+                1.0e-12,
+                float(np.min(positive_cdf)) * 0.5 if positive_cdf.size else 1.0e-12,
+            )
+            cdf_ax.set_ylim(cdf_lower, 1.0)
+            com_text = (
+                f"COM={pmf_status.COM:.3f} dB"
+                if pmf_status.COM is not None
+                else "COM=None"
+            )
+            self._title(
+                pdf_ax,
+                "Total PMF PDF",
+                f"{com_text}, DER_0={der0:.3e}, A_ni={abs(y0):.3e} V",
+            )
+            self._title(cdf_ax, "Total PMF CDF", f"{com_text}, DER_0 threshold")
             self._annotate_pmf_settings(cdf_ax, total)
             self._finish(fig, output)
             outputs["combined_cdf"] = output
