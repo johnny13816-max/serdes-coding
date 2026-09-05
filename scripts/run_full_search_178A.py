@@ -57,7 +57,14 @@ def _load(case_root: Path):
     )
 
 
-def prepare(case_root: Path, output_root: Path, group_size: int, matrix_output: Path, mode: str) -> None:
+def prepare(
+    case_root: Path,
+    output_root: Path,
+    group_size: int,
+    matrix_output: Path,
+    mode: str,
+    candidate_limit: int | None,
+) -> None:
     if group_size <= 0:
         raise ValueError("group_size must be positive.")
     cfg, search = _load(case_root)
@@ -66,7 +73,12 @@ def prepare(case_root: Path, output_root: Path, group_size: int, matrix_output: 
     elif mode != "full":
         raise ValueError("mode must be 'dry-run' or 'full'.")
     cfg = replace(cfg, execution=replace(cfg.execution, search_group_size=group_size))
-    artifacts = create_search_plan(cfg, search, output_root)
+    artifacts = create_search_plan(
+        cfg,
+        search,
+        output_root,
+        candidate_limit=candidate_limit,
+    )
     groups = _read_csv(artifacts.group_plan_path, ("group_id",))
     matrix = [int(row["group_id"]) for row in groups]
     matrix_output.parent.mkdir(parents=True, exist_ok=True)
@@ -104,12 +116,20 @@ def main() -> None:
     parser.add_argument("--group-id", type=int)
     parser.add_argument("--matrix-output", type=Path)
     parser.add_argument("--mode", choices=("dry-run", "full"), default="dry-run")
+    parser.add_argument("--candidate-limit", type=int)
     args = parser.parse_args()
 
     if args.command == "prepare":
         if args.matrix_output is None:
             raise ValueError("prepare requires --matrix-output.")
-        prepare(args.case_root, args.output_root, args.group_size, args.matrix_output, args.mode)
+        prepare(
+            args.case_root,
+            args.output_root,
+            args.group_size,
+            args.matrix_output,
+            args.mode,
+            args.candidate_limit,
+        )
     elif args.command == "partial":
         if args.group_id is None:
             raise ValueError("partial requires --group-id.")

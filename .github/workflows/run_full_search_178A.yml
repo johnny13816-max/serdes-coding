@@ -22,6 +22,10 @@ on:
           - dry-run
           - full
         default: dry-run
+      candidate_limit:
+        description: "Maximum candidates; use 10000 for the first limited full run"
+        required: true
+        default: "10000"
 
 permissions:
   contents: read
@@ -50,12 +54,14 @@ jobs:
           CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
           GROUP_SIZE: ${{ inputs.group_size || '1000' }}
           MODE: ${{ inputs.mode || 'dry-run' }}
+          CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '10000' }}
         run: >-
           python scripts/run_full_search_178A.py prepare
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
           --group-size "${GROUP_SIZE}"
           --mode "${MODE}"
+          --candidate-limit "${CANDIDATE_LIMIT}"
           --matrix-output "$GITHUB_OUTPUT"
 
       - name: Upload search plan

@@ -173,6 +173,8 @@ def create_search_plan(
     cfg: "COMConfig",
     search: COMSearchConfig,
     report_dir: str | Path,
+    *,
+    candidate_limit: Optional[int] = None,
 ) -> SearchArtifacts:
     """Write the candidate manifest and contiguous partial-search group plan."""
     artifacts = SearchArtifacts(Path(report_dir))
@@ -180,6 +182,10 @@ def create_search_plan(
     artifacts.group_results_dir.mkdir(parents=True, exist_ok=True)
 
     candidates = search.candidates(cfg.filter)
+    if candidate_limit is not None:
+        if candidate_limit <= 0:
+            raise ValueError("candidate_limit must be positive when specified.")
+        candidates = candidates[:candidate_limit]
     if not candidates:
         raise ValueError("178A search candidate list is empty.")
     manifest = [_manifest_dict(idx, candidate) for idx, candidate in enumerate(candidates)]
