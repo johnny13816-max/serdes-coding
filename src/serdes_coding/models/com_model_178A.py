@@ -292,16 +292,18 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
         cfg: LinkConfig,
         g_1: float,
         g_2: float,
-        f_z: float,
-        f_LF: float,
+        f_z1: float,
+        f_z2: float,
         f_p1: float,
         f_p2: float,
+        f_p3: float | None = None,
     ) -> 'IEEECOMFilter':
         """
         Build the 178A receiver equalizer transfer function.
 
-        The IO follows the aligned 93A CTF shape. ``f_LF`` is the low-frequency
-        pole/zero term, not an independent second zero.
+        The IO uses the 178A spec-facing two-zero / three-pole names. When
+        mapped from the aligned 93A Ad Hoc form, ``f_z2`` and ``f_p3`` both
+        receive ``f_HP_PZ`` so they represent the same low-frequency term.
 
         Parameters
         ----------
@@ -309,23 +311,23 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
             LinkConfig that defines the frequency grid in Hz.
         g_1, g_2:
             178A CTF gain terms in dB.
-        f_z:
-            Main CTF zero frequency in Hz.
-        f_LF:
-            Low-frequency pole/zero frequency in Hz.
+        f_z1, f_z2:
+            178A CTF zero frequencies in Hz.
         f_p1, f_p2:
             Required CTF pole frequencies in Hz.
+        f_p3:
+            Optional third pole frequency in Hz. ``None`` bypasses this pole.
         """
         f = cfg.freqs
-        pole_values = (f_p1, f_p2, f_LF)
+        pole_values = (f_p1, f_p2) if f_p3 is None else (f_p1, f_p2, f_p3)
         if any(float(value) <= 0.0 or not np.isfinite(float(value)) for value in pole_values):
             raise ValueError("CTF pole frequencies must be finite and positive.")
         denom = np.ones_like(f, dtype=complex)
         for pole in pole_values:
             denom *= 1 + 1j * f / float(pole)
         H_ctf = (
-            (10**(g_1 / 20) + 1j * f / f_z)
-            * (10**(g_2 / 20) + 1j * f / f_LF)
+            (10**(g_1 / 20) + 1j * f / f_z1)
+            * (10**(g_2 / 20) + 1j * f / f_z2)
             / denom
         )
         return cls.from_tf(f, H_ctf, cfg)
@@ -475,7 +477,7 @@ class COMFilterConfig(_PrettyDataclass):
 
     TX FFE, transition-time filter, and receiver noise-filter fields intentionally
     keep the same names as the 93A config when the same helper contract is used.
-    CTF fields use the aligned 93A low-frequency pole/zero naming.
+    CTF fields use the 178A spec-facing two-zero / three-pole naming.
     """
     c_m3: float = 0.0                # unit: dimensionless, TX FFE tap c(-3)
     c_m2: float = 0.0                # unit: dimensionless, TX FFE tap c(-2)
@@ -487,10 +489,11 @@ class COMFilterConfig(_PrettyDataclass):
     fr: Optional[float] = None       # unit: Hz, receiver noise-filter bandwidth
     g_1: Optional[float] = None      # unit: dB, 178A CTF gain term 1
     g_2: Optional[float] = None      # unit: dB, 178A CTF gain term 2
-    f_z: Optional[float] = None      # unit: Hz, main CTF zero
-    f_LF: Optional[float] = None     # unit: Hz, low-frequency pole/zero term
-    f_p1: Optional[float] = None     # unit: Hz, CTF pole 1
-    f_p2: Optional[float] = None     # unit: Hz, CTF pole 2
+    f_z1: Optional[float] = None     # unit: Hz, 178A CTF zero 1
+    f_z2: Optional[float] = None     # unit: Hz, 178A CTF zero 2
+    f_p1: Optional[float] = None     # unit: Hz, 178A CTF pole 1
+    f_p2: Optional[float] = None     # unit: Hz, 178A CTF pole 2
+    f_p3: Optional[float] = None     # unit: Hz, 178A CTF pole 3
     A_v: float = 1.0                 # unit: V, victim rectangular pulse amplitude
     A_fe: float = 1.0                # unit: V, FEXT rectangular pulse amplitude
     A_ne: float = 1.0                # unit: V, NEXT rectangular pulse amplitude
@@ -1147,10 +1150,11 @@ def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter
     required = {
         "g_1": ft_cfg.g_1,
         "g_2": ft_cfg.g_2,
-        "f_z": ft_cfg.f_z,
-        "f_LF": ft_cfg.f_LF,
+        "f_z1": ft_cfg.f_z1,
+        "f_z2": ft_cfg.f_z2,
         "f_p1": ft_cfg.f_p1,
         "f_p2": ft_cfg.f_p2,
+        "f_p3": ft_cfg.f_p3,
     }
     missing = [name for name, value in required.items() if value is None]
     if missing:
@@ -1163,10 +1167,11 @@ def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter
         link_cfg,
         required["g_1"],
         required["g_2"],
-        required["f_z"],
-        required["f_LF"],
+        required["f_z1"],
+        required["f_z2"],
         required["f_p1"],
         required["f_p2"],
+        required["f_p3"],
     )
 
 def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:

@@ -300,6 +300,8 @@ class COMReport178A:
 
         g_1 = self.cfg.filter.g_1
         g_2 = self.cfg.filter.g_2
+        f_p3 = self.cfg.filter.f_p3
+        f_p3_note = "bypass" if f_p3 is None else f"{f_p3 / 1e9:.4g} GHz"
         g_1_note = "bypass" if g_1 is None else f"{g_1:.4g} dB"
         g_2_note = "bypass" if g_2 is None else f"{g_2:.4g} dB"
         filter_subtitles = {
@@ -314,10 +316,11 @@ class COMReport178A:
             "H_r": f"3dB BW: fr={self.cfg.filter.fr / 1e9:.4g} GHz",
             "H_ctf": (
                 f"g1={g_1_note}, g2={g_2_note}; "
-                f"zero: fz={self.cfg.filter.f_z / 1e9:.4g} GHz, "
-                f"LF pole/zero={self.cfg.filter.f_LF / 1e9:.4g} GHz; "
+                f"zeros: fz1={self.cfg.filter.f_z1 / 1e9:.4g} GHz, "
+                f"fz2={self.cfg.filter.f_z2 / 1e9:.4g} GHz; "
                 f"poles: fp1={self.cfg.filter.f_p1 / 1e9:.4g} GHz, "
-                f"fp2={self.cfg.filter.f_p2 / 1e9:.4g} GHz"
+                f"fp2={self.cfg.filter.f_p2 / 1e9:.4g} GHz, "
+                f"fp3={f_p3_note}"
             ),
             "H_all": "All continuous-time filters cascaded",
         }
