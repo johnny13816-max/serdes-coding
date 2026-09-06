@@ -295,6 +295,8 @@ class COMReport178A:
             self._finish(fig, output)
             outputs[f"{field_name}_IL"] = output
 
+        f_p3 = self.cfg.filter.f_p3
+        f_p3_note = "bypass" if f_p3 is None else f"{f_p3 / 1e9:.4g} GHz"
         filter_subtitles = {
             "H_ffe": f"txfir={np.asarray(self.cfg.filter.txfir).tolist()}",
             "H_t": f"Tr={self.cfg.filter.Tr * 1e12:.4g} ps",
@@ -310,7 +312,7 @@ class COMReport178A:
                 f"fz2={self.cfg.filter.f_z2 / 1e9:.4g} GHz; "
                 f"poles: fp1={self.cfg.filter.f_p1 / 1e9:.4g} GHz, "
                 f"fp2={self.cfg.filter.f_p2 / 1e9:.4g} GHz, "
-                f"fp3={self.cfg.filter.f_p3 / 1e9:.4g} GHz"
+                f"fp3={f_p3_note}"
             ),
             "H_all": "All continuous-time filters cascaded",
         }
