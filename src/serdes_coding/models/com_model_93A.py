@@ -1,3 +1,11 @@
+"""
+IEEE 802.3 Annex 93A COM model public facade.
+
+Public names in this module do not need a ``_93A`` suffix because the module
+namespace already defines the spec version. This module owns the 93A algorithm
+pipeline and its stable v1 data-flow primitives.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass, replace
@@ -8,210 +16,17 @@ import sys
 import time
 from typing import Any, Literal, Optional, Sequence
 import numpy as np
+from serdes_coding.utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+from serdes_coding.utilities.sparam import SparamModel
+from serdes_coding.utilities.pmf import Pmf1D
 
-try:
-    from .link_segment import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse, SparamModel
-    from .pmf_handler import Pmf1D
-except ImportError:
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from serdes_coding.link_segment import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse, SparamModel
-    from serdes_coding.pmf_handler import Pmf1D
-
-
-class _PrettyDataclass:
-    """Readable print/repr for COM config and status dataclasses."""
-
-    _FREQUENCY_FIELD_NAMES = {
-        "fb",
-        "target_df",
-        "df",
-        "f_nyq",
-        "fr",
-        "f_z",
-        "f_LF",
-        "f_p1",
-        "f_p2",
-        "f_min",
-        "f_max",
-        "delta_f",
-    }
-
-    def __repr__(self) -> str:
-        return self._pretty()
-
-    def __str__(self) -> str:
-        return self._pretty()
-
-    def _pretty(self, indent: int = 0) -> str:
-        pad = " " * indent
-        inner_pad = " " * (indent + 2)
-        lines = [f"{pad}{type(self).__name__}("]
-        for item in fields(self):
-            value = getattr(self, item.name)
-            lines.append(f"{inner_pad}{item.name}={self._format_value(value, indent + 2, item.name)},")
-        lines.append(f"{pad})")
-        return "\n".join(lines)
-
-    @classmethod
-    def _format_value(cls, value: object, indent: int, name: str = "") -> str:
-        if isinstance(value, _PrettyDataclass):
-            return value._pretty(indent).lstrip()
-
-        if is_dataclass(value) and isinstance(value, LinkConfig):
-            return (
-                "LinkConfig("
-                f"fb={cls._format_frequency(value.fb)}, "
-                f"per_ui={value.per_ui}, "
-                f"target_df={cls._format_frequency(value.target_df)}, "
-                f"Nfft={value.Nfft}, "
-                f"df={cls._format_frequency(value.df)}, "
-                f"f_nyq={cls._format_frequency(value.f_nyq)}"
-                ")"
-            )
-
-        if isinstance(value, SparamModel):
-            df = value.freqs[1] - value.freqs[0] if len(value.freqs) > 1 else float("nan")
-            return (
-                f"{type(value).__name__}("
-                f"n={len(value.freqs)}, "
-                f"f_min={cls._format_frequency(value.freqs[0])}, "
-                f"f_max={cls._format_frequency(value.freqs[-1])}, "
-                f"df={cls._format_frequency(df)}, "
-                f"sdd={value.sdd.shape})"
-            )
-
-        if isinstance(value, LinkSegment):
-            raw_ir_shape = None if value._raw_ir is None else value._raw_ir.shape
-            aligned_ir_shape = None if value._aligned_ir is None else value._aligned_ir.shape
-            sr_shape = None if value._sr is None else value._sr.shape
-            sbr_shape = None if value._sbr is None else value._sbr.shape
-            return (
-                f"{type(value).__name__}("
-                f"tf={value.tf.shape}, raw_ir={raw_ir_shape}, "
-                f"aligned_ir={aligned_ir_shape}, sr={sr_shape}, sbr={sbr_shape}"
-                ")"
-            )
-
-        if isinstance(value, np.ndarray):
-            if value.size == 0:
-                return f"ndarray(shape={value.shape}, dtype={value.dtype})"
-            if value.ndim == 1 and value.size <= 8:
-                return repr(value)
-            return (
-                f"ndarray(shape={value.shape}, dtype={value.dtype}, "
-                f"min={np.min(np.abs(value)):.3e}, max={np.max(np.abs(value)):.3e})"
-            )
-
-        if isinstance(value, list):
-            if len(value) == 0:
-                return "[]"
-            item_pad = " " * (indent + 2)
-            close_pad = " " * indent
-            items = [
-                f"{item_pad}{cls._format_value(item, indent + 2)},"
-                for item in value
-            ]
-            return "[\n" + "\n".join(items) + f"\n{close_pad}]"
-
-        if isinstance(value, tuple):
-            return repr(value)
-
-        if isinstance(value, (float, np.floating)) and name in cls._FREQUENCY_FIELD_NAMES:
-            return cls._format_frequency(float(value))
-
-        return repr(value)
-
-    @staticmethod
-    def _format_frequency(value: float) -> str:
-        return f"{float(value):.6e}"
-
-    @staticmethod
-    def _json_scalar(value: object) -> object:
-        if value is None:
-            return None
-        if isinstance(value, (np.integer,)):
-            return int(value)
-        if isinstance(value, (np.floating,)):
-            return float(value)
-        if isinstance(value, (np.bool_,)):
-            return bool(value)
-        if isinstance(value, complex):
-            return {"real": value.real, "imag": value.imag}
-        if isinstance(value, (str, int, float, bool)):
-            return value
-        return str(value)
-
-    @classmethod
-    def _json_value(cls, value: object) -> object:
-        if isinstance(value, LinkConfig):
-            return {
-                "fb": cls._json_scalar(value.fb),
-                "per_ui": cls._json_scalar(value.per_ui),
-                "target_df": cls._json_scalar(value.target_df),
-                "Nfft": cls._json_scalar(value.Nfft),
-                "df": cls._json_scalar(value.df),
-                "f_nyq": cls._json_scalar(value.f_nyq),
-                "dt": cls._json_scalar(value.dt),
-                "bt": cls._json_scalar(value.bt),
-                "T_max": cls._json_scalar(value.T_max),
-            }
-
-        if isinstance(value, np.ndarray):
-            return [cls._json_value(item) for item in value.tolist()]
-
-        if isinstance(value, (list, tuple)):
-            return [cls._json_value(item) for item in value]
-
-        if isinstance(value, dict):
-            return {str(key): cls._json_value(item) for key, item in value.items()}
-
-        if is_dataclass(value):
-            return {
-                item.name: cls._json_value(getattr(value, item.name))
-                for item in fields(value)
-                if item.init
-            }
-
-        return cls._json_scalar(value)
-
-    @staticmethod
-    def _write_json(path: Path, data: dict[str, object]) -> None:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-def excel_to_config(excel_path: str) -> COMConfig:
-    """Backward-compatible wrapper for COM Excel input."""
-    try:
-        from .com_excel_io import excel_to_config as _excel_to_config
-    except ImportError:
-        from serdes_coding.com_excel_io import excel_to_config as _excel_to_config
-
-    return _excel_to_config(excel_path)
-
-def excel_to_config_178A(excel_path: str) -> 'COMConfig_178A':
-    """Backward-compatible wrapper for 178A COM Excel input."""
-    try:
-        from .com_excel_io import excel_to_config_178A as _excel_to_config_178A
-    except ImportError:
-        from serdes_coding.com_excel_io import excel_to_config_178A as _excel_to_config_178A
-
-    return _excel_to_config_178A(excel_path)
-
-def excel_to_search_config(excel_path: str) -> 'COMSearchConfig':
-    """Backward-compatible wrapper for COM search Excel input."""
-    try:
-        from .com_excel_io import excel_to_search_config as _excel_to_search_config
-    except ImportError:
-        from serdes_coding.com_excel_io import excel_to_search_config as _excel_to_search_config
-
-    return _excel_to_search_config(excel_path)
-
-class IEEECOMsparam(SparamModel):
+class IEEECOMSparam(SparamModel):
     """
     IEEE COM-specific S-parameter model builder.
 
     Class boundary
     --------------
-    IEEECOMsparam owns S-parameter networks generated from IEEE COM equations.
+    IEEECOMSparam owns S-parameter networks generated from IEEE COM equations.
 
     Versioned responsibilities:
     - 93A primitive Sdd models:
@@ -234,7 +49,7 @@ class IEEECOMsparam(SparamModel):
         freqs: np.ndarray,
         capacitance: float,
         R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
+    ) -> 'IEEECOMSparam':
         """
         Build the COM shunt capacitance Sdd two-port on freqs.
 
@@ -276,7 +91,7 @@ class IEEECOMsparam(SparamModel):
         freqs: np.ndarray,
         inductance: float,
         R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
+    ) -> 'IEEECOMSparam':
         """
         Build the COM series inductance Sdd two-port on freqs.
 
@@ -323,7 +138,7 @@ class IEEECOMsparam(SparamModel):
         a2: float = float(1.455e-4),
         tau: float = float(6.141e-3),
         Zc: float = 78.2,
-    ) -> 'IEEECOMsparam':
+    ) -> 'IEEECOMSparam':
         """
         Build the COM package transmission-line Sdd two-port on freqs.
 
@@ -426,7 +241,7 @@ class IEEECOMsparam(SparamModel):
             np.stack([z21, z22], axis=-1),
         ], axis=-2)
 
-    def cascade_com_93A(self, other: SparamModel) -> 'IEEECOMsparam':
+    def cascade_com_93A(self, other: SparamModel) -> 'IEEECOMSparam':
         """
         Cascade two Sdd two-port networks using IEEE COM equations.
 
@@ -463,223 +278,6 @@ class IEEECOMsparam(SparamModel):
 
         cascaded_sdd = self._cascade_sdd_93A(left.sdd, right.sdd)
         return type(self).from_sdd_array(common_freqs, cascaded_sdd, z0=left.network.z0)
-
-    @classmethod
-    def device_termination_178A(
-        cls,
-        freqs: np.ndarray,
-        L_seq: Sequence[float] | np.ndarray,
-        C_seq: Sequence[float] | np.ndarray,
-        bump_capacitance: float,
-        R0: float = 50.0,
-    ) -> 'IEEECOMsparam':
-        """
-        Build the 178A device termination S-parameter model.
-
-        Reference:
-        - IEEE 802.3 Annex 178A, Eq. 178A-7.
-
-        Model convention
-        ----------------
-        The model is represented as an N-stage LC ladder plus the package bump
-        capacitance. The L/C vectors describe per-stage device termination
-        elements. The ladder is cascaded in reverse order so the returned
-        two-port follows the physical order expected by the package/channel
-        cascade.
-
-        Parameters
-        ----------
-        freqs:
-            Frequency axis in Hz.
-        L_seq:
-            Series-inductance vector in H. Must be a 1-D vector.
-        C_seq:
-            Shunt-capacitance vector in F. Must be a 1-D vector with the same
-            length as L_seq.
-        bump_capacitance:
-            Bump/interface shunt capacitance in F.
-        R0:
-            Single-ended reference resistance in ohm.
-
-        Returns
-        -------
-        IEEECOMsparam
-            Cascaded N-stage LC ladder as a differential 2-port Sdd model.
-        """
-        def _validate_LC_seq(L_seq,C_seq) -> tuple[np.ndarray, np.ndarray]:
-            L = np.asarray(L_seq, dtype=float)
-            C = np.asarray(C_seq, dtype=float)
-
-            if L.ndim != 1 or C.ndim != 1:
-                raise ValueError("L and C must be 1-D arrays.")
-
-            if len(L) != len(C):
-                raise ValueError(
-                    f"L and C must have the same length. Got len(L)={len(L)}, len(C)={len(C)}."
-                )
-
-            if len(L) == 0:
-                raise ValueError("L and C must contain at least one stage.")
-
-            if np.any(L < 0.0) or np.any(C < 0.0):
-                raise ValueError("L and C values must be non-negative.")
-
-            return L, C
-        L, C = _validate_LC_seq(L_seq, C_seq)
-
-        # initialized with C_b
-        S_d = cls.shunt_capacitance_93A(freqs, bump_capacitance, R0)
-
-        # build LC ladder in reverse order
-        L_rev = L[::-1]
-        C_rev = C[::-1]
-        for l, c in zip(L_rev, C_rev):
-            S_C_temp = cls.shunt_capacitance_93A(freqs, c, R0)
-            S_L_temp = cls.series_inductance_93A(freqs, l, R0)
-            S_temp = S_C_temp.cascade_com_93A(S_L_temp)
-            S_d = S_temp.cascade_com_93A(S_d)
-            
-        return S_d
-
-    @classmethod
-    def device_package_178A(
-        cls,
-        freqs: np.ndarray,
-        R0: float,
-        package_capacitance: float,
-        zp_seq: Sequence[float] | np.ndarray,
-        *,
-        Zc_seq: Sequence[float] | np.ndarray,
-        gamma0: float = 0.0,
-        a1: float = float(1.734e-3),
-        a2: float = float(1.455e-4),
-        tau: float = float(6.141e-3),
-    ) -> 'IEEECOMsparam':
-        """
-        Build the 178A device package S-parameter model.
-
-        Reference:
-        - IEEE 802.3 Annex 178A, Eq. 178A-9.
-
-        Model convention
-        ----------------
-        The model is represented as a package-side shunt capacitance followed
-        by N transmission-line stages. Based on the IEEE 802.3dj COM adhoc
-        config/code convention, zp_seq and Zc_seq are stage-specific, while
-        gamma0/a1/a2/tau are package-level propagation parameters shared by
-        all stages. If a future config needs per-stage propagation coefficients,
-        this interface should be generalized explicitly.
-
-        Parameters
-        ----------
-        freqs:
-            Frequency axis in Hz.
-        R0:
-            Single-ended reference resistance in ohm.
-        package_capacitance:
-            Package-to-board shunt capacitance in F.
-        zp_seq:
-            Vector of package TL lengths in mm.
-        Zc_seq:
-            Vector of differential characteristic impedances in ohm. Must align
-            with zp_seq.
-        gamma0, a1, a2, tau:
-            Package-level propagation-coefficient parameters shared by all TL
-            stages. The underlying 93A primitive uses GHz internally.
-
-        Returns
-        -------
-        IEEECOMsparam
-            Cascaded N-stage package TL as a differential 2-port Sdd model.
-        """
-        def _validate_zp_Zc_seq(zp_seq, Zc_seq) -> tuple[np.ndarray, np.ndarray]:
-            zp_seq = np.asarray(zp_seq, dtype=float)
-            Zc_seq = np.asarray(Zc_seq, dtype=float)
-
-            if zp_seq.ndim != 1 or Zc_seq.ndim != 1:
-                raise ValueError("zp and Zc must be 1-D arrays.")
-
-            if len(zp_seq) != len(Zc_seq):
-                raise ValueError(
-                    f"zp and Zc must have the same length. Got len(zp_seq)={len(zp_seq)}, len(Zc_seq)={len(Zc_seq)}."
-                )
-
-            if len(zp_seq) == 0:
-                raise ValueError("zp and Zc must contain at least one stage.")
-
-            if np.any(zp_seq < 0.0) or np.any(Zc_seq < 0.0):
-                raise ValueError("zp and Zc values must be non-negative.")
-
-            return zp_seq, Zc_seq
-        zp, Zc = _validate_zp_Zc_seq(zp_seq, Zc_seq)
-
-        # initialized with C_p
-        S_p = cls.shunt_capacitance_93A(freqs, package_capacitance, R0)
-
-        # build N-stage package transmission lines in reverse order
-        zp_rev = zp[::-1]
-        Zc_rev = Zc[::-1]
-        for z1, z2 in zip(zp_rev, Zc_rev):
-            S_temp = cls.pkg_trans_line_93A(freqs, R0, z1, Zc=z2, gamma0=gamma0, a1=a1, a2=a2, tau=tau)
-            S_p = S_temp.cascade_com_93A(S_p)
-
-        return S_p
-
-    @classmethod
-    def partial_host_channel_178A(
-        cls,
-        freqs: np.ndarray,
-        R0: float,
-        C0: float,
-        C1: float,
-        zp: float,
-        *,
-        Zc: float = 78.2,
-        gamma0: float = 0.0,
-        a1: float = float(1.734e-3),
-        a2: float = float(1.455e-4),
-        tau: float = float(6.141e-3),
-    ) -> 'IEEECOMsparam':
-        """
-        Build the 178A partial host channel S-parameter model.
-
-        Reference:
-        - IEEE 802.3 Annex 178A, Eq. 178A-10.
-
-        Model convention
-        ----------------
-        The partial host channel is represented as:
-            C0 shunt capacitance -> host TL segment -> C1 shunt capacitance.
-
-        This helper builds the synthetic partial-host block itself; it does not
-        consume an external measured host S-parameter model.
-
-        Parameters
-        ----------
-        freqs:
-            Frequency axis in Hz.
-        R0:
-            Single-ended reference resistance in ohm.
-        C0:
-            Near-device shunt capacitance in F.
-        C1:
-            Connector-side shunt capacitance in F.
-        zp:
-            Partial-host TL length in mm.
-        Zc:
-            Partial-host differential characteristic impedance in ohm.
-        gamma0, a1, a2, tau:
-            Propagation-coefficient parameters for the partial-host TL.
-
-        Returns
-        -------
-        IEEECOMsparam
-            Synthetic partial host channel as a differential 2-port Sdd model.
-        """
-        S_0 = cls.shunt_capacitance_93A(freqs, C0, R0)
-        S_h = cls.pkg_trans_line_93A(freqs, R0, zp, Zc=Zc, gamma0=gamma0, a1=a1, a2=a2, tau=tau)
-        S_1 = cls.shunt_capacitance_93A(freqs, C1, R0)
-        return (S_0.cascade_com_93A(S_h)).cascade_com_93A(S_1)
 
 class IEEECOMFilter(LinkSegment):
     """
@@ -774,40 +372,6 @@ class IEEECOMFilter(LinkSegment):
         return cls.from_tf(f, H_ctf, cfg)
 
     @classmethod
-    def rx_equalizer_178A(
-        cls,
-        cfg: LinkConfig,
-        g_1: float,
-        g_2: float,
-        f_z1: float,
-        f_z2: float,
-        f_p1: float,
-        f_p2: float,
-        f_p3: float,
-    ) -> 'IEEECOMFilter':
-        """
-        Build the 178A receiver equalizer transfer function.
-
-        The IO follows the 178A CTF shape with two independent zeros and
-        three independent poles.
-
-        Parameters
-        ----------
-        cfg:
-            LinkConfig that defines the frequency grid in Hz.
-        g_1, g_2:
-            178A CTF gain terms in dB.
-        f_z1, f_z2:
-            178A CTF zero frequencies in Hz.
-        f_p1, f_p2, f_p3:
-            178A CTF pole frequencies in Hz.
-        """
-        f = cfg.freqs
-        denom = (1 + 1j * f / f_p1) * (1 + 1j * f / f_p2) * (1 + 1j * f / f_p3)
-        H_ctf = (10**(g_1 / 20) + 1j * f / f_z1) * (10**(g_2 / 20) + 1j * f / f_z2) / denom
-        return cls.from_tf(f, H_ctf, cfg)
-
-    @classmethod
     def rect_pulse_93A(cls, cfg: LinkConfig, At: float) -> 'IEEECOMFilter':
         """
         Build the rectangular transmit pulse transfer function.
@@ -850,6 +414,166 @@ class IEEECOMFilter(LinkSegment):
 # ========================================
 # Configs (all integrated in COMConfig)
 # ========================================
+
+class _PrettyDataclass:
+    """Readable print/repr for COM config and status dataclasses."""
+
+    _FREQUENCY_FIELD_NAMES = {
+        "fb",
+        "target_df",
+        "df",
+        "f_nyq",
+        "fr",
+        "f_z",
+        "f_LF",
+        "f_p1",
+        "f_p2",
+        "f_min",
+        "f_max",
+        "delta_f",
+    }
+
+    def __repr__(self) -> str:
+        return self._pretty()
+
+    def __str__(self) -> str:
+        return self._pretty()
+
+    def _pretty(self, indent: int = 0) -> str:
+        pad = " " * indent
+        inner_pad = " " * (indent + 2)
+        lines = [f"{pad}{type(self).__name__}("]
+        for item in fields(self):
+            value = getattr(self, item.name)
+            lines.append(f"{inner_pad}{item.name}={self._format_value(value, indent + 2, item.name)},")
+        lines.append(f"{pad})")
+        return "\n".join(lines)
+
+    @classmethod
+    def _format_value(cls, value: object, indent: int, name: str = "") -> str:
+        if isinstance(value, _PrettyDataclass):
+            return value._pretty(indent).lstrip()
+
+        if is_dataclass(value) and isinstance(value, LinkConfig):
+            return (
+                "LinkConfig("
+                f"fb={cls._format_frequency(value.fb)}, "
+                f"per_ui={value.per_ui}, "
+                f"target_df={cls._format_frequency(value.target_df)}, "
+                f"Nfft={value.Nfft}, "
+                f"df={cls._format_frequency(value.df)}, "
+                f"f_nyq={cls._format_frequency(value.f_nyq)}"
+                ")"
+            )
+
+        if isinstance(value, SparamModel):
+            df = value.freqs[1] - value.freqs[0] if len(value.freqs) > 1 else float("nan")
+            return (
+                f"{type(value).__name__}("
+                f"n={len(value.freqs)}, "
+                f"f_min={cls._format_frequency(value.freqs[0])}, "
+                f"f_max={cls._format_frequency(value.freqs[-1])}, "
+                f"df={cls._format_frequency(df)}, "
+                f"sdd={value.sdd.shape})"
+            )
+
+        if isinstance(value, LinkSegment):
+            raw_ir_shape = None if value._raw_ir is None else value._raw_ir.shape
+            causal_ir_shape = None if value._causal_ir is None else value._causal_ir.shape
+            sr_shape = None if value._sr is None else value._sr.shape
+            sbr_shape = None if value._sbr is None else value._sbr.shape
+            return (
+                f"{type(value).__name__}("
+                f"tf={value.tf.shape}, raw_ir={raw_ir_shape}, "
+                f"causal_ir={causal_ir_shape}, sr={sr_shape}, sbr={sbr_shape}"
+                ")"
+            )
+
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
+                return f"ndarray(shape={value.shape}, dtype={value.dtype})"
+            if value.ndim == 1 and value.size <= 8:
+                return repr(value)
+            return (
+                f"ndarray(shape={value.shape}, dtype={value.dtype}, "
+                f"min={np.min(np.abs(value)):.3e}, max={np.max(np.abs(value)):.3e})"
+            )
+
+        if isinstance(value, list):
+            if len(value) == 0:
+                return "[]"
+            item_pad = " " * (indent + 2)
+            close_pad = " " * indent
+            items = [
+                f"{item_pad}{cls._format_value(item, indent + 2)},"
+                for item in value
+            ]
+            return "[\n" + "\n".join(items) + f"\n{close_pad}]"
+
+        if isinstance(value, tuple):
+            return repr(value)
+
+        if isinstance(value, (float, np.floating)) and name in cls._FREQUENCY_FIELD_NAMES:
+            return cls._format_frequency(float(value))
+
+        return repr(value)
+
+    @staticmethod
+    def _format_frequency(value: float) -> str:
+        return f"{float(value):.6e}"
+
+    @staticmethod
+    def _json_scalar(value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, (np.integer,)):
+            return int(value)
+        if isinstance(value, (np.floating,)):
+            return float(value)
+        if isinstance(value, (np.bool_,)):
+            return bool(value)
+        if isinstance(value, complex):
+            return {"real": value.real, "imag": value.imag}
+        if isinstance(value, (str, int, float, bool)):
+            return value
+        return str(value)
+
+    @classmethod
+    def _json_value(cls, value: object) -> object:
+        if isinstance(value, LinkConfig):
+            return {
+                "fb": cls._json_scalar(value.fb),
+                "per_ui": cls._json_scalar(value.per_ui),
+                "target_df": cls._json_scalar(value.target_df),
+                "Nfft": cls._json_scalar(value.Nfft),
+                "df": cls._json_scalar(value.df),
+                "f_nyq": cls._json_scalar(value.f_nyq),
+                "dt": cls._json_scalar(value.dt),
+                "bt": cls._json_scalar(value.bt),
+                "T_max": cls._json_scalar(value.T_max),
+            }
+
+        if isinstance(value, np.ndarray):
+            return [cls._json_value(item) for item in value.tolist()]
+
+        if isinstance(value, (list, tuple)):
+            return [cls._json_value(item) for item in value]
+
+        if isinstance(value, dict):
+            return {str(key): cls._json_value(item) for key, item in value.items()}
+
+        if is_dataclass(value):
+            return {
+                item.name: cls._json_value(getattr(value, item.name))
+                for item in fields(value)
+                if item.init
+            }
+
+        return cls._json_scalar(value)
+
+    @staticmethod
+    def _write_json(path: Path, data: dict[str, object]) -> None:
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 @dataclass(repr=False)
 class COMPkgConfig(_PrettyDataclass):
@@ -1241,12 +965,23 @@ class COMPMFConfig(_PrettyDataclass):
         if not np.isfinite(self.keep_mass) or self.keep_mass <= 0.0 or self.keep_mass > 1.0:
             raise ValueError("COMPMFConfig.keep_mass must be finite and in (0, 1].")
 
-    def resolve(self, As: float) -> 'COMPMFRuntimeConfig':
+    def resolve(
+        self,
+        As: float,
+        grid_quality: Literal["coarse", "fine"] = "fine",
+    ) -> 'COMPMFRuntimeConfig':
         As_abs = abs(float(As))
         if not np.isfinite(As_abs) or As_abs <= 0.0:
             raise ValueError("As must be finite and positive to resolve COMPMFConfig.")
+        if grid_quality not in {"coarse", "fine"}:
+            raise ValueError("grid_quality must be 'coarse' or 'fine'.")
 
-        dy = self.dy_override if self.dy_override is not None else min(self.dy_abs_max, self.dy_rel_As * As_abs)
+        if self.dy_override is not None:
+            dy = self.dy_override
+        elif grid_quality == "coarse":
+            dy = self.dy_rel_As * As_abs
+        else:
+            dy = min(self.dy_abs_max, self.dy_rel_As * As_abs)
         tap_abs_th = (
             self.tap_abs_th_override
             if self.tap_abs_th_override is not None
@@ -1344,7 +1079,7 @@ class COMSearchConfig(_PrettyDataclass):
     Search-space configuration for 93A.1.6 variable equalizer parameters.
 
     None means "use the scalar value already stored in COMConfig.filter".
-    Values are combined by Cartesian product in COM_93A.run(search=...).
+    Values are combined by Cartesian product in COM.run(search=...).
     """
     c_m2_values: Optional[Sequence[float]] = None # unit: dimensionless, TX FFE tap c(-2)
     c_m1_values: Optional[Sequence[float]] = None # unit: dimensionless, TX FFE tap c(-1)
@@ -1429,7 +1164,7 @@ class COMSharedPath(_PrettyDataclass):
     H_ffe: IEEECOMFilter
     H_ffe_next: IEEECOMFilter
     H_t: IEEECOMFilter
-    S_rx: IEEECOMsparam
+    S_rx: IEEECOMSparam
     H_r: IEEECOMFilter
     H_ctf: IEEECOMFilter
 
@@ -1458,12 +1193,15 @@ class COMPath(_PrettyDataclass):
     @property
     def H_t(self) -> IEEECOMFilter:
         return self.shared.H_t
+
     @property
     def S_rx(self) -> SparamModel:
         return self.shared.S_rx
+
     @property
     def H_r(self) -> IEEECOMFilter:
         return self.shared.H_r
+
     @property
     def H_ctf(self) -> IEEECOMFilter:
         return self.shared.H_ctf
@@ -1476,7 +1214,7 @@ class COMDFEStatus(_PrettyDataclass):
     h_ISI: np.ndarray               # unit: V, sampled residual ISI response
 
 @dataclass(repr=False)
-class COMImpairmentStatus_93A(_PrettyDataclass):
+class COMImpairmentStatus(_PrettyDataclass):
     As: float                       # unit: V, signal amplitude
     sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
     sigma_TX: float                 # unit: V, TX noise amplitude standard deviation
@@ -1502,6 +1240,7 @@ class COMPMFStatus(_PrettyDataclass):
     p_G: Optional[Pmf1D] = None # Gaussian noise distribution, Eq. 93A-42
     p_DD: Optional[Pmf1D] = None # dual-Dirac jitter distribution
     p_XT: Optional[Pmf1D] = None # combined crosstalk distribution, Eq. 93A-44
+    p_qn: Optional[Pmf1D] = None # ADC quantization-noise distribution; used by 178A final PMF
     p_combined: Optional[Pmf1D] = None # combined interference and noise distribution, Eq. 93A-45
     y0: Optional[float] = None         # unit: V, CDF inverse at DER_0
     A_ni: Optional[float] = None       # unit: V, noise/interference amplitude = abs(y0)
@@ -1509,10 +1248,10 @@ class COMPMFStatus(_PrettyDataclass):
 
 @dataclass(repr=False)
 class COMStatus(_PrettyDataclass):
-    paths: list[COMPath]
-    dfe: Optional['COMDFEStatus | COMDTEStatus'] = None
-    imp: Optional['COMImpairmentStatus_93A | COMImpairmentStatus_178A'] = None
-    pmf: Optional['COMPMFStatus'] = None
+    paths: list[COMPath] = field(default_factory=list)
+    dfe: Optional[COMDFEStatus] = None
+    imp: Optional[COMImpairmentStatus] = None
+    pmf: Optional[COMPMFStatus] = None
     FOM: Optional[float] = None        # unit: dB, 93A.1.6 figure of merit
 
     @property
@@ -1569,7 +1308,7 @@ class COMStatus(_PrettyDataclass):
             "times": cls._array_meta(arrays, f"{name}.times", segment.times),
             "tf": cls._array_meta(arrays, f"{name}.tf", segment.tf),
             "raw_ir": cls._array_meta(arrays, f"{name}.raw_ir", segment.raw_ir),
-            "aligned_ir": cls._array_meta(arrays, f"{name}.aligned_ir", segment.aligned_ir),
+            "causal_ir": cls._array_meta(arrays, f"{name}.causal_ir", segment.causal_ir),
             "sr": cls._array_meta(arrays, f"{name}.sr", segment.sr),
             "sbr": cls._array_meta(arrays, f"{name}.sbr", segment.sbr),
         }
@@ -2049,6 +1788,7 @@ class COMStatus(_PrettyDataclass):
                 "p_G": self._pmf_export("pmf.p_G", self.pmf.p_G, arrays),
                 "p_DD": self._pmf_export("pmf.p_DD", self.pmf.p_DD, arrays),
                 "p_XT": self._pmf_export("pmf.p_XT", self.pmf.p_XT, arrays),
+                "p_qn": self._pmf_export("pmf.p_qn", self.pmf.p_qn, arrays),
                 "p_combined": self._pmf_export("pmf.p_combined", self.pmf.p_combined, arrays),
             }
 
@@ -2084,7 +1824,7 @@ class COMSearchRow(_PrettyDataclass):
 @dataclass(repr=False)
 class COMSearchStatus(_PrettyDataclass):
     """
-    Search result for COM_93A.run(search=...).
+    Search result for COM.run(search=...).
 
     Only the FOM winner is recomputed with the full PMF/COM pipeline. The rows
     field stores lightweight candidate summaries, not full COMStatus objects.
@@ -2241,6 +1981,9 @@ class COMSearchStatus(_PrettyDataclass):
             outputs["plots"] = str(out_dir / "plots")
         return outputs
 
+# =========================================
+# COM Report Organization
+#==========================================
 class COMReport:
     """
     Plot/report orchestration for COM run results.
@@ -2385,7 +2128,10 @@ class COMReport:
             hi = f_max
         else:
             hi = fb
-        return (0.0, hi)
+        # LinkSegment.plot_tf() uses a logarithmic frequency axis by default;
+        # omit the DC bin from the default display range.
+        lo = float(freqs[1]) if len(freqs) > 1 and freqs[1] > 0.0 else float(np.finfo(float).tiny)
+        return (lo, hi)
 
     @staticmethod
     def _apply_auto_ylim_from_lines(
@@ -2780,7 +2526,9 @@ class COMReport:
         output_file = self._plot_save_path(save_path, "path_H21_tf.png")
         fig, ax = self._subplots(output_file)
         if xlim is None:
-            xlim = (0.0, float(self.cfg.link.fb))
+            # H21.plot_tf() uses a logarithmic frequency axis by default.
+            # Exclude the DC bin while retaining the full measured band.
+            xlim = (float(self.cfg.link.freqs[1]), float(self.cfg.link.fb))
         for idx, path in enumerate(self.status.paths):
             path.H_21.plot_tf(
                 ax=ax,
@@ -3229,7 +2977,7 @@ class COMReport:
 # class helpers
 # ======================================
 
-def _build_txpkg_93A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool = False) -> IEEECOMsparam:
+def _build_txpkg_93A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool = False) -> IEEECOMSparam:
     """
     Build the 93A TX package S-parameter model.
 
@@ -3255,13 +3003,13 @@ def _build_txpkg_93A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool
     C_b = txpkg_cfg.C_b
     C_p = txpkg_cfg.C_p
 
-    S_d = IEEECOMsparam.shunt_capacitance_93A(freqs, C_d, txpkg_cfg.R0)
-    S_s = IEEECOMsparam.series_inductance_93A(freqs, L_s, txpkg_cfg.R0)
-    S_b = IEEECOMsparam.shunt_capacitance_93A(freqs, C_b, txpkg_cfg.R0)
-    S_l = IEEECOMsparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
+    S_d = IEEECOMSparam.shunt_capacitance_93A(freqs, C_d, txpkg_cfg.R0)
+    S_s = IEEECOMSparam.series_inductance_93A(freqs, L_s, txpkg_cfg.R0)
+    S_b = IEEECOMSparam.shunt_capacitance_93A(freqs, C_b, txpkg_cfg.R0)
+    S_l = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
     if (txpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMsparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
-    S_p = IEEECOMsparam.shunt_capacitance_93A(freqs, C_p, txpkg_cfg.R0)
+        S_l2 = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
+    S_p = IEEECOMSparam.shunt_capacitance_93A(freqs, C_p, txpkg_cfg.R0)
 
     # cascade
     S_td = (S_d.cascade_com_93A(S_s)).cascade_com_93A(S_b)
@@ -3271,7 +3019,7 @@ def _build_txpkg_93A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool
         S_tp = (S_td.cascade_com_93A(S_l)).cascade_com_93A(S_p)
     return S_tp
 
-def _build_rxpkg_93A(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMsparam:
+def _build_rxpkg_93A(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMSparam:
     """
     Build the 93A RX package S-parameter model.
 
@@ -3293,13 +3041,13 @@ def _build_rxpkg_93A(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMspara
     C_b = rxpkg_cfg.C_b
     C_p = rxpkg_cfg.C_p
 
-    S_p = IEEECOMsparam.shunt_capacitance_93A(freqs, C_p, rxpkg_cfg.R0)
+    S_p = IEEECOMSparam.shunt_capacitance_93A(freqs, C_p, rxpkg_cfg.R0)
     if (rxpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMsparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
-    S_l = IEEECOMsparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
-    S_b = IEEECOMsparam.shunt_capacitance_93A(freqs, C_b, rxpkg_cfg.R0)
-    S_s = IEEECOMsparam.series_inductance_93A(freqs, L_s, rxpkg_cfg.R0)
-    S_d = IEEECOMsparam.shunt_capacitance_93A(freqs, C_d, rxpkg_cfg.R0)
+        S_l2 = IEEECOMSparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
+    S_l = IEEECOMSparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
+    S_b = IEEECOMSparam.shunt_capacitance_93A(freqs, C_b, rxpkg_cfg.R0)
+    S_s = IEEECOMSparam.series_inductance_93A(freqs, L_s, rxpkg_cfg.R0)
+    S_d = IEEECOMSparam.shunt_capacitance_93A(freqs, C_d, rxpkg_cfg.R0)
     
     # cascade
     S_rd = (S_b.cascade_com_93A(S_s)).cascade_com_93A(S_d)
@@ -3412,7 +3160,7 @@ def _build_channel_under_test_93A(channel_cfg: COMChannelConfig) -> list[SparamM
     ]
 
     channel_models = [
-        IEEECOMsparam.from_touchstone(
+        IEEECOMSparam.from_touchstone(
             path,
             mode="s4p",
             port_order=channel_cfg.port_order,
@@ -3730,7 +3478,7 @@ def _build_pmf_interference_93A(
         name = name
     )
 
-def _build_pmf_G_93A(imp_stat: COMImpairmentStatus_93A, imp_cfg: COMImpairmentConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
+def _build_pmf_G_93A(imp_stat: COMImpairmentStatus, imp_cfg: COMImpairmentConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
     "Eq. 93A-41 and 93A-42"
     sigma_G = np.sqrt( 
         imp_stat.sigma_TX**2 + imp_stat.sigma_N**2 +
@@ -3762,7 +3510,7 @@ def _build_pmf_XT_all_93A(
     p_XT.name = "XT_all"
     return p_XT
 
-def _calculate_FOM_93A(imp_status: COMImpairmentStatus_93A) -> float:
+def _calculate_FOM_93A(imp_status: COMImpairmentStatus) -> float:
     """
     Calculate the 93A.1.6 FOM from signal amplitude and RSS imp terms.
 
@@ -3781,14 +3529,13 @@ def _calculate_FOM_93A(imp_status: COMImpairmentStatus_93A) -> float:
         return float("-inf")
     return float(10 * np.log10(As**2 / var_total))
 
-
-class COM_93A:
+class COM:
     """
     IEEE 802.3 Annex 93A COM calculator.
 
     Class boundary
     --------------
-    COM_93A owns the versioned 93A algorithm pipeline:
+    COM owns the Annex 93A algorithm pipeline:
     - build_all_paths_93A()
     - find_pos_and_dfe_93A()
     - calculate_imp_93A()
@@ -3850,7 +3597,7 @@ class COM_93A:
         for idx, candidate in enumerate(candidates):
             candidate_cfg = self._config_with_search_candidate(candidate)
             try:
-                candidate_status = COM_93A(candidate_cfg)._run_once(calculate_pmf=False)
+                candidate_status = COM(candidate_cfg)._run_once(calculate_pmf=False)
                 row = self._search_row_from_status(idx, candidate, candidate_status)
             except Exception as exc:
                 if not search.continue_on_error:
@@ -3894,7 +3641,7 @@ class COM_93A:
 
         print(f"COM search best candidate: idx={best_row.idx}, FOM={best_row.FOM:.3f} dB")
         print("Computing full PMF/COM for best candidate...")
-        best_status = COM_93A(best_cfg)._run_once(calculate_pmf=True)
+        best_status = COM(best_cfg)._run_once(calculate_pmf=True)
         elapsed_total = time.perf_counter() - start_time
         print(
             "COM search completed: "
@@ -3984,15 +3731,15 @@ class COM_93A:
         separate phase selection and should not inherit the victim main-cursor
         alignment contract.
         """
-        victim.H_21.validate_aligned_ir(victim.H_21.ir, source_name="victim H_21 aligned_ir")
-        victim.pulse.validate_aligned_ir(victim.pulse.ir, source_name="victim pulse aligned_ir")
+        victim.H_21.validate_causal_ir(victim.H_21.ir, source_name="victim H_21 causal_ir")
+        victim.pulse.validate_causal_ir(victim.pulse.ir, source_name="victim pulse causal_ir")
 
     # ------------------
     # proxy
     # ------------------
     def _require_status(self) -> COMStatus:
         if self.status is None:
-            raise RuntimeError("COM_93A status is not available. Run COM_93A.run() first.")
+            raise RuntimeError("COM status is not available. Run COM.run() first.")
         if isinstance(self.status, COMSearchStatus):
             return self.status.best
         return self.status
@@ -4028,7 +3775,7 @@ class COM_93A:
         """Victim pulse response sampled at the selected DFE sampling phase."""
         dfe = self.dfe_status
         if dfe is None:
-            raise RuntimeError("COM_93A.dfe_status is not available. Run COM_93A.run() first.")
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
         return self.h[dfe.pos::self.per_ui]
 
     @property
@@ -4036,7 +3783,7 @@ class COM_93A:
         """Discrete UI axis for h_dsamp and h_ISI, with main cursor at 0."""
         dfe = self.dfe_status
         if dfe is None:
-            raise RuntimeError("COM_93A.dfe_status is not available. Run COM_93A.run() first.")
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
         num_pre = (dfe.ts - dfe.pos) // self.per_ui
         return np.arange(len(self.h_dsamp), dtype=float) - float(num_pre)
 
@@ -4050,7 +3797,7 @@ class COM_93A:
         return self._require_status().dfe
 
     @property
-    def imp_status(self) -> Optional[COMImpairmentStatus_93A]:
+    def imp_status(self) -> Optional[COMImpairmentStatus]:
         return self._require_status().imp
 
     @property
@@ -4060,7 +3807,7 @@ class COM_93A:
     def _h_j_ui_axis(self) -> np.ndarray:
         dfe = self.dfe_status
         if dfe is None:
-            raise RuntimeError("COM_93A.dfe_status is not available. Run COM_93A.run() first.")
+            raise RuntimeError("COM.dfe_status is not available. Run COM.run() first.")
 
         pos = int(dfe.ts) % self.per_ui
         center_idx = np.arange(pos, len(self.h), self.per_ui)
@@ -4237,7 +3984,7 @@ class COM_93A:
         h: np.ndarray,
         dfe_status: COMDFEStatus,
         h_XTs: list[np.ndarray],
-    ) -> COMImpairmentStatus_93A:
+    ) -> COMImpairmentStatus:
 
         L = self.cfg.L
         link_cfg = self.cfg.link
@@ -4284,7 +4031,7 @@ class COM_93A:
         )
         sigma_N = noise_psd.filtered_by(noise_filter).to_sigma()
 
-        return COMImpairmentStatus_93A(
+        return COMImpairmentStatus(
             As=As,
             sigma_X=sigma_X,
             sigma_TX=sigma_TX,
@@ -4297,7 +4044,7 @@ class COM_93A:
             sigma_N=sigma_N,
         )
 
-    def calculate_COM_93A(self, imp_status: COMImpairmentStatus_93A) -> COMPMFStatus:
+    def calculate_COM_93A(self, imp_status: COMImpairmentStatus) -> COMPMFStatus:
         L = self.cfg.L
         As = imp_status.As
         imp_cfg = self.cfg.imp
@@ -4357,1720 +4104,74 @@ class COM_93A:
             COM=COM
         )
 
-#%% 178A
-@dataclass(repr=False)
-class COMPkgConfig_178A(_PrettyDataclass):
-    """
-    178A package configuration using internal formula units.
 
-    Unit contract:
-    - L_s_seq values are stored in H
-    - C_d_seq, C_b, and C_p values are stored in F
-    - z_p_seq values are stored in mm
-    - R0 and Z_c_seq values are stored in ohm
-    - gamma0/a1/a2/tau use the same package propagation model units as the
-      underlying 93A transmission-line primitive
-    """
-    L_s_seq: Sequence[float] | np.ndarray = ()     # unit: H, device termination series-inductance vector
-    C_d_seq: Sequence[float] | np.ndarray = ()     # unit: F, device termination shunt-capacitance vector
-    C_b: float = 0.0                               # unit: F, bump/interface capacitance
-    C_p: float = 0.0                               # unit: F, package-to-board capacitance
-    z_p_seq: Sequence[float] | np.ndarray = ()     # unit: mm, package TL stage lengths
-    Z_c_seq: Sequence[float] | np.ndarray = ()     # unit: ohm, package TL stage differential impedances
-    enable: bool = True                            # unit: boolean
-    R0: float = 50.0                               # unit: ohm, single-ended reference resistance
-    gamma0: float = 0.0                            # unit: 1/mm, package propagation coefficient term
-    a1: float = float(1.734e-3)                    # unit: 93A package TL model coefficient
-    a2: float = float(1.455e-4)                    # unit: 93A package TL model coefficient
-    tau: float = float(6.141e-3)                   # unit: ns/mm, package TL delay coefficient
-
-    def __post_init__(self) -> None:
-        L = np.asarray(self.L_s_seq, dtype=float)
-        C = np.asarray(self.C_d_seq, dtype=float)
-        zp = np.asarray(self.z_p_seq, dtype=float)
-        Zc = np.asarray(self.Z_c_seq, dtype=float)
-
-        if L.ndim != 1 or C.ndim != 1:
-            raise ValueError("L_s_seq and C_d_seq must be 1-D arrays.")
-        if len(L) != len(C):
-            raise ValueError(
-                "L_s_seq and C_d_seq must have the same length. "
-                f"Got len(L_s_seq)={len(L)}, len(C_d_seq)={len(C)}."
-            )
-        if zp.ndim != 1 or Zc.ndim != 1:
-            raise ValueError("z_p_seq and Z_c_seq must be 1-D arrays.")
-        if len(zp) != len(Zc):
-            raise ValueError(
-                "z_p_seq and Z_c_seq must have the same length. "
-                f"Got len(z_p_seq)={len(zp)}, len(Z_c_seq)={len(Zc)}."
-            )
-        if self.enable and (len(L) == 0 or len(zp) == 0):
-            raise ValueError("Enabled 178A package config requires at least one LC stage and one TL stage.")
-        if np.any(L < 0.0) or np.any(C < 0.0):
-            raise ValueError("L_s_seq and C_d_seq values must be non-negative.")
-        if np.any(zp < 0.0) or np.any(Zc <= 0.0):
-            raise ValueError("z_p_seq must be non-negative and Z_c_seq must be positive.")
-        if self.C_b < 0.0 or self.C_p < 0.0:
-            raise ValueError("C_b and C_p must be non-negative.")
-        if self.R0 <= 0.0:
-            raise ValueError("R0 must be positive.")
-
-@dataclass(repr=False)
-class COMFilterConfig_178A(_PrettyDataclass):
-    """
-    178A filter configuration using internal formula units.
-
-    TX FFE, transition-time filter, and receiver noise-filter fields intentionally
-    keep the same names as the 93A config when the same helper contract is used.
-    CTF fields use the 178A two-zero / three-pole naming.
-    """
-    c_m3: float = 0.0                # unit: dimensionless, TX FFE tap c(-3)
-    c_m2: float = 0.0                # unit: dimensionless, TX FFE tap c(-2)
-    c_m1: float = 0.0                # unit: dimensionless, TX FFE tap c(-1)
-    c_1: float = 0.0                 # unit: dimensionless, TX FFE tap c(1)
-    num_pre: int = 3                 # unit: taps, main cursor index in txfir
-    Tr: Optional[float] = None       # unit: s, 20%-80% transition time
-    fr: Optional[float] = None       # unit: Hz, receiver noise-filter bandwidth
-    g_1: Optional[float] = None      # unit: dB, 178A CTF gain term 1
-    g_2: Optional[float] = None      # unit: dB, 178A CTF gain term 2
-    f_z1: Optional[float] = None     # unit: Hz, 178A CTF zero 1
-    f_z2: Optional[float] = None     # unit: Hz, 178A CTF zero 2
-    f_p1: Optional[float] = None     # unit: Hz, 178A CTF pole 1
-    f_p2: Optional[float] = None     # unit: Hz, 178A CTF pole 2
-    f_p3: Optional[float] = None     # unit: Hz, 178A CTF pole 3
-    A_v: float = 1.0                 # unit: V, victim rectangular pulse amplitude
-    A_fe: float = 1.0                # unit: V, FEXT rectangular pulse amplitude
-    A_ne: float = 1.0                # unit: V, NEXT rectangular pulse amplitude
-
-    # derived attributes
-    c_0: float = field(init=False)   # unit: dimensionless, TX FFE main cursor tap
-    txfir: np.ndarray = field(init=False) # unit: dimensionless tap vector [c(-3), c(-2), c(-1), c(0), c(1)]
-
-    def __post_init__(self):
-        self.c_0 = 1.0 - abs(self.c_m3) - abs(self.c_m2) - abs(self.c_m1) - abs(self.c_1)
-        self.txfir = np.r_[self.c_m3, self.c_m2, self.c_m1, self.c_0, self.c_1]
-
-@dataclass(repr=False)
-class COMDTEConfig(_PrettyDataclass):
-    """
-    178A receiver discrete-time equalizer configuration.
-
-    This is the 178A replacement for using COMDFEConfig directly. It owns the
-    receiver sampled-domain equalizer search/limit parameters for the MMSE
-    feed-forward and feedback filter solve.
-    """
-    b_max: float                     # unit: dimensionless, DFE upper coefficient limit
-    b_min: float                     # unit: dimensionless, DFE lower coefficient limit
-    w_max: float                     # unit: dimensionless, FFE upper coefficient limit
-    w_min: float                     # unit: dimensionless, FFE lower coefficient limit
-    d_w: int                         # unit: taps, number of pre-cursor FFE taps
-    N_fix: int                       # unit: taps, number of fixed-position FFE taps
-    N_wg: int = 0                    # unit: groups, number of floating FFE tap groups
-    N_wf: int = 0                    # unit: taps/group, taps per floating group
-    N_max: Optional[int] = None      # unit: tap index, highest allowed FFE tap index
-    N_b: int = 0                     # unit: taps, number of DFE feedback taps
-
-    # derived coefficient-limit arrays used by COM_MMSE_DTE
-    w_upper: np.ndarray = field(init=False)
-    w_lower: np.ndarray = field(init=False)
-    b_upper: np.ndarray = field(init=False)
-    b_lower: np.ndarray = field(init=False)
-
-    @classmethod
-    def from_dfe_config(cls, dfe_cfg: COMDFEConfig) -> 'COMDTEConfig':
-        """
-        Temporary adapter from the existing 93A-style COMDFEConfig.
-
-        This keeps old Excel/config sources usable while COMConfig178A migrates
-        toward explicit 178A DTE parameters.
-        """
-        return cls(
-            b_max=float(np.max(dfe_cfg.fixed_upper)) if len(dfe_cfg.fixed_upper) else 0.0,
-            b_min=float(np.min(dfe_cfg.fixed_lower)) if len(dfe_cfg.fixed_lower) else 0.0,
-            w_max=1.0,
-            w_min=-1.0,
-            d_w=0,
-            N_fix=max(1, int(dfe_cfg.N_f) if int(dfe_cfg.N_f) > 0 else int(dfe_cfg.N_b) + 1),
-            N_wg=int(dfe_cfg.N_bg),
-            N_wf=int(dfe_cfg.N_bf),
-            N_max=int(dfe_cfg.N_ts) if dfe_cfg.N_ts is not None else None,
-            N_b=int(dfe_cfg.N_b),
-        )
-
-    def __post_init__(self) -> None:
-        for name in ("d_w", "N_fix", "N_wg", "N_wf", "N_b"):
-            value = int(getattr(self, name))
-            if value < 0:
-                raise ValueError(f"COMDTEConfig.{name} must be non-negative.")
-            setattr(self, name, value)
-        if self.N_fix <= 0:
-            raise ValueError("COMDTEConfig.N_fix must be positive.")
-        if self.d_w >= self.N_fix:
-            raise ValueError("COMDTEConfig.d_w must point to a fixed FFE tap.")
-        if self.N_max is None:
-            self.N_max = self.N_fix
-        self.N_max = int(self.N_max)
-        if self.N_max < self.N_fix:
-            raise ValueError("COMDTEConfig.N_max must be greater than or equal to N_fix.")
-        if (self.N_wg == 0) != (self.N_wf == 0):
-            raise ValueError("COMDTEConfig.N_wg and N_wf must both be zero or both be positive.")
-        for name in ("b_max", "b_min", "w_max", "w_min"):
-            value = float(getattr(self, name))
-            if not np.isfinite(value):
-                raise ValueError(f"COMDTEConfig.{name} must be finite.")
-            setattr(self, name, value)
-        if self.b_min > self.b_max:
-            raise ValueError("COMDTEConfig.b_min must be <= b_max.")
-        if self.w_min > self.w_max:
-            raise ValueError("COMDTEConfig.w_min must be <= w_max.")
-
-        num_ffe_limits = self.N_fix + self.N_wg * self.N_wf
-        self.w_upper = self.w_max * np.ones(num_ffe_limits, dtype=float)
-        self.w_lower = self.w_min * np.ones(num_ffe_limits, dtype=float)
-        self.w_upper[self.d_w] = 1.0
-        self.w_lower[self.d_w] = 1.0
-        self.b_upper = self.b_max * np.ones(self.N_b, dtype=float)
-        self.b_lower = self.b_min * np.ones(self.N_b, dtype=float)
-
-@dataclass(repr=False)
-class COMConfig_178A(_PrettyDataclass):
-    """Top-level 178A COM configuration grouped by function."""
-    L: int                            # unit: levels, PAM order
-    link: LinkConfig                  # unit contract: SI grid, Hz/s
-    filter: COMFilterConfig_178A       # unit contract: SI filter frequencies and 178A CTF terms
-    channel: COMChannelConfig         # unit contract: Touchstone paths and S4P port order
-    txpkg_victim: COMPkgConfig_178A    # unit contract: 178A victim TX package
-    txpkg_fext: COMPkgConfig_178A      # unit contract: 178A FEXT aggressor TX package
-    txpkg_next: COMPkgConfig_178A      # unit contract: 178A NEXT aggressor TX package
-    rxpkg: COMPkgConfig_178A           # unit contract: 178A shared RX package
-    dte: COMDTEConfig                 # unit contract: 178A receiver discrete-time equalizer search/limits
-    imp: COMImpairmentConfig          # unit contract: V/UI/noise PSD units
-    DER_0: float                      # unit: dimensionless, target detector error ratio
-    pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
-
-    def to_export_dict(self) -> dict[str, object]:
-        """
-        Return a JSON-friendly COMConfig178A snapshot.
-
-        The snapshot records only configuration and derived configuration
-        metadata. It does not include COMStatus run results.
-        """
-        return {
-            "type": type(self).__name__,
-            "config": self._json_value(self),
-            "derived": {
-                "link": self._json_value(self.link),
-                "channel_measured_grid": self._json_value(self.channel.measured_grid_summary()),
-                "channel_aligned_grid": self._json_value(self.channel.aligned_grid_summary()),
-                "txfir": self._json_value(self.filter.txfir),
-                "c_0": self._json_scalar(self.filter.c_0),
-            },
-        }
-
-    def export(self, save_path: str) -> dict[str, str]:
-        """Export this COMConfig178A as a human-readable summary."""
-        out_dir = Path(save_path)
-        out_dir.mkdir(parents=True, exist_ok=True)
-
-        txt_path = out_dir / "config_summary.txt"
-        txt_path.write_text(str(self), encoding="utf-8")
-
-        return {
-            "config_summary_txt": str(txt_path),
-        }
-
-@dataclass(repr=False)
-class COMImpairmentStatus_178A(_PrettyDataclass):
-    # common psd
-    sigma_X: float                  # unit: dimensionless, normalized symbol standard deviation
-    S_rn: SampledPSD                # unit: V^2/Hz, receiver input noise PSD, theta-indexed one-sided equivalent
-    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
-    S_xn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
-    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
-    h_XTs_dsamp: list[np.ndarray]   # unit: V, worst-phase sampled crosstalk responses
-
-    # pre-dte
-    pos: int                        # unit: sample phase index, 0 <= pos < per_ui
-    ts: int                         # unit: sample index on cfg.times
-    As: float                       # unit: V, signal amplitude
-    h_dsamp: np.ndarray
-    S_tn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
-    sigma_tn: float                 # unit: V, TX noise amplitude standard deviation
-    h_tn: np.ndarray                # unit: V, no-FFE TX-noise pulse samples at selected phase
-    S_jn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
-    sigma_J: float                  # unit: V, jitter-induced amplitude standard deviation
-    h_J: np.ndarray                 # unit: V/UI, sampled jitter sensitivity at selected phase
-    S_qn: SampledPSD                # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
-    sigma_qn: float                 # unit: V, quantization noise standard deviation
-    S_total: SampledPSD             # unit: V^2/Hz, theta-indexed one-sided equivalent PSD
-    sigma_total: float              # unit: V, total sampled-domain PSD standard deviation
-    R_n: np.ndarray                 # unit: V^2, sampled-domain noise autocorrelation
-
-    # post-dte
-    h_w: np.ndarray
-    h_XTs_w: list[np.ndarray]
-    h_ISI: np.ndarray               # unit: V, residual ISI pulse samples
-    sigma_ISI: float                # unit: V, ISI amplitude standard deviation
-    h_w_J: np.ndarray
-    S_jn_RJ: SampledPSD
-
-@dataclass(repr=False)
-class COMDTEStatus(_PrettyDataclass):
-    """
-    178A receiver discrete-time equalizer result for one sampling phase.
-    """
-    ts: int                         # unit: sample index on cfg.times
-    pos: int                        # unit: sample phase index, 0 <= pos < per_ui
-    d: int
-    w_lim: np.ndarray             # unit: dimensionless, full FFE impulse with non-selected taps zero-filled
-    b_lim: np.ndarray             # unit: dimensionless, DFE coefficients b
-    mse: float                      # unit: V^2, mean-square error from 178A-35
-    H_all: np.ndarray 
-    Rnn_all: np.ndarray 
-    pruned_index: np.ndarray         # unit: tap index, selected FFE tap index vector i
-    H: np.ndarray 
-    R_nn: np.ndarray 
-    H_b: np.ndarray 
-
-    @property
-    def dfe_coeff(self) -> np.ndarray:
-        """Compatibility proxy for report code that plots feedback taps."""
-        return self.b_lim
-
-# ----------------------------------------
-# bulid_all_paths_178A(): private helpers
-# ----------------------------------------
-
-def _build_txpkg_178A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig_178A, *, isNext: bool = False) -> IEEECOMsparam:
-    """
-    Build the 178A TX package S-parameter model.
-
-    The current 178A package contract is:
-        device termination -> device package
-    """
-    freqs = LinkConfig.validate_freqs(freqs)
-    if not txpkg_cfg.enable:
-        return IEEECOMsparam.shunt_capacitance_93A(freqs, 0.0, txpkg_cfg.R0)
-
-    S_td = IEEECOMsparam.device_termination_178A(
-        freqs=freqs,
-        L_seq=txpkg_cfg.L_s_seq,
-        C_seq=txpkg_cfg.C_d_seq,
-        bump_capacitance=txpkg_cfg.C_b,
-        R0=txpkg_cfg.R0,
-    )
-    S_tp = IEEECOMsparam.device_package_178A(
-        freqs=freqs,
-        R0=txpkg_cfg.R0,
-        package_capacitance=txpkg_cfg.C_p,
-        zp_seq=txpkg_cfg.z_p_seq,
-        Zc_seq=txpkg_cfg.Z_c_seq,
-        gamma0=txpkg_cfg.gamma0,
-        a1=txpkg_cfg.a1,
-        a2=txpkg_cfg.a2,
-        tau=txpkg_cfg.tau,
-    )
-    return S_td.cascade_com_93A(S_tp)
-
-def _build_rxpkg_178A(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig_178A) -> IEEECOMsparam:
-    """
-    Build the 178A RX package S-parameter model.
-
-    The current 178A package contract is:
-        device package -> device termination
-    """
-    freqs = LinkConfig.validate_freqs(freqs)
-    if not rxpkg_cfg.enable:
-        return IEEECOMsparam.shunt_capacitance_93A(freqs, 0.0, rxpkg_cfg.R0)
-
-    S_rp = IEEECOMsparam.device_package_178A(
-        freqs=freqs,
-        R0=rxpkg_cfg.R0,
-        package_capacitance=rxpkg_cfg.C_p,
-        zp_seq=rxpkg_cfg.z_p_seq,
-        Zc_seq=rxpkg_cfg.Z_c_seq,
-        gamma0=rxpkg_cfg.gamma0,
-        a1=rxpkg_cfg.a1,
-        a2=rxpkg_cfg.a2,
-        tau=rxpkg_cfg.tau,
-    )
-    S_rd = IEEECOMsparam.device_termination_178A(
-        freqs=freqs,
-        L_seq=rxpkg_cfg.L_s_seq,
-        C_seq=rxpkg_cfg.C_d_seq,
-        bump_capacitance=rxpkg_cfg.C_b,
-        R0=rxpkg_cfg.R0,
-    )
-    return S_rp.cascade_com_93A(S_rd)
-
-def _build_H_ffe_178A(link_cfg: LinkConfig, ft_cfg: COMFilterConfig_178A) -> IEEECOMFilter:
-    """Build the 178A victim/FEXT TX FFE filter."""
-    return IEEECOMFilter.tx_ffe_93A(link_cfg, ft_cfg.txfir, ft_cfg.num_pre)
-
-def _build_H_ffe_next_178A(link_cfg: LinkConfig) -> IEEECOMFilter:
-    """Build the 178A NEXT TX FFE filter."""
-    ffe_next = np.array([0, 1, 0])
-    return IEEECOMFilter.tx_ffe_93A(link_cfg, ffe_next, num_pre=1)
-
-def _build_H_t_178A(link_cfg: LinkConfig, ft_cfg: COMFilterConfig_178A) -> IEEECOMFilter:
-    """Build the 178A transmitter transition-time filter."""
-    return IEEECOMFilter.transition_time_filter_93A(link_cfg, ft_cfg.Tr)
-
-def _build_H_r_178A(link_cfg: LinkConfig, ft_cfg: COMFilterConfig_178A) -> IEEECOMFilter:
-    """Build the 178A receiver noise filter."""
-    return IEEECOMFilter.rx_noise_filter_93A(link_cfg, ft_cfg.fr)
-
-def _build_H_ctf_178A(link_cfg: LinkConfig, ft_cfg: COMFilterConfig_178A) -> IEEECOMFilter:
-    """
-    Build the 178A receiver equalizer / CTF filter.
-
-    Maps COMFilterConfig178A directly to IEEECOMFilter.rx_equalizer_178A().
-    """
-    required = {
-        "g_1": ft_cfg.g_1,
-        "g_2": ft_cfg.g_2,
-        "f_z1": ft_cfg.f_z1,
-        "f_z2": ft_cfg.f_z2,
-        "f_p1": ft_cfg.f_p1,
-        "f_p2": ft_cfg.f_p2,
-        "f_p3": ft_cfg.f_p3,
-    }
-    missing = [name for name, value in required.items() if value is None]
-    if missing:
-        raise ValueError(
-            "COMFilterConfig178A is missing required CTF fields: "
-            + ", ".join(missing)
-        )
-
-    return IEEECOMFilter.rx_equalizer_178A(
-        link_cfg,
-        required["g_1"],
-        required["g_2"],
-        required["f_z1"],
-        required["f_z2"],
-        required["f_p1"],
-        required["f_p2"],
-        required["f_p3"],
-    )
-
-def _build_channel_under_test_178A(channel_cfg: COMChannelConfig) -> list[SparamModel]:
-    """
-    Build 178A measured-domain channel-under-test S-parameter models.
-
-    Output contract mirrors _build_channel_under_test_93A():
-    - index 0: victim
-    - following indices: NEXT channels, then FEXT channels
-    """
-    return _build_channel_under_test_93A(channel_cfg)
-
-def _build_path_178A(
-    link_cfg: LinkConfig,
-    channel_cfg: COMChannelConfig,
-    ft_cfg: COMFilterConfig_178A,
-    txpkg_cfg: COMPkgConfig_178A,
-    shared: COMSharedPath,
-    kind: Literal["victim", "next", "fext"],
-    S_ch: SparamModel,
-) -> COMPath:
-    """
-    Build one 178A COM signal path from a measured-domain channel-under-test model.
-
-    IO contract mirrors _build_path_93A() so COM_178A can reuse COMPath and
-    COMReport while the package and CTF equations remain version-specific.
-    """
-    if not np.allclose(S_ch.freqs, shared.S_rx.freqs):
-        raise ValueError("S_ch.freqs must match shared.S_rx.freqs for measured-domain cascade.")
-
-    if kind == "next":
-        S_tx = _build_txpkg_178A(S_ch.freqs, txpkg_cfg, isNext=True)
-        H_ffe = shared.H_ffe_next
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_ne)
-    elif kind == "fext":
-        S_tx = _build_txpkg_178A(S_ch.freqs, txpkg_cfg)
-        H_ffe = shared.H_ffe
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_fe)
-    elif kind == "victim":
-        S_tx = _build_txpkg_178A(S_ch.freqs, txpkg_cfg)
-        H_ffe = shared.H_ffe
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
-    else:
-        raise ValueError(f"Unsupported COM path kind: {kind}")
-
-    S_all = S_tx.cascade_com_93A(S_ch).cascade_com_93A(shared.S_rx)
-    H_21 = S_all.to_LinkSegment(
-        link_cfg,
-        gamma_src=channel_cfg.gamma_src,
-        gamma_load=channel_cfg.gamma_load,
-    )
-    H_all = (
-        H_ffe
-        .cascade_tf(shared.H_t)
-        .cascade_tf(H_21)
-        .cascade_tf(shared.H_r)
-        .cascade_tf(shared.H_ctf)
-    )
-    pulse = H_all.cascade_tf(X)
-
-    return COMPath(
-        kind=kind,
-        shared=shared,
-        S_tx=S_tx,
-        S_ch=S_ch,
-        S_all=S_all,
-        H_21=H_21,
-        H_all=H_all,
-        X=X,
-        pulse=pulse,
-    )
-
-def _build_shared_path_178A(cfg: COMConfig_178A, freqs: np.ndarray) -> COMSharedPath:
-    """
-    Build 178A path-shared COM models.
-
-    The returned COMSharedPath keeps the same fields as 93A:
-    H_ffe, H_ffe_next, H_t, S_rx, H_r, H_ctf.
-    """
-    link_cfg = cfg.link
-    ft_cfg = cfg.filter
-    return COMSharedPath(
-        H_ffe=_build_H_ffe_178A(link_cfg, ft_cfg),
-        H_ffe_next=_build_H_ffe_next_178A(link_cfg),
-        H_t=_build_H_t_178A(link_cfg, ft_cfg),
-        S_rx=_build_rxpkg_178A(freqs, cfg.rxpkg),
-        H_r=_build_H_r_178A(link_cfg, ft_cfg),
-        H_ctf=_build_H_ctf_178A(link_cfg, ft_cfg),
-    )
-
-def _build_paths_178A(
-    cfg: COMConfig_178A,
-    shared: COMSharedPath,
-    channels: list[SparamModel],
-) -> list[COMPath]:
-    """
-    Build 178A path-specific COM models from aligned channel-under-test models.
-
-    IO contract mirrors _build_paths_93A().
-    """
-    link_cfg = cfg.link
-    ch_cfg = cfg.channel
-    ft_cfg = cfg.filter
-
-    expected_count = 1 + len(ch_cfg.next_s4p_paths) + len(ch_cfg.fext_s4p_paths)
-    if len(channels) != expected_count:
-        raise ValueError(
-            "channels length must match victim + NEXT + FEXT path count. "
-            f"Expected {expected_count}, got {len(channels)}."
-        )
-
-    paths = [
-        _build_path_178A(
-            link_cfg=link_cfg,
-            channel_cfg=ch_cfg,
-            ft_cfg=ft_cfg,
-            txpkg_cfg=cfg.txpkg_victim,
-            shared=shared,
-            kind="victim",
-            S_ch=channels[0],
-        )
-    ]
-
-    next_count = len(ch_cfg.next_s4p_paths)
-    next_channels = channels[1 : 1 + next_count]
-    fext_channels = channels[1 + next_count :]
-
-    for S_ch in next_channels:
-        paths.append(
-            _build_path_178A(
-                link_cfg=link_cfg,
-                channel_cfg=ch_cfg,
-                ft_cfg=ft_cfg,
-                txpkg_cfg=cfg.txpkg_next,
-                shared=shared,
-                kind="next",
-                S_ch=S_ch,
-            )
-        )
-
-    for S_ch in fext_channels:
-        paths.append(
-            _build_path_178A(
-                link_cfg=link_cfg,
-                channel_cfg=ch_cfg,
-                ft_cfg=ft_cfg,
-                txpkg_cfg=cfg.txpkg_fext,
-                shared=shared,
-                kind="fext",
-                S_ch=S_ch,
-            )
-        )
-
-    return paths
-
-# --------------------------------------------
-# calculate_psd_common_178A(): private helpers
-# --------------------------------------------
-@dataclass(repr=False)
-class COMImpairmentCommon(_PrettyDataclass):
-    """
-    178A impairment components that are independent of sampling phase.
-
-    This object is computed once per concrete path/filter configuration and
-    reused across the sampling-phase loop in COM_178A._run_once().
-    """
-    sigma_X: float
-    S_rn: SampledPSD                # unit: V^2/Hz, receiver input noise PSD, theta-indexed one-sided equivalent
-    sigma_N: float                  # unit: V, receiver noise amplitude standard deviation
-    S_xn: SampledPSD                # unit: V^2/Hz, crosstalk PSD using each path's worst sampling phase
-    sigma_XT: float                 # unit: V, crosstalk amplitude standard deviation
-    h_XTs_dsamp: list[np.ndarray]   # unit: V, worst-phase sampled crosstalk responses
-
-def _build_psd_rx_noise_178A(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_cfg: COMFilterConfig_178A) -> SampledPSD:
-    # 178A-17 uses eta_0/2 as the two-sided white-noise density. ContinuousPSD
-    # stores one-sided CT PSD, so the corresponding positive-frequency value is
-    # eta_0.
-    S_rn_broadband = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0)
-    H_rn = _build_H_r_178A(link_cfg, ft_cfg).cascade_tf(_build_H_ctf_178A(link_cfg, ft_cfg))
-    S_rn_filtered = S_rn_broadband.filtered_by(H_rn)
-    return S_rn_filtered.to_sampled(link_cfg.fb, link_cfg.theta)
-
-def _find_pos_xtalk_178A(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
-    """
-    Find the 178A-18 crosstalk worst-case sampling phase.
-
-    Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
-    maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
-    the victim sampling phase candidate.
-    """
-    return _find_pos_xtalk_93A(h_XT, per_ui)
-
-def _build_psd_xtalk_178A(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x: float) -> tuple[SampledPSD, list[np.ndarray]]:
-
-    # initialized with psd_constant = 0.0
-    S_xn_all = SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
-    h_XTs_dsamp = []
-    for h_XT in h_XTs:
-        _, h_XT_dsamp = _find_pos_xtalk_178A(h_XT, link_cfg.per_ui)
-        S_xn_temp = _build_psd_from_DFT_response_178A(h_XT_dsamp, link_cfg, sigma_x**2)
-        h_XTs_dsamp.append(h_XT_dsamp)
-        S_xn_all = S_xn_all.add(S_xn_temp)
-
-    return S_xn_all, h_XTs_dsamp
-
-# ---------------------------------------------
-# calculate_psd_pre_dte_178A: private helpers
-# ---------------------------------------------
-@dataclass(repr=False)
-class COMImpairmentAtPos(_PrettyDataclass):
-    pos: int
-    ts: int
-    As: float
-    sigma_X: float
-    h_dsamp: np.ndarray
-    S_tn: SampledPSD
-    sigma_tn: float
-    h_tn: np.ndarray
-    S_jn: SampledPSD
-    sigma_J: float
-    h_J: np.ndarray
-    S_qn: SampledPSD
-    sigma_qn: float
-    S_total: SampledPSD
-    sigma_total: float
-    R_n: np.ndarray
-
-def _build_psd_from_DFT_response_178A(
-    h_dsamp: np.ndarray,
-    link_cfg: LinkConfig,
-    variance: float,
-) -> SampledPSD:
-    """
-    Build one sampled-domain PSD component from a sampled impulse response.
-
-    This implements the 178A PSD terms that have the form:
-        variance * |DFT(h[n])|^2 / fb
-
-    SampledPSD stores the rfft one-sided equivalent of the spec's two-sided
-    theta-indexed Hz-density PSD. Therefore the source PSD constant passed to
-    SampledPSD.from_constant() is the spec value ``variance / fb``; no
-    Jacobian/radian-density scaling is applied here.
-    """
-    variance = float(variance)
-    if not np.isfinite(variance) or variance < 0.0:
-        raise ValueError("variance must be finite and non-negative.")
-    S_base = SampledPSD.from_constant(link_cfg.theta, variance / link_cfg.fb, link_cfg.fb)
-    H = SampledResponse.from_ir(h_dsamp, link_cfg)
-    return S_base.filtered_by(H)
-
-def _build_psd_tx_noise_178A(
-    victim: COMPath,
-    link_cfg: LinkConfig,
-    ft_cfg: COMFilterConfig_178A,
-    imp_cfg: COMImpairmentConfig,
-    pos: int,
-) -> tuple[SampledPSD, np.ndarray]:
-    """
-    Build transmitter output noise PSD and the sampled no-FFE pulse response.
-
-    Reference:
-    - IEEE 802.3 Annex 178A.1.7.3, Eq. 178A-19 and Eq. 178A-20.
-    """
-    H_noffe = (
-        victim.H_t
-        .cascade_tf(victim.H_21)
-        .cascade_tf(victim.H_r)
-        .cascade_tf(victim.H_ctf)
-    )
-    X_v = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
-    h_tn = H_noffe.cascade_tf(X_v).ir[int(pos)::link_cfg.per_ui]
-    variance = 10 ** (-imp_cfg.SNR_TX / 10)
-    return _build_psd_from_DFT_response_178A(h_tn, link_cfg, variance), h_tn
-
-def _calculate_h_J_178A(h: np.ndarray, pos: int, link_cfg: LinkConfig, w: Optional[np.ndarray]=None) -> np.ndarray:
-    """
-    Calculate 178A sampled jitter sensitivity.
-
-    Reference:
-    - IEEE 802.3 Annex 178A.1.7.4, Eq. 178A-21.
-
-    The returned samples are in V/UI because COM jitter parameters A_DD and
-    sigma_RJ are specified in UI. Eq. 178A-21 is evaluated with
-    Delta t = link_cfg.dt, the waveform sample interval.
-    """
-    per_ui = link_cfg.per_ui
-    center_idx = np.arange(pos, len(h), per_ui)
-    valid = (center_idx > 0) & (center_idx < len(h) - 1)
-    center_idx = center_idx[valid]
-    if len(center_idx) == 0:
-        raise ValueError("No valid samples for 178A h_J finite difference.")
-
-    delta_t_ui = link_cfg.dt / link_cfg.bt
-    h_m1 = h[center_idx - 1]
-    h_p1 = h[center_idx + 1]
-    if w is not None:
-        h_m1 = np.convolve(h_m1, w)
-        h_p1 = np.convolve(h_p1, w)
-    h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
-    return h_J
-
-def _build_psd_tx_jitter_178A(
-    victim: COMPath,
-    link_cfg: LinkConfig,
-    imp_cfg: COMImpairmentConfig,
-    pos: int,
-    sigma_X: float
-) -> tuple[SampledPSD, np.ndarray]:
-
-    h_J = _calculate_h_J_178A(victim.pulse.ir, pos, link_cfg)
-    jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
-    S_jn = _build_psd_from_DFT_response_178A(h_J, link_cfg, jitter_variance)
-    return S_jn, h_J
-
-def _calculate_V_qc(p_sig: Pmf1D, h_dsamp: np.ndarray, sigma_ga: float, P_qc: float, pmf_cfg: COMPMFRuntimeConfig) -> float:
-    # calculate quantization clipping amplitude at adc input
-    pmf_s = _build_pmf_interference_93A(
-        p_sig, 
-        h_dsamp, 
-        pmf_cfg,
-        name="Noiseless signal",
-    )
-
-    pmf_ga = Pmf1D.gaussian(
-        mu=0,
-        sigma=sigma_ga,
-        dx=pmf_cfg.dy,
-        n_sigma=pmf_cfg.gaussian_n_sigma,
-        unit="volt",
-        name="Noise"
-    )
-
-    pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal")
-    V_qc = -(pmf_sn.quantile(P_qc/2))
-
-    return V_qc
-
-def _calculate_V_qc_gaussian_approx(p_sig: Pmf1D, h_dsamp: np.ndarray, sigma_ga: float, P_qc: float) -> float:
-    """
-    Fast approximation for 178A pre-DTE quantization clipping amplitude.
-
-    The exact 178A.1.7.6 path builds ``p_sn = conv[p_s, p_ga]`` and finds the
-    clipping point from its CDF. This approximation keeps the same target tail
-    probability but approximates the noisy signal amplitude as Gaussian with
-    variance equal to signal variance plus Gaussian-noise variance.
-    """
-    from statistics import NormalDist
-
-    x = p_sig.x
-    probs = p_sig.pmf
-    mu_x = float(np.sum(x * probs))
-    var_x = float(np.sum((x - mu_x)**2 * probs))
-    var_signal = var_x * float(np.sum(np.asarray(h_dsamp, dtype=float)**2))
-    sigma_sn = float(np.sqrt(max(0.0, var_signal + float(sigma_ga)**2)))
-    return float(NormalDist().inv_cdf(1.0 - float(P_qc) / 2.0) * sigma_sn)
-
-def _build_psd_adc_qn_178A(
-    p_sig: Pmf1D, 
-    h_dsamp: np.ndarray, 
-    sigma_ga: float, 
-    P_qc: float,
-    N_qb: int,
-    pmf_cfg: COMPMFRuntimeConfig, 
-    link_cfg: LinkConfig,
-    vqc_method: str = "gaussian_approx",
-) -> SampledPSD:
-
-    if vqc_method == "gaussian_approx":
-        V_qc = _calculate_V_qc_gaussian_approx(p_sig, h_dsamp, sigma_ga, P_qc)
-    elif vqc_method == "pmf_exact":
-        V_qc = _calculate_V_qc(p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg)
-    else:
-        raise ValueError("vqc_method must be 'gaussian_approx' or 'pmf_exact'.")
-
-    # 178A-27
-    delta = 2 * V_qc / (2**N_qb - 1)
-
-    # 178A-26
-    S_qn = SampledPSD.from_constant(link_cfg.theta, (delta**2/12)/link_cfg.fb, link_cfg.fb)
-
-    return S_qn
-
-# for psd fallback
-def _zero_sampled_psd_178A(link_cfg: LinkConfig) -> SampledPSD:
-    """Return a zero-valued sampled-domain PSD on link_cfg.theta."""
-    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
-
-# -----------------------------------------
-# calculate_MMSE_DTE_178A(): private helper
-# -----------------------------------------
-class COM_MMSE_DTE:
-    def __init__(self, cfg: COMDTEConfig):
-        self.cfg = cfg
-        
-    def run(self, h_dsamp: np.ndarray, R_n: np.ndarray, sigma_x: float, pos: int, per_ui: int) -> COMDTEStatus:
-
-        # collect some input infomation
-        self.h_dsamp = h_dsamp
-        self.R_n = R_n[:self.cfg.N_max]
-        self.d_h = np.argmax(abs(h_dsamp))
-        self.N = len(h_dsamp)
-        self.d = int(self.d_h + self.cfg.d_w)    # total delay of FFE output pulse
-        self.ts = int(pos + self.d_h * int(per_ui))
-        self.var_x = sigma_x**2
-
-        # step 1: build full matrice
-        self.build_mmse_matrice()
-
-        # step 2: build pruned matrice
-        if (self.cfg.N_wg == 0):
-            self.pruned_index = range(self.cfg.N_fix)   # must be ascending
-            self.build_mmse_pruned_matrice()
-        else:
-            self.select_floating_tap_indices()
-            self.build_mmse_pruned_matrice()
-
-        # step 3: solve the constrained MMSE system and decompose results
-        self.solve_mmse_kkt_system()
-
-        # step 4: apply dfe limiter and recalculate ffe
-        self.apply_dte_limiter()
-
-        # step 5: calculate MSE
-        self.calculate_mse() 
-
-        # non-open floating tap set to zeros
-        w_lim_out = np.zeros(self.pruned_index[-1] + 1)
-        w_lim_out[self.pruned_index] = self.w_lim
-
-        return COMDTEStatus(
-            ts = int(self.ts),
-            pos = int(pos),
-            d = int(self.d),
-            w_lim = np.asarray(w_lim_out, dtype=float),
-            b_lim = np.asarray(self.b_lim, dtype=float),
-            mse = float(self.var_e),
-            H_all = self.H_all,
-            Rnn_all = self.Rnn_all,
-            pruned_index=np.asarray(self.pruned_index, dtype=int),
-            H = self.H,
-            R_nn = self.R_nn,
-            H_b = self.H_b
-        )
-
-    def build_mmse_matrice(self) -> None:
-        from scipy.linalg import toeplitz
-        self.H_all = toeplitz(self.h_dsamp, np.zeros(self.cfg.N_max))
-        self.Rnn_all = toeplitz(self.R_n, self.R_n)
-
-    def select_floating_tap_indices(self) -> None:
-        fixed_index = np.arange(self.cfg.N_fix, dtype=int)
-        float_start = self.cfg.N_fix
-        float_stop = self.cfg.N_max
-        candidate_index = np.arange(float_start, float_stop, dtype=int)
-        if len(candidate_index) < self.cfg.N_wg:
-            raise ValueError("COMDTEConfig.N_max does not provide enough floating-tap candidates.")
-
-        metric = np.zeros(len(candidate_index), dtype=float)
-        h_index = self.d - candidate_index
-        valid = (0 <= h_index) & (h_index < len(self.h_dsamp))
-        metric[valid] = np.abs(self.h_dsamp[h_index[valid]])
-        group_centers = candidate_index[np.argsort(metric)[::-1][:self.cfg.N_wg]]
-        floating_index: list[int] = []
-        for center in np.sort(group_centers):
-            start = int(center)
-            stop = min(start + self.cfg.N_wf, self.cfg.N_max)
-            floating_index.extend(range(start, stop))
-
-        floating_index = sorted(set(floating_index) - set(fixed_index))
-        self.pruned_index = np.array([*fixed_index, *floating_index], dtype=int)
-
-    def build_mmse_pruned_matrice(self) -> None:
-        self.H = self.H_all[:, self.pruned_index]
-        self.R_nn = self.Rnn_all[np.ix_(self.pruned_index, self.pruned_index)]
-        dfe_index = range(self.d+1, self.d+self.cfg.N_b+1)    # post 1 ~ post N_b
-        self.H_b = self.H[dfe_index, :]
-        self.h_0 = self.H[self.d, :]
-
-    def solve_mmse_kkt_system(self) -> None:
-        "eq. 178A-31"
-        self.R = self.H.T @ self.H + self.R_nn / self.var_x
-        N_w = len(self.pruned_index)
-        N_b = self.cfg.N_b
-        self.system_matrix = np.block([
-            [self.R,                   -self.H_b.T,        -self.h_0.reshape(N_w, 1)],
-            [-self.H_b,                np.eye(N_b),        np.zeros((N_b, 1))      ],
-            [self.h_0.reshape(1, N_w), np.zeros((1, N_b)), np.zeros((1, 1))        ],
-        ])
-        self.system_column = np.concatenate([
-            self.h_0,                   # shape (Nw,)
-            np.zeros(N_b),              # shape (Nb,)
-            np.array([1.0]),            # shape (1,)
-        ])
-        self.system_sol = np.linalg.solve(self.system_matrix, self.system_column)
-        self.w = self.system_sol[:N_w]
-        self.b = self.system_sol[N_w: N_w + N_b]
-        self.lam = self.system_sol[-1]
-
-    def apply_dte_limiter(self) -> None:
-        "eq. 178A-32~34"
-        # dfe limiter
-        self.b_lim = np.clip(self.b, self.cfg.b_lower, self.cfg.b_upper)
-
-        # recalculate ffe
-        if not np.allclose(self.b, self.b_lim, rtol=0.0, atol=1e-12):
-            self.solve_mmse_kkt_system_ffe()
-
-        # ffe limiter
-        self.w_lim = np.clip(self.w, self.cfg.w_lower[:len(self.w)], self.cfg.w_upper[:len(self.w)])
-
-        # refine ffe and dfe
-        if not np.allclose(self.w, self.w_lim, rtol=0.0, atol=1e-12):
-            gain = self.w_lim.dot(self.h_0)
-            self.w_lim = self.w_lim / gain
-            self.b_lim = self.H_b @ self.w_lim
-
-    def solve_mmse_kkt_system_ffe(self) -> None:
-        "eq. 178A-33"
-        N_w = len(self.pruned_index)
-        self.system_matrix_1 = np.block([
-            [self.R,                   -self.h_0.reshape(N_w, 1)],
-            [self.h_0.reshape(1, N_w), np.zeros((1, 1))        ],
-        ])
-        self.system_column_1 = np.concatenate([
-            self.h_0 + self.H_b.T @ self.b_lim,                     # shape (Nw,)
-            np.array([1.0]),                                        # shape (1,)
-        ])
-        self.system_sol_1 = np.linalg.solve(self.system_matrix_1, self.system_column_1)
-        self.w = self.system_sol_1[:N_w]
-        self.lam = self.system_sol_1[-1]
-
-    def calculate_mse(self) -> None:
-        "eq. 178A-35"
-        var_e = self.var_x*(
-            self.w_lim.reshape(1,-1) @ self.R @ self.w_lim.reshape(-1,1) +
-            1 + self.b_lim.dot(self.b_lim) 
-            - 2*self.w_lim.dot(self.h_0)
-            - 2*self.w_lim.reshape(1,-1) @ self.H_b.T @ self.b_lim.reshape(-1,1)
-        )
-        self.var_e = float(np.asarray(var_e).squeeze())
-
-# ----------------------------
-# pmf
-# ----------------------------
-def _build_pmf_pam_L(L: int, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
-    # Base PAM4 signal pmf
-    return Pmf1D.multi_dirac(
-        values = np.array([2*l/(L-1)-1 for l in range(L)]),
-        probs = 1/L * np.ones(L),
-        dx = pmf_cfg.dy,
-        unit = "",
-        name = f"PAM{L}_signal"
-    )
-
-def _build_pmf_w_XT_all_178A(
-    p_sig: Pmf1D,
-    h_XTs_w: list[np.ndarray],
-    pmf_cfg: COMPMFRuntimeConfig,
-) -> Pmf1D:
-    return _build_pmf_XT_all_93A(p_sig, h_XTs_w, pmf_cfg)
-
-def _ffe_impulse_from_dte_status(dte_status: COMDTEStatus) -> np.ndarray:
-    """Return the full FFE impulse response stored in COMDTEStatus.w_lim."""
-    pruned_index = np.asarray(dte_status.pruned_index, dtype=int)
-    w_lim = np.asarray(dte_status.w_lim, dtype=float)
-    if len(pruned_index) == 0:
-        raise ValueError("dte_status.pruned_index must not be empty.")
-    if len(w_lim) <= int(np.max(pruned_index)):
-        raise ValueError("dte_status.w_lim must be a full FFE impulse covering every pruned_index.")
-    return w_lim
-
-def _calculate_sigma_gn_for_pmf(imp_status: COMImpairmentStatus_178A) -> float:
-    "eq. 178A-42"
-
-    S_rn = imp_status.S_rn
-    S_tn = imp_status.S_tn
-    S_jn_RJ = imp_status.S_jn_RJ
-    S_gn = S_rn.add(S_tn).add(S_jn_RJ)
-    return S_gn.to_sigma()
-
-def _calculate_V_qc_for_pmf(
-    p_sig: Pmf1D, 
-    h_dsamp: np.ndarray,
-    h_XTs_dsamp: list[np.ndarray],
-    A_DD: float,
-    h_J: np.ndarray,
-    sigma_gn: float, 
-    P_qc: float, 
-    pmf_cfg: COMPMFRuntimeConfig
-) -> float:
-    "according to 178A-41 post-context."
-    
-    # noiseless signal
-    pmf_s = _build_pmf_interference_93A(
-        p_sig, 
-        h_dsamp, 
-        pmf_cfg,
-        name="Noiseless signal",
-    )
-
-    pmf_n = Pmf1D.multi_dirac(np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy, unit="volt", name="")
-    for h_XT_dsamp in h_XTs_dsamp:
-        pmf_XT_temp = _build_pmf_interference_93A(p_sig, h_XT_dsamp, pmf_cfg)
-        pmf_n = pmf_n.combine(pmf_XT_temp)
-
-    pmf_DD = _build_pmf_interference_93A(p_sig, A_DD*h_J, pmf_cfg)
-    pmf_n = pmf_n.combine(pmf_DD)
-
-    pmf_ga = Pmf1D.gaussian(
-        mu=0,
-        sigma=sigma_gn,
-        dx=pmf_cfg.dy,
-        n_sigma=pmf_cfg.gaussian_n_sigma,
-        unit="volt",
-        name="Gaussian Noise"
-    )
-    pmf_n = pmf_n.combine(pmf_ga)
-
-    pmf_sn = pmf_s.combine(pmf_n, name="Noisy signal")
-    V_qc = -(pmf_sn.quantile(P_qc/2))
-
-    return V_qc
-
-def _build_pmf_G_178A(imp_status: COMImpairmentStatus_178A, dte_status: COMDTEStatus, link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
-    S_G_pre = imp_status.S_tn.add(imp_status.S_jn_RJ).add(imp_status.S_rn)
-    H_rxffe = SampledResponse.from_ir(_ffe_impulse_from_dte_status(dte_status), link_cfg)
-    S_G = S_G_pre.filtered_by(H_rxffe)
-    sigma_G = S_G.to_sigma()
-    return Pmf1D.gaussian(
-        mu=0,
-        sigma=sigma_G,
-        dx=pmf_cfg.dy,
-        n_sigma=pmf_cfg.gaussian_n_sigma,
-        unit="volt",
-        name="Noise"
-    )
-
-def _calculate_FOM_178A(imp_status: COMImpairmentStatus_178A, dte_status: COMDTEStatus) -> float:
-    """
-    Calculate the 178A outer-search FOM with the same role as 93A FOM.
-
-    MSE is still used inside the 178A MMSE DTE solve to choose the sampling
-    phase and equalizer coefficients for one TXFFE/CTLE candidate. This FOM is
-    only the outer search scalar for comparing TXFFE/CTLE candidates, so it
-    follows the 93A-style signal-to-RSS-impairment form instead of replacing the
-    project FOM with MSE.
-    """
-    del dte_status
-    As = abs(float(imp_status.As))
-    var_total = (
-        imp_status.sigma_tn**2
-        + imp_status.sigma_ISI**2
-        + imp_status.sigma_J**2
-        + imp_status.sigma_XT**2
-        + imp_status.sigma_N**2
-        + imp_status.sigma_qn**2
-    )
-    if As <= 0.0 or var_total <= 0.0:
-        return float("-inf")
-    return float(10.0 * np.log10(As**2 / var_total))
-
-def _debug_config_178A_from_93A(
-    cfg: COMConfig,
-    *,
-    include_quantization: bool = False,
-) -> COMConfig_178A:
-    """
-    Build a temporary 178A debug config from the project-owned 93A Excel config.
-
-    This is only an execution-script adapter for smoke testing COM_178A.run().
-    It is not the formal 178A Excel mapping contract.
-    """
-    def pkg178(pkg: COMPkgConfig) -> COMPkgConfig_178A:
-        z_p_seq = [pkg.z_p]
-        Z_c_seq = [pkg.Z_c]
-        if pkg.z_p2 is not None and pkg.z_p2 > 0.0:
-            z_p_seq.append(pkg.z_p2)
-            Z_c_seq.append(pkg.Z_c2)
-        return COMPkgConfig_178A(
-            L_s_seq=[pkg.L_s],
-            C_d_seq=[pkg.C_d],
-            C_b=pkg.C_b,
-            C_p=pkg.C_p,
-            z_p_seq=z_p_seq,
-            Z_c_seq=Z_c_seq,
-            enable=pkg.enable,
-            R0=pkg.R0,
-        )
-
-    return COMConfig_178A(
-        L=cfg.L,
-        link=cfg.link,
-        filter=COMFilterConfig_178A(
-            c_m3=cfg.filter.c_m3,
-            c_m2=cfg.filter.c_m2,
-            c_m1=cfg.filter.c_m1,
-            c_1=cfg.filter.c_1,
-            num_pre=cfg.filter.num_pre,
-            Tr=cfg.filter.Tr,
-            fr=cfg.filter.fr,
-            g_1=cfg.filter.g_DC,
-            g_2=cfg.filter.g_DC2,
-            f_z1=cfg.filter.f_z,
-            f_z2=cfg.filter.f_LF,
-            f_p1=cfg.filter.f_p1,
-            f_p2=cfg.filter.f_p2,
-            f_p3=cfg.link.f_nyq,
-            A_v=cfg.filter.A_v,
-            A_fe=cfg.filter.A_fe,
-            A_ne=cfg.filter.A_ne,
-        ),
-        channel=cfg.channel,
-        txpkg_victim=pkg178(cfg.txpkg_victim),
-        txpkg_fext=pkg178(cfg.txpkg_fext),
-        txpkg_next=pkg178(cfg.txpkg_next),
-        rxpkg=pkg178(cfg.rxpkg),
-        dte=COMDTEConfig(
-            b_max=cfg.dfe.b_max,
-            b_min=-cfg.dfe.b_max,
-            w_max=1.0,
-            w_min=-1.0,
-            d_w=0,
-            N_fix=3,
-            N_wg=0,
-            N_wf=0,
-            N_max=3,
-            N_b=cfg.dfe.N_b,
-        ),
-        imp=COMImpairmentConfig(
-            R_LM=cfg.imp.R_LM,
-            SNR_TX=cfg.imp.SNR_TX,
-            sigma_RJ=cfg.imp.sigma_RJ,
-            A_DD=cfg.imp.A_DD,
-            eta_0=cfg.imp.eta_0,
-            N_qb=6 if include_quantization else None,
-            P_qc=1e-5 if include_quantization else None,
-            quantization_vqc_method="gaussian_approx",
-        ),
-        DER_0=cfg.DER_0,
-        pmf=cfg.pmf,
-    )
-
-class COM_178A(COM_93A):
-    """
-    IEEE 802.3 Annex 178A COM calculator.
-
-    Class boundary
-    --------------
-    COM_178A owns the versioned 178A algorithm pipeline:
-    - build_all_paths_178A()
-    - outer-loop sampling phase search
-    - calculate_psd_common_178A()
-    - calculate_psd_pre_dte_178A()
-    - calculate_psd_post_dte_178A()
-    - calculate_MMSE_DTE_178A()
-    - calculate_COM_178A()
-
-    This class intentionally reuses COM_93A's shared proxy/report/search shell
-    where possible, but all spec-defined calculation steps are routed to 178A
-    method names. The path-building stage is wired; DFE, impairment, FOM, and
-    PMF stages remain explicit skeletons until the 178A equations are filled in.
-    """
-
-    def __init__(self, cfg: COMConfig_178A):
-        self.cfg = cfg
-        self.status: Optional[COMStatus | COMSearchStatus] = None
-
-    def _run_once(self, *, calculate_pmf: bool = True) -> COMStatus:
-        """
-        Run one concrete 178A COMConfig point.
-
-        178A pipeline:
-        paths -> sampling phase candidates -> common PSD ->
-        for-loop pre-DTE PSD(pos) -> MMSE DTE(pos) -> post-DTE PSD ->
-        MSE/FOM selection ->
-        optional PMF/COM for best pos.
-        """
-
-        # stage 1: build all paths
-        paths = self.build_all_paths_178A()
-        victim = paths[0]
-        xtalk_paths = paths[1:]
-        self._validate_victim_time_alignment(victim)
-        h_XTs = [path.pulse.ir for path in xtalk_paths]
-
-        # stage 2: calculate psd common
-        psd_common = self.calculate_psd_common_178A(victim=victim, h_XTs=h_XTs)
-
-        # ===========================
-        # pos sweeping
-        # ===========================
-        best_dte: Optional[COMDTEStatus] = None
-        best_imp_pre: Optional[COMImpairmentAtPos] = None
-        for pos in range(self.per_ui):
-            imp_pre = self.calculate_psd_pre_dte_178A(
-                victim=victim,
-                pos=pos,
-                common=psd_common,
-            )
-            dte_status = self.calculate_MMSE_DTE_178A(
-                victim=victim,
-                imp_pre=imp_pre,
-                pos=pos,
-            )
-            if best_dte is None or dte_status.mse < best_dte.mse:
-                best_dte = dte_status
-                best_imp_pre = imp_pre
-
-        if best_dte is None or best_imp_pre is None:
-            raise RuntimeError("COM_178A did not produce any valid sampling phase candidate.")
-
-        imp_status = self.calculate_psd_post_dte_178A(
-            dte_status=best_dte,
-            imp_comm=psd_common,
-            imp_pre=best_imp_pre,
-            h=victim.pulse.ir,
-        )
-        best_FOM = _calculate_FOM_178A(imp_status, best_dte)
-        pmf_status = self.calculate_COM_178A(imp_status, best_dte) if calculate_pmf else None
-        return COMStatus(paths=paths, dfe=best_dte, imp=imp_status, pmf=pmf_status, FOM=best_FOM)
-
-    def _require_status(self) -> COMStatus:
-        if self.status is None:
-            raise RuntimeError("COM_178A status is not available. Run COM_178A.run() first.")
-        if isinstance(self.status, COMSearchStatus):
-            return self.status.best
-        return self.status
-
-    def _run_search(self, search: COMSearchConfig) -> COMSearchStatus:
-        """
-        Run 178A search skeleton.
-
-        The search shell mirrors COM_93A, but candidate execution uses
-        COM_178A._run_once().
-        """
-        candidates = search.candidates(self.cfg.filter)
-        total = len(candidates)
-        rows: list[COMSearchRow] = []
-        best_row: Optional[COMSearchRow] = None
-        best_cfg: Optional[COMConfig_178A] = None
-        num_error = 0
-        start_time = time.perf_counter()
-        last_print_time = start_time
-        print(f"COM 178A search started: {total} candidates")
-
-        for idx, candidate in enumerate(candidates):
-            candidate_cfg = self._config_with_search_candidate(candidate)
-            try:
-                candidate_status = COM_178A(candidate_cfg)._run_once(calculate_pmf=False)
-                row = self._search_row_from_status(idx, candidate, candidate_status)
-            except Exception as exc:
-                if not search.continue_on_error:
-                    raise
-                num_error += 1
-                row = COMSearchRow(
-                    idx=idx,
-                    candidate=candidate,
-                    FOM=float("-inf"),
-                    status="error",
-                    error=str(exc),
-                )
-                rows.append(row)
-                continue
-
-            rows.append(row)
-            if best_row is None or row.FOM > best_row.FOM:
-                best_row = row
-                best_cfg = candidate_cfg
-
-            now = time.perf_counter()
-            done = idx + 1
-            should_print = done == total or done == 1 or done % 10 == 0 or (now - last_print_time) >= 5.0
-            if should_print:
-                elapsed = now - start_time
-                rate = done / elapsed if elapsed > 0.0 else float("nan")
-                remaining = (total - done) / rate if np.isfinite(rate) and rate > 0.0 else float("nan")
-                percent = 100.0 * done / total if total > 0 else 100.0
-                best_text = "n/a" if best_row is None else f"{best_row.FOM:.3f} dB @ {best_row.idx}"
-                print(
-                    "COM 178A search progress: "
-                    f"{done}/{total} ({percent:.1f}%), "
-                    f"elapsed={self._format_duration(elapsed)}, "
-                    f"eta={self._format_duration(remaining)}, "
-                    f"best_FOM={best_text}"
-                )
-                last_print_time = now
-
-        if best_row is None or best_cfg is None:
-            raise RuntimeError("COM 178A search did not produce any successful candidate.")
-
-        print(f"COM 178A search best candidate: idx={best_row.idx}, FOM={best_row.FOM:.3f} dB")
-        print("Computing best 178A candidate status without final PMF/COM...")
-        best_status = COM_178A(best_cfg)._run_once(calculate_pmf=False)
-        elapsed_total = time.perf_counter() - start_time
-        print(
-            "COM 178A search completed: "
-            f"elapsed={self._format_duration(elapsed_total)}, "
-            "best_COM=n/a (calculate_pmf=False)"
-        )
-        return COMSearchStatus(
-            best=best_status,
-            best_row=best_row,
-            rows=self._select_search_rows(rows, search),
-            num_candidates=len(candidates),
-            num_success=len(candidates) - num_error,
-            num_error=num_error,
-        )
-
-    def _config_with_search_candidate(self, candidate: COMSearchCandidate) -> COMConfig_178A:
-        """
-        Return a COMConfig178A copy with one search candidate applied.
-
-        The current shared COMSearchCandidate uses the 93A names g_DC/g_DC2.
-        For 178A these two search gains map to the 178A CTF fields g_1/g_2.
-        """
-        ft_cfg = self.cfg.filter
-        new_filter = replace(
-            ft_cfg,
-            c_m2=candidate.c_m2,
-            c_m1=candidate.c_m1,
-            c_1=candidate.c_1,
-            g_1=candidate.g_DC,
-            g_2=candidate.g_DC2,
-        )
-        return replace(self.cfg, filter=new_filter)
-
-    @staticmethod
-    def _search_row_from_status(
-        idx: int,
-        candidate: COMSearchCandidate,
-        status: COMStatus,
-    ) -> COMSearchRow:
-        """Compress one 178A candidate COMStatus into one search summary row."""
-        if status.dfe is None or status.imp is None or status.FOM is None:
-            raise ValueError("Search candidate status must include DTE, imp, and FOM.")
-
-        imp = status.imp
-        dte = status.dfe
-        if not isinstance(imp, COMImpairmentStatus_178A):
-            raise TypeError("COM_178A search expects COMImpairmentStatus_178A.")
-        return COMSearchRow(
-            idx=idx,
-            candidate=candidate,
-            FOM=status.FOM,
-            As=imp.As,
-            sigma_ISI=imp.sigma_ISI,
-            sigma_J=imp.sigma_J,
-            sigma_XT=imp.sigma_XT,
-            sigma_N=imp.sigma_N,
-            sigma_TX=imp.sigma_tn,
-            ts=dte.ts,
-            pos=dte.pos,
-        )
-
-    @property
-    def per_ui(self) -> int:
-        return self.cfg.link.per_ui
-
-    @property
-    def paths(self) -> list[COMPath]:
-        return self._require_status().paths
-
-    @property
-    def victim(self) -> COMPath:
-        return self._require_status().victim
-
-    @property
-    def xtalks(self) -> list[COMPath]:
-        return self._require_status().xtalks
-
-    @property
-    def h(self) -> np.ndarray:
-        """Victim pulse response h^(0)(t), as status.victim.pulse.ir."""
-        return self.victim.pulse.ir
-
-    @property
-    def h_dsamp(self) -> np.ndarray:
-        """Victim pulse response sampled at the selected DFE sampling phase."""
-        dte = self.dte_status
-        if dte is None:
-            raise RuntimeError("COM_178A.dte_status is not available. Run COM_178A.run() first.")
-        return self.h[dte.pos::self.per_ui]
-
-    def build_all_paths_178A(self) -> list[COMPath]:
-        """
-        Build all 178A COM paths.
-
-        LV-1 hierarchy mirrors COM_93A:
-        1. build channel-under-test models
-        2. build path-shared models
-        3. build every path-specific model
-        """
-        channels = _build_channel_under_test_178A(self.cfg.channel)
-        shared = _build_shared_path_178A(self.cfg, channels[0].freqs)
-        return _build_paths_178A(self.cfg, shared, channels)
-
-    def calculate_psd_common_178A(self, victim: COMPath, h_XTs: list[np.ndarray]) -> COMImpairmentCommon:
-        """
-        Calculate 178A PSD components that do not depend on sampling phase.
-
-        Parameters
-        ----------
-        victim:
-            Victim COMPath for the current TX FFE/CTLE/channel candidate.
-        h_XTs:
-            Crosstalk pulse responses in V. Each crosstalk PSD uses its own
-            worst-case sampling phase as defined below Eq. 178A-18.
-
-        Returns
-        -------
-        COMImpairmentCommon_178A
-            Cached receiver-noise and crosstalk PSD terms reused by every sampling-phase
-            candidate in the current _run_once() call.
-        """
-        del victim
-        link_cfg = self.cfg.link
-        imp_cfg = self.cfg.imp
-        ft_cfg = self.cfg.filter
-        L = self.cfg.L
-
-        # input signal power
-        sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
-
-        # Receiver input noise PSD
-        S_rn = _build_psd_rx_noise_178A(link_cfg, imp_cfg, ft_cfg)
-        sigma_N = S_rn.to_sigma()
-
-        # Crosstalk PSD
-        S_xn, h_XTs_dsamp = _build_psd_xtalk_178A(h_XTs, link_cfg, sigma_X)
-        sigma_XT = S_xn.to_sigma()
-
-        return COMImpairmentCommon(
-            sigma_X = sigma_X,
-            S_rn = S_rn,
-            sigma_N = sigma_N,
-            S_xn = S_xn,
-            sigma_XT = sigma_XT,
-            h_XTs_dsamp = h_XTs_dsamp,
-        )
-
-    def calculate_psd_pre_dte_178A(
-        self,
-        victim: COMPath,
-        pos: int,
-        common: COMImpairmentCommon,
-    ) -> COMImpairmentAtPos:
-        """
-        Calculate 178A pre-DTE PSD status for one sampling phase candidate.
-
-        This stage builds PSD components available before solving the receiver
-        discrete-time equalizer. Quantization noise is finalized in
-        calculate_psd_post_dte_178A() because 178A-26/27/28 determines the
-        quantization step from the pre-quantization signal/noise distribution.
-
-        Parameters
-        ----------
-        victim:
-            Victim COMPath. The method uses victim.pulse.ir for the signal
-            pulse and victim.H_t/H_21/H_r/H_ctf for the no-FFE TX-noise pulse.
-        pos:
-            Sample phase index in [0, cfg.link.per_ui).
-        common:
-            Sampling-phase-independent impairment components computed once by
-            calculate_psd_common_178A().
-
-        Notes
-        -----
-        ``ts`` is not an input to this stage. It is derived from ``pos`` by
-        finding the main cursor on ``victim.pulse.ir[pos::per_ui]``.
-        """
-        link_cfg = self.cfg.link
-        imp_cfg = self.cfg.imp
-        ft_cfg = self.cfg.filter
-        L = self.cfg.L
-        pos = int(pos)
-        pmf_cfg = self.cfg.pmf.resolve(imp_cfg.R_LM / (L - 1))
-        
-        h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
-        num_pre = np.argmax(abs(h_dsamp))
-        if num_pre < 0 or num_pre >= len(h_dsamp):
-            raise ValueError("178A sampling candidate points outside the downsampled victim pulse.")
-        ts = int(pos + num_pre * link_cfg.per_ui)
-        
-        # From common_psd
-        sigma_X = common.sigma_X
-        S_rn = common.S_rn
-        S_xn = common.S_xn
-
-        # transmitter output noise PSD, Eq. 178A-19 and Eq. 178A-20.
-        S_tn, h_tn = _build_psd_tx_noise_178A(victim, link_cfg, ft_cfg, imp_cfg, pos)
-        sigma_tn = S_tn.to_sigma()
-
-        # transmitter jitter-induced noise PSD, Eq. 178A-21 and Eq. 178A-22.
-        S_jn, h_J = _build_psd_tx_jitter_178A(victim, link_cfg, imp_cfg, pos, sigma_X)
-        sigma_J = S_jn.to_sigma()
-
-        # quantization noise
-        p_sig = _build_pmf_pam_L(L, pmf_cfg)
-        S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
-        sigma_ga = S_ga.to_sigma()
-        if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            S_qn = _zero_sampled_psd_178A(link_cfg)
-        else:
-            S_qn = _build_psd_adc_qn_178A(
-                p_sig = p_sig, 
-                h_dsamp = h_dsamp, 
-                sigma_ga = sigma_ga, 
-                P_qc = imp_cfg.P_qc,
-                N_qb = imp_cfg.N_qb,
-                pmf_cfg = pmf_cfg, 
-                link_cfg = link_cfg,
-                vqc_method = imp_cfg.quantization_vqc_method,
-            )
-        sigma_qn = S_qn.to_sigma()
-
-        # summation and IDFT
-        # 但如果 N_max 太接近 FFT 長度，或者 noise correlation 在長時間 lag 還沒衰減完，
-        # R_n 尾端的能量會 circular wrap 回前面，使得前幾個 lag 被污染。
-        S_total = S_ga.add(S_qn)
-        sigma_total = S_total.to_sigma()
-        R_n = S_total.to_autocorrelation()
-
-        return COMImpairmentAtPos(
-            pos = pos,
-            ts = ts,
-            As = float("nan"),
-            sigma_X = sigma_X,
-            h_dsamp = h_dsamp,
-            S_tn = S_tn,
-            sigma_tn = sigma_tn,
-            h_tn = h_tn,
-            S_jn = S_jn,
-            h_J = h_J,
-            sigma_J = sigma_J,
-            S_qn = S_qn,
-            sigma_qn = sigma_qn,
-            S_total = S_total,
-            sigma_total = sigma_total,
-            R_n = R_n
-        )
-
-    def calculate_MMSE_DTE_178A(
-        self,
-        victim: COMPath,
-        imp_pre: COMImpairmentAtPos,
-        pos: int,
-    ) -> COMDTEStatus:
-        """
-        Calculate 178A MMSE DTE status for one sampling-phase candidate.
-
-        This stage only owns FFE/DFE coefficient solving and MSE. Residual ISI
-        response construction belongs to the post-DTE impairment/PMF path, not
-        COMDTEStatus.
-        """
-        h_dsamp = victim.pulse.ir[int(pos):: self.per_ui]
-        solver = COM_MMSE_DTE(self.cfg.dte)
-        return solver.run(
-            h_dsamp = h_dsamp,
-            R_n = imp_pre.R_n,
-            sigma_x = imp_pre.sigma_X,
-            pos = pos,
-            per_ui = self.per_ui,
-        )
-
-    def calculate_psd_post_dte_178A(
-        self, 
-        dte_status: COMDTEStatus, 
-        imp_comm: COMImpairmentCommon, 
-        imp_pre: COMImpairmentAtPos,
-        h: np.ndarray,
-    ) -> COMImpairmentStatus_178A:
-        As = self.cfg.imp.R_LM / (self.cfg.L - 1)
-        w_ir = _ffe_impulse_from_dte_status(dte_status)
-        h_w = np.convolve(imp_pre.h_dsamp, w_ir)
-        if (np.argmax(abs(h_w)) != dte_status.d):
-            raise ValueError("Main cursor of fff output pulse doesn't d = d_w + d_h")
-        h_XTs_w = []
-        for h_XT_dsamp in imp_comm.h_XTs_dsamp:
-            h_XTs_w.append(np.convolve(h_XT_dsamp, w_ir))
-
-        h_ISI = h_w.copy()
-        h_ISI[dte_status.d+1:dte_status.d+1+len(dte_status.b_lim)] -= dte_status.b_lim
-
-        sigma_ISI = np.sqrt(imp_pre.sigma_X**2 * np.sum((h_ISI)**2))
-
-        h_w_J = _calculate_h_J_178A(h, dte_status.pos, self.cfg.link, w_ir)
-
-        # Pre-Calculation S_jn_RJ(theta) here as a part of COMImpairmentStatus (Seperated pmf of RJ and DDJ)
-        S_jn_RJ = _build_psd_from_DFT_response_178A(imp_pre.h_J, self.cfg.link, imp_comm.sigma_X**2 * self.cfg.imp.sigma_RJ**2)
-
-        return COMImpairmentStatus_178A(
-            # common psd
-            sigma_X=imp_comm.sigma_X,
-            S_rn=imp_comm.S_rn,
-            sigma_N=imp_comm.sigma_N,
-            S_xn=imp_comm.S_xn,
-            sigma_XT=imp_comm.sigma_XT,
-            h_XTs_dsamp=imp_comm.h_XTs_dsamp,
-        
-            # pre-dte
-            pos=imp_pre.pos,
-            ts=imp_pre.ts,
-            As=As,
-            h_dsamp=imp_pre.h_dsamp,
-            S_tn=imp_pre.S_tn,
-            sigma_tn=imp_pre.sigma_tn,
-            h_tn=imp_pre.h_tn,
-            S_jn=imp_pre.S_jn,
-            sigma_J=imp_pre.sigma_J,
-            h_J=imp_pre.h_J,
-            S_qn=imp_pre.S_qn,
-            sigma_qn=imp_pre.sigma_qn,
-            S_total=imp_pre.S_total,
-            sigma_total=imp_pre.sigma_total,
-            R_n=imp_pre.R_n,
-        
-            # post-dte
-            h_w=h_w,
-            h_XTs_w=h_XTs_w,
-            h_ISI=h_ISI,
-            sigma_ISI=sigma_ISI,
-            h_w_J=h_w_J,
-            S_jn_RJ=S_jn_RJ
-        )
-
-    def calculate_COM_178A(self, imp_status: COMImpairmentStatus_178A, dte_status: COMDTEStatus) -> COMPMFStatus:
-        """
-        Calculate 178A final PMF/COM result from impairment status.
-
-        Parameters
-        ----------
-        imp_status:
-            178A impairment status.
-        dte_status:
-            Selected 178A receiver DTE result.
-        """
-        imp_cfg = self.cfg.imp
-        pmf_cfg = self.cfg.pmf.resolve(imp_status.As)
-        As = imp_status.As
-
-        # base pmf of PAM-L
-        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg)
-
-        # pmf of ISI
-        p_ISI = _build_pmf_interference_93A(p_sig, imp_status.h_ISI, pmf_cfg, name="ISI")
-
-        # pmf of XT (all combined)
-        p_w_XT_all = _build_pmf_w_XT_all_178A(p_sig, imp_status.h_XTs_w, pmf_cfg)
-
-        # pmf of tx Dual-dirac jitter
-        p_w_DD = _build_pmf_interference_93A(p_sig, imp_cfg.A_DD * imp_status.h_w_J, pmf_cfg, name="Dual-Dirac")
-
-        # pmf of quantization noise
-        if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            p_qn = Pmf1D.multi_dirac(np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy, unit="volt", name="ADC_QN")
-        else:
-            sigma_gn = _calculate_sigma_gn_for_pmf(imp_status)
-            V_qc = _calculate_V_qc_for_pmf(
-                p_sig, 
-                imp_status.h_dsamp,
-                imp_status.h_XTs_dsamp,
-                imp_cfg.A_DD,
-                imp_status.h_J,
-                sigma_gn, 
-                imp_cfg.P_qc, 
-                pmf_cfg        
-            )
-            delta = 2 * V_qc / (2**imp_cfg.N_qb - 1)
-            p_delta = Pmf1D.uniform(delta, pmf_cfg)
-            p_qn = p_delta.fir_filter(
-                dte_status.w_lim,
-                keep_mass = pmf_cfg.keep_mass,
-                dx_ref = pmf_cfg.dy,
-                tap_abs_th = pmf_cfg.tap_abs_th,
-                max_taps = None,
-                name = "ADC_QN"
-            )
-
-        # pmf of gaussian noise
-        p_G = _build_pmf_G_178A(imp_status, dte_status, self.cfg.link, pmf_cfg)
-
-        # combined pmf, A_ni
-        p_combined = p_ISI.combine(p_w_XT_all).combine(p_w_DD).combine(p_qn).combine(p_G)
-        y0 = p_combined.quantile(self.cfg.DER_0)
-        A_ni = abs(y0)
-
-        # COM
-        COM = 20 * np.log10( As / A_ni )
-        return COMPMFStatus(
-            dy=pmf_cfg.dy,
-            tap_abs_th=pmf_cfg.tap_abs_th,
-            p_ISI=p_ISI,
-            p_G=p_G,
-            p_DD=p_w_DD,
-            p_XT=p_w_XT_all,
-            p_combined=p_combined,
-            y0=y0,
-            A_ni=A_ni,
-            COM=COM,
-        )
+__all__ = [
+    "COM",
+    "COMConfig",
+    "COMDFEConfig",
+    "COMDFEStatus",
+    "COMFilterConfig",
+    "COMImpairmentConfig",
+    "COMImpairmentStatus",
+    "COMPMFStatus",
+    "COMPkgConfig",
+    "build_H_ctf",
+    "build_H_ffe",
+    "build_H_ffe_next",
+    "build_H_r",
+    "build_H_t",
+    "build_channel_under_test",
+    "build_path",
+    "build_paths",
+    "build_rxpkg",
+    "build_shared_path",
+    "build_txpkg",
+    "calculate_FOM",
+]
 
 if __name__ == "__main__":
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
 
-    # Project-owned COM input workbook.
-    config_path = project_root / "cases" / "c2m_8023dj_4p13p0_50mm" / "config.xlsx"
+    # Case-owned COM run settings.
+    #
+    # Directory contract:
+    #   cases/<case_id>/config/config_93A.xlsx
+    #   cases/<case_id>/config/config_178A.xlsx
+    #   cases/<case_id>/report/<spec_version>/<run_kind>/
+    #
+    # Edit these three values for normal local runs.
+    case_id = "c2m_8023dj_4p13p0_50mm"
+    spec_version = "93A"       # allowed: "93A", "178A"
+    run_kind = "single_run"     # allowed: "single_run", "search_run"
 
-    # Choose one mode:
-    # - "single": use fixed_config only and export one full 93A debug/study status
-    # - "search": use fixed_config + search_config and export 93A search result + best status
-    # - "single_178A": use project workbook through excel_to_config_178A()
-    # - "search_178A": use project workbook + search_config for 178A FOM search
-    run_mode = "single_178A"
+    case_path = project_root / "cases" / case_id
+    config_path = case_path / "config" / f"config_{spec_version}.xlsx"
+    output_path = case_path / "report" / spec_version / run_kind
 
-    if run_mode == "single":
+    def excel_to_config(excel_path: str) -> COMConfig:
+        """Backward-compatible wrapper for COM Excel input."""
+        try:
+            from ..io.com_excel_io import excel_to_config as _excel_to_config
+        except ImportError:
+            from serdes_coding.io.com_excel_io import excel_to_config as _excel_to_config
+
+        return _excel_to_config(excel_path)
+
+    def excel_to_search_config(excel_path: str) -> 'COMSearchConfig':
+        """Backward-compatible wrapper for COM search Excel input."""
+        try:
+            from ..io.com_excel_io import excel_to_search_config as _excel_to_search_config
+        except ImportError:
+            from serdes_coding.io.com_excel_io import excel_to_search_config as _excel_to_search_config
+
+        return _excel_to_search_config(excel_path)
+
+
+    if spec_version == "93A" and run_kind == "single_run":
         cfg = excel_to_config(str(config_path))
-        output_path = project_root / "reports" / "single_run"
         config_outputs = cfg.export(str(output_path))
 
-        status = COM_93A(cfg).run()
+        status = COM(cfg).run()
         outputs = status.export(str(output_path), include_plots=False)
         outputs.update(status.export_report_summary(str(output_path)))
         COMReport(cfg, status).plot_single_run(str(output_path / "plots"), path_idx=0)
@@ -6078,19 +4179,19 @@ if __name__ == "__main__":
         outputs.update(config_outputs)
 
         print("COM single run completed")
+        print(f"case: {case_id}")
         print(f"config: {config_path}")
         print(f"output: {output_path}")
         print(f"FOM: {status.FOM}")
         if status.pmf is not None:
             print(f"COM: {status.pmf.COM}")
         print(outputs)
-    elif run_mode == "search":
+    elif spec_version == "93A" and run_kind == "search_run":
         cfg = excel_to_config(str(config_path))
         search = excel_to_search_config(str(config_path))
-        output_path = project_root / "reports" / "search_run"
         config_outputs = cfg.export(str(output_path))
 
-        search_status = COM_93A(cfg).run(search)
+        search_status = COM(cfg).run(search)
         outputs = search_status.export(str(output_path), include_plots=False)
         outputs.update(search_status.best.export_report_summary(str(output_path / "best")))
         COMReport(cfg, search_status).plot_search_run(str(output_path / "plots"))
@@ -6098,139 +4199,17 @@ if __name__ == "__main__":
         outputs.update(config_outputs)
 
         print("COM search run completed")
+        print(f"case: {case_id}")
         print(f"config: {config_path}")
         print(f"output: {output_path}")
         print(f"best FOM: {search_status.best.FOM}")
         if search_status.best.pmf is not None:
             print(f"best COM: {search_status.best.pmf.COM}")
         print(outputs)
-    elif run_mode == "single_178A":
-        cfg = excel_to_config_178A(str(config_path))
-        output_path = project_root / "reports" / "single_run_178A"
-        config_outputs = cfg.export(str(output_path))
 
-        status = COM_178A(cfg)._run_once(calculate_pmf=False)
-        summary_path = output_path / "report_summary.txt"
-        output_path.mkdir(parents=True, exist_ok=True)
-        summary_lines = [
-            "COM 178A Single-Run Debug Summary",
-            "=================================",
-            "",
-            f"FOM_dB: {status.FOM:.6g}" if status.FOM is not None else "FOM_dB: None",
-            "COM_dB: None (calculate_pmf=False)",
-            "",
-            "DTE",
-            "---",
-            f"ts: {status.dfe.ts if status.dfe is not None else 'None'}",
-            f"pos: {status.dfe.pos if status.dfe is not None else 'None'}",
-            f"mse: {status.dfe.mse:.6e}" if status.dfe is not None else "mse: None",
-            f"w_lim: {np.array2string(status.dfe.w_lim, precision=6, separator=', ')}" if status.dfe is not None else "w_lim: None",
-            f"b_lim: {np.array2string(status.dfe.b_lim, precision=6, separator=', ')}" if status.dfe is not None else "b_lim: None",
-            "",
-            "Impairment",
-            "----------",
-        ]
-        if status.imp is not None:
-            summary_lines.extend([
-                f"As_V: {status.imp.As:.6e}",
-                f"sigma_tn_V: {status.imp.sigma_tn:.6e}",
-                f"sigma_ISI_V: {status.imp.sigma_ISI:.6e}",
-                f"sigma_J_V: {status.imp.sigma_J:.6e}",
-                f"sigma_XT_V: {status.imp.sigma_XT:.6e}",
-                f"sigma_N_V: {status.imp.sigma_N:.6e}",
-                f"sigma_qn_V: {status.imp.sigma_qn:.6e}",
-            ])
-        summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-
-        print("COM 178A single run completed")
-        print(f"config: {config_path}")
-        print("config_adapter: excel_to_config_178A(project workbook)")
-        print(f"quantization_vqc_method: {cfg.imp.quantization_vqc_method}")
-        print(f"output: {output_path}")
-        print(f"FOM: {status.FOM}")
-        if status.pmf is not None:
-            print(f"COM: {status.pmf.COM}")
-        print({
-            "report_summary_txt": str(summary_path),
-            **config_outputs,
-        })
-    elif run_mode == "search_178A":
-        cfg = excel_to_config_178A(str(config_path))
-        search = excel_to_search_config(str(config_path))
-        output_path = project_root / "reports" / "search_run_178A"
-        output_path.mkdir(parents=True, exist_ok=True)
-        config_outputs = cfg.export(str(output_path))
-
-        search_status = COM_178A(cfg).run(search)
-
-        rows_path = output_path / "search_rows.csv"
-        row_lines = [
-            "idx,status,FOM,c_m2,c_m1,c_1,g_1,g_2,As,sigma_ISI,sigma_J,sigma_XT,sigma_N,sigma_tn,ts,pos,error"
-        ]
-        for row in search_status.rows:
-            row_lines.append(
-                ",".join([
-                    str(row.idx),
-                    str(row.status),
-                    "" if row.FOM is None else f"{row.FOM:.12g}",
-                    f"{row.candidate.c_m2:.12g}",
-                    f"{row.candidate.c_m1:.12g}",
-                    f"{row.candidate.c_1:.12g}",
-                    f"{row.candidate.g_DC:.12g}",
-                    f"{row.candidate.g_DC2:.12g}",
-                    "" if row.As is None else f"{row.As:.12g}",
-                    "" if row.sigma_ISI is None else f"{row.sigma_ISI:.12g}",
-                    "" if row.sigma_J is None else f"{row.sigma_J:.12g}",
-                    "" if row.sigma_XT is None else f"{row.sigma_XT:.12g}",
-                    "" if row.sigma_N is None else f"{row.sigma_N:.12g}",
-                    "" if row.sigma_TX is None else f"{row.sigma_TX:.12g}",
-                    "" if row.ts is None else str(row.ts),
-                    "" if row.pos is None else str(row.pos),
-                    "" if row.error is None else json.dumps(row.error),
-                ])
-            )
-        rows_path.write_text("\n".join(row_lines) + "\n", encoding="utf-8")
-
-        best_summary_path = output_path / "best_report_summary.txt"
-        best = search_status.best
-        summary_lines = [
-            "COM 178A Search Best Summary",
-            "============================",
-            "",
-            f"num_candidates: {search_status.num_candidates}",
-            f"num_success: {search_status.num_success}",
-            f"num_error: {search_status.num_error}",
-            f"best_idx: {search_status.best_row.idx}",
-            f"best_FOM_dB: {best.FOM:.6g}" if best.FOM is not None else "best_FOM_dB: None",
-            "best_COM_dB: None (178A search uses calculate_pmf=False)",
-            "",
-            "Best candidate",
-            "--------------",
-            f"c_m2: {search_status.best_row.candidate.c_m2}",
-            f"c_m1: {search_status.best_row.candidate.c_m1}",
-            f"c_1: {search_status.best_row.candidate.c_1}",
-            f"g_1: {search_status.best_row.candidate.g_DC}",
-            f"g_2: {search_status.best_row.candidate.g_DC2}",
-            "",
-            "DTE",
-            "---",
-            f"ts: {best.dfe.ts if best.dfe is not None else 'None'}",
-            f"pos: {best.dfe.pos if best.dfe is not None else 'None'}",
-            f"mse: {best.dfe.mse:.6e}" if best.dfe is not None else "mse: None",
-            f"w_lim: {np.array2string(best.dfe.w_lim, precision=6, separator=', ')}" if best.dfe is not None else "w_lim: None",
-            f"b_lim: {np.array2string(best.dfe.b_lim, precision=6, separator=', ')}" if best.dfe is not None else "b_lim: None",
-        ]
-        best_summary_path.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
-
-        print("COM 178A search run completed")
-        print(f"config: {config_path}")
-        print("config_adapter: excel_to_config_178A(project workbook)")
-        print(f"output: {output_path}")
-        print(f"best FOM: {search_status.best.FOM}")
-        print({
-            "search_rows_csv": str(rows_path),
-            "best_report_summary_txt": str(best_summary_path),
-            **config_outputs,
-        })
     else:
-        raise ValueError(f"Unsupported run_mode: {run_mode!r}. Use 'single', 'search', 'single_178A', or 'search_178A'.")
+        raise ValueError(
+            "Unsupported COM run selection. "
+            "Use spec_version in {'93A', '178A'} and "
+            "run_kind in {'single_run', 'search_run'}."
+        )

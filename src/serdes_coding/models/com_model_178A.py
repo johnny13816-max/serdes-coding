@@ -18,20 +18,22 @@ from typing import Any, Literal, Optional, Sequence
 import numpy as np
 
 try:
-    from .link_segment import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse, SparamModel
-    from .pmf_handler import Pmf1D
-    from .com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
+    from ..utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+    from ..utilities.sparam import SparamModel
+    from ..utilities.pmf import Pmf1D
+    from ..search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
     from . import com_model_93A as com_93A
 except ImportError:
-    # Support direct interactive execution: ``%run .../com_model_178A.py``.
+    # Support direct interactive execution of this canonical module.
     # Package execution continues to use the relative imports above.
-    source_root = str(Path(__file__).resolve().parents[1])
+    source_root = str(Path(__file__).resolve().parents[2])
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from serdes_coding.link_segment import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse, SparamModel
-    from serdes_coding.pmf_handler import Pmf1D
-    from serdes_coding.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
-    from serdes_coding import com_model_93A as com_93A
+    from serdes_coding.utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+    from serdes_coding.utilities.sparam import SparamModel
+    from serdes_coding.utilities.pmf import Pmf1D
+    from serdes_coding.search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
+    from serdes_coding.models import com_model_93A as com_93A
 
 # 178A reuses only these stable v1 data-flow/reporting primitives. Versioned
 # config, impairment status, PSD, DTE, and COM pipeline definitions live here.
@@ -61,6 +63,14 @@ class COMMainCursorError(COMError):
 
 class COMTxfirMainCursorError(COMError):
     """Raised when a TX FFE candidate cannot keep c(0) as the main cursor."""
+
+
+class COMLengthMismatchError(COMError):
+    """Raised when a COM calculation violates an array-length contract.
+
+    This includes incompatible model arrays, path counts, sampled response
+    lengths, and other shape contracts at the COM boundary.
+    """
 
 
 def _validate_positive_main_cursor(h_dsamp: np.ndarray, *, source_name: str, pos: int) -> None:
@@ -286,13 +296,14 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
         f_z2: float,
         f_p1: float,
         f_p2: float,
-        f_p3: float,
+        f_p3: float | None = None,
     ) -> 'IEEECOMFilter':
         """
         Build the 178A receiver equalizer transfer function.
 
-        The IO follows the 178A CTF shape with two independent zeros and
-        three independent poles.
+        The IO uses the 178A spec-facing two-zero / three-pole names. When
+        mapped from the aligned 93A Ad Hoc form, ``f_z2`` and ``f_p3`` both
+        receive ``f_HP_PZ`` so they represent the same low-frequency term.
 
         Parameters
         ----------
@@ -302,12 +313,23 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
             178A CTF gain terms in dB.
         f_z1, f_z2:
             178A CTF zero frequencies in Hz.
-        f_p1, f_p2, f_p3:
-            178A CTF pole frequencies in Hz.
+        f_p1, f_p2:
+            Required CTF pole frequencies in Hz.
+        f_p3:
+            Optional third pole frequency in Hz. ``None`` bypasses this pole.
         """
         f = cfg.freqs
-        denom = (1 + 1j * f / f_p1) * (1 + 1j * f / f_p2) * (1 + 1j * f / f_p3)
-        H_ctf = (10**(g_1 / 20) + 1j * f / f_z1) * (10**(g_2 / 20) + 1j * f / f_z2) / denom
+        pole_values = (f_p1, f_p2) if f_p3 is None else (f_p1, f_p2, f_p3)
+        if any(float(value) <= 0.0 or not np.isfinite(float(value)) for value in pole_values):
+            raise ValueError("CTF pole frequencies must be finite and positive.")
+        denom = np.ones_like(f, dtype=complex)
+        for pole in pole_values:
+            denom *= 1 + 1j * f / float(pole)
+        H_ctf = (
+            (10**(g_1 / 20) + 1j * f / f_z1)
+            * (10**(g_2 / 20) + 1j * f / f_z2)
+            / denom
+        )
         return cls.from_tf(f, H_ctf, cfg)
 
 # =========================================
@@ -327,7 +349,7 @@ class COMDeviceTermConfig(_PrettyDataclass):
         if self.C_d_seq.ndim != 1 or self.L_s_seq.ndim != 1:
             raise ValueError("C_d_seq and L_s_seq must be 1-D arrays.")
         if len(self.C_d_seq) != len(self.L_s_seq):
-            raise ValueError(
+            raise COMLengthMismatchError(
                 "C_d_seq and L_s_seq must have the same length. "
                 f"Got len(C_d_seq)={len(self.C_d_seq)}, len(L_s_seq)={len(self.L_s_seq)}."
             )
@@ -359,7 +381,7 @@ class COMDevicePackageConfig(_PrettyDataclass):
         if self.z_p_seq.ndim != 1 or self.Z_c_seq.ndim != 1:
             raise ValueError("z_p_seq and Z_c_seq must be 1-D arrays.")
         if len(self.z_p_seq) != len(self.Z_c_seq):
-            raise ValueError(
+            raise COMLengthMismatchError(
                 "z_p_seq and Z_c_seq must have the same length. "
                 f"Got len(z_p_seq)={len(self.z_p_seq)}, len(Z_c_seq)={len(self.Z_c_seq)}."
             )
@@ -379,7 +401,7 @@ class COMDevicePackageConfig(_PrettyDataclass):
             elif values.ndim != 1:
                 raise ValueError(f"{name} must be a scalar or a 1-D array.")
             elif len(values) != num_stages:
-                raise ValueError(
+                raise COMLengthMismatchError(
                     f"{name} must have {num_stages} values to match z_p_seq; got {len(values)}."
                 )
             if not np.all(np.isfinite(values)):
@@ -455,7 +477,7 @@ class COMFilterConfig(_PrettyDataclass):
 
     TX FFE, transition-time filter, and receiver noise-filter fields intentionally
     keep the same names as the 93A config when the same helper contract is used.
-    CTF fields use the 178A two-zero / three-pole naming.
+    CTF fields use the 178A spec-facing two-zero / three-pole naming.
     """
     c_m3: float = 0.0                # unit: dimensionless, TX FFE tap c(-3)
     c_m2: float = 0.0                # unit: dimensionless, TX FFE tap c(-2)
@@ -676,6 +698,11 @@ class COMImpairmentConfig(_PrettyDataclass):
             if not np.isfinite(self.P_qc) or self.P_qc <= 0.0 or self.P_qc >= 1.0:
                 raise ValueError("COMImpairmentConfig.P_qc must be in (0, 1) when provided.")
 
+@dataclass(repr=False)
+class COMMLSDConfig(_PrettyDataclass):
+    enable: bool
+    trunc_len: int
+    delta_com_an: float
 
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
@@ -766,14 +793,18 @@ class COMEqChannelStatus(_PrettyDataclass):
     Contract: only sampled response / equivalent-channel sequences named h_xx
     are stored here. PSD objects and scalar sigma values belong to COMPSDStatus.
     """
-    h_dsamp: Optional[np.ndarray] = None
-    h_tn: Optional[np.ndarray] = None
-    h_J: Optional[np.ndarray] = None
-    h_XTs_dsamp: Optional[list[np.ndarray]] = None
-    h_w: Optional[np.ndarray] = None
-    h_XTs_w: Optional[list[np.ndarray]] = None
-    h_ISI: Optional[np.ndarray] = None
-    h_w_J: Optional[np.ndarray] = None
+    # pre-dte
+    h_dsamp: Optional[SampledResponse] = None
+    h_tn: Optional[SampledResponse] = None
+    h_J: Optional[SampledResponse] = None
+    h_XTs_dsamp: Optional[list[SampledResponse]] = None
+
+    # post-ffe
+    h_ISI: Optional[SampledResponse] = None
+    h_w_J: Optional[SampledResponse] = None
+    h_w: Optional[SampledResponse] = None
+    h_XTs_w: Optional[list[SampledResponse]] = None
+    
 
 @dataclass(repr=False)
 class COMAdcInputPMF(_PrettyDataclass):
@@ -798,7 +829,6 @@ class COMAdcInputPMF(_PrettyDataclass):
 class COMImpStageStatus(_PrettyDataclass):
     """One 178A impairment stage's PSD, equivalent-channel, and ADC material."""
     psd: Optional[COMPSDStatus] = None
-    eq_ch: Optional[COMEqChannelStatus] = None
     adc_input: Optional[COMAdcInputPMF] = None
 
 @dataclass(repr=False)
@@ -813,7 +843,8 @@ class COMImpairmentStatus(_PrettyDataclass):
     pre_dte: Optional[COMImpStageStatus] = None
     post_ffe: Optional[COMImpStageStatus] = None
     pre_mlsd: Optional[COMImpStageStatus] = None
-
+    eq_ch: Optional[COMEqChannelStatus] = None
+    
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
         return tuple(
             stage
@@ -830,11 +861,10 @@ class COMImpairmentStatus(_PrettyDataclass):
         raise AttributeError(f"{type(self).__name__}.{name} is not available.")
 
     def _eq_attr(self, name: str) -> Any:
-        for stage in self._stages():
-            if stage.eq_ch is not None:
-                value = getattr(stage.eq_ch, name, None)
-                if value is not None:
-                    return value
+        if self.eq_ch is not None:
+            value = getattr(self.eq_ch, name, None)
+            if value is not None:
+                return value
         raise AttributeError(f"{type(self).__name__}.{name} is not available.")
 
     @property
@@ -937,27 +967,27 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._psd_attr("sigma_ISI")
 
     @property
-    def h_dsamp(self) -> np.ndarray:
+    def h_dsamp(self) -> SampledResponse:
         return self._eq_attr("h_dsamp")
 
     @property
-    def h_tn(self) -> np.ndarray:
+    def h_tn(self) -> SampledResponse:
         return self._eq_attr("h_tn")
 
     @property
-    def h_J(self) -> np.ndarray:
+    def h_J(self) -> SampledResponse:
         return self._eq_attr("h_J")
 
     @property
-    def h_XTs_dsamp(self) -> list[np.ndarray]:
+    def h_XTs_dsamp(self) -> list[SampledResponse]:
         return self._eq_attr("h_XTs_dsamp")
 
     @property
-    def h_w(self) -> np.ndarray:
+    def h_w(self) -> SampledResponse:
         return self._eq_attr("h_w")
 
     @property
-    def h_XTs_w(self) -> list[np.ndarray]:
+    def h_XTs_w(self) -> list[SampledResponse]:
         return self._eq_attr("h_XTs_w")
 
     @property
@@ -965,7 +995,7 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._eq_attr("h_ISI")
 
     @property
-    def h_w_J(self) -> np.ndarray:
+    def h_w_J(self) -> SampledResponse:
         return self._eq_attr("h_w_J")
 
 @dataclass(repr=False)
@@ -976,7 +1006,7 @@ class COMDTEStatus(_PrettyDataclass):
     ts: int                         # unit: sample index on cfg.times
     pos: int                        # unit: sample phase index, 0 <= pos < per_ui
     d: int
-    w_lim: np.ndarray             # unit: dimensionless, full FFE impulse with non-selected taps zero-filled
+    w_lim: SampledResponse       # unit: dimensionless, full FFE impulse response
     b_lim: np.ndarray             # unit: dimensionless, DFE coefficients b
     mse: float                      # unit: V^2, mean-square error from 178A-35
     H_all: np.ndarray 
@@ -1011,6 +1041,32 @@ class COMStatus(com_93A.COMStatus):
     dfe: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
+
+    def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
+        """Export a 178A status without invoking the legacy 93A exporter.
+
+        The inherited 93A exporter assumes the flat 93A impairment contract,
+        including ``imp.sigma_TX``. 178A impairment data is grouped by stage,
+        so top-K finalization must use a 178A-specific export boundary.
+        """
+        out_dir = Path(save_path)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = out_dir / "status_summary.txt"
+        summary_path.write_text(str(self), encoding="utf-8")
+        outputs = {"status_summary_txt": str(summary_path)}
+
+        if include_plots:
+            cfg = getattr(self, "_config_for_report", None)
+            if cfg is None:
+                raise ValueError(
+                    "178A plot export requires the originating COMConfig."
+                )
+            from ..reporting.com_report_178A import COMReport178A
+
+            plot_dir = out_dir / "plots"
+            COMReport178A(cfg, self).plot_single_run(plot_dir)
+            outputs["plots"] = str(plot_dir)
+        return outputs
 
 
 # ----------------------------------------
@@ -1222,7 +1278,7 @@ def _build_paths(
 
     expected_count = 1 + len(ch_cfg.next_s4p_paths) + len(ch_cfg.fext_s4p_paths)
     if len(channels) != expected_count:
-        raise ValueError(
+        raise COMLengthMismatchError(
             "channels length must match victim + NEXT + FEXT path count. "
             f"Expected {expected_count}, got {len(channels)}."
         )
@@ -1362,6 +1418,17 @@ def _build_psd_from_DFT_response(
     variance = float(variance)
     if not np.isfinite(variance) or variance < 0.0:
         raise ValueError("variance must be finite and non-negative.")
+    h_dsamp = np.asarray(h_dsamp, dtype=float)
+    if h_dsamp.ndim != 1:
+        raise ValueError("h_dsamp must be one-dimensional.")
+    if len(h_dsamp) > link_cfg.sampled_nfft:
+        raise COMLengthMismatchError(
+            "Linear sampled response exceeds the target sampled DFT window: "
+            f"len(response)={len(h_dsamp)}, "
+            f"cfg.sampled_nfft={link_cfg.sampled_nfft}. "
+            "Choose an expanded sampled grid or an explicit fixed-grid DTFT "
+            "projection; do not truncate the response implicitly."
+        )
     S_base = SampledPSD.from_constant(link_cfg.theta, variance / link_cfg.fb, link_cfg.fb)
     H = SampledResponse.from_ir(h_dsamp, link_cfg)
     return S_base.filtered_by(H)
@@ -1626,7 +1693,12 @@ class COM_MMSE_DTE:
 
     def _validate_equalized_main_cursor(self, dte_status: COMDTEStatus) -> None:
         """Require the limited FFE output pulse to peak at the DTE main index d."""
-        h_w = np.convolve(self.h_dsamp, dte_status.w_lim)
+        w_lim = (
+            dte_status.w_lim.ir
+            if isinstance(dte_status.w_lim, SampledResponse)
+            else dte_status.w_lim
+        )
+        h_w = np.convolve(self.h_dsamp, w_lim)
         peak_index = int(np.argmax(np.abs(h_w)))
         if peak_index != dte_status.d:
             raise COMMainCursorError(
@@ -1859,7 +1931,9 @@ class COM_MMSE_DTE:
         group_starts = np.asarray(group_starts, dtype=int)
         scores = np.asarray(scores, dtype=float)
         if group_starts.shape != scores.shape:
-            raise ValueError("group_starts and scores must have identical shape.")
+            raise COMLengthMismatchError(
+                "group_starts and scores must have identical shape."
+            )
 
         selected_starts: list[int] = []
         selected_taps: set[int] = set()
@@ -1896,15 +1970,24 @@ def _build_pmf_pam_L(L: int, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
 
 def _build_pmf_w_XT_all(
     p_sig: Pmf1D,
-    h_XTs_w: list[np.ndarray],
+    h_XTs_w: list[np.ndarray | SampledResponse],
     pmf_cfg: COMPMFRuntimeConfig,
 ) -> Pmf1D:
-    return _build_pmf_XT_all_93A(p_sig, h_XTs_w, pmf_cfg)
+    return _build_pmf_XT_all_93A(
+        p_sig,
+        [value.ir if isinstance(value, SampledResponse) else value for value in h_XTs_w],
+        pmf_cfg,
+    )
 
 def _ffe_impulse_from_dte_status(dte_status: COMDTEStatus) -> np.ndarray:
     """Return the full FFE impulse response stored in COMDTEStatus.w_lim."""
     pruned_index = np.asarray(dte_status.pruned_index, dtype=int)
-    w_lim = np.asarray(dte_status.w_lim, dtype=float)
+    w_lim_value = dte_status.w_lim
+    w_lim = (
+        np.asarray(w_lim_value.ir, dtype=float)
+        if isinstance(w_lim_value, SampledResponse)
+        else np.asarray(w_lim_value, dtype=float)
+    )
     if len(pruned_index) == 0:
         raise ValueError("dte_status.pruned_index must not be empty.")
     if len(w_lim) <= int(np.max(pruned_index)):
@@ -1963,9 +2046,13 @@ def _build_adc_input_pmf_exact(
     )
 
 def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
-    S_G_pre = imp_status.S_tn.add(imp_status.S_jn_RJ).add(imp_status.S_rn)
-    H_rxffe = SampledResponse.from_ir(_ffe_impulse_from_dte_status(dte_status), link_cfg)
-    S_G = S_G_pre.filtered_by(H_rxffe)
+    # Post-FFE impairment construction already filters receiver noise,
+    # transmitter noise, and RJ onto one common expanded sampled grid.
+    post_ffe = imp_status.post_ffe
+    if post_ffe is not None and post_ffe.psd is not None and post_ffe.psd.S_gn_adc is not None:
+        S_G = post_ffe.psd.S_gn_adc
+    else:
+        S_G = imp_status.S_tn.add(imp_status.S_jn_RJ).add(imp_status.S_rn)
     sigma_G = S_G.to_sigma()
     return Pmf1D.gaussian(
         mu=0,
@@ -2189,6 +2276,8 @@ class COM(com_93A.COM):
         if not isinstance(self.status.imp, COMImpairmentStatus):
             raise TypeError("COM status.imp must be COMImpairmentStatus.")
         current = self.status.imp
+        if imp_status.eq_ch is not None:
+            current.eq_ch = imp_status.eq_ch
         for name in ("pre_dte", "post_ffe", "pre_mlsd"):
             value = getattr(imp_status, name)
             if value is not None:
@@ -2368,6 +2457,7 @@ class COM(com_93A.COM):
             source_name="calculate_pre_dte_imp_at_pos.h_dsamp",
             pos=pos,
         )
+        h_dsamp_response = SampledResponse.from_ir(h_dsamp, link_cfg)
         
         # From common_psd
         sigma_X = common.sigma_X
@@ -2392,7 +2482,7 @@ class COM(com_93A.COM):
         else:
             S_qn, adc_input_pmf = _build_psd_adc_qn(
                 p_sig = p_sig, 
-                h_dsamp = h_dsamp, 
+                h_dsamp = h_dsamp,
                 sigma_ga = sigma_ga, 
                 P_qc = imp_cfg.P_qc,
                 N_qb = imp_cfg.N_qb,
@@ -2427,13 +2517,13 @@ class COM(com_93A.COM):
                 sigma_total=sigma_total,
                 R_n=R_n,
                 ),
-                eq_ch=COMEqChannelStatus(
-                    h_XTs_dsamp=h_XTs_dsamp,
-                    h_dsamp=h_dsamp,
-                    h_tn=h_tn,
-                    h_J=h_J,
-                ),
                 adc_input=adc_input_pmf,
+            ),
+            eq_ch=COMEqChannelStatus(
+                h_XTs_dsamp=[SampledResponse.from_ir(h_xt, link_cfg) for h_xt in h_XTs_dsamp],
+                h_dsamp=h_dsamp_response,
+                h_tn=SampledResponse.from_ir(h_tn, link_cfg),
+                h_J=SampledResponse.from_ir(h_J, link_cfg),
             ),
         )
 
@@ -2500,18 +2590,20 @@ class COM(com_93A.COM):
         response construction belongs to the post-DTE impairment/PMF path, not
         COMDTEStatus.
         """
-        h_dsamp = imp_pre.h_dsamp
+        h_dsamp = imp_pre.h_dsamp.ir
         solver = COM_MMSE_DTE(
             self.cfg.dte,
             run_cfg.floating_mode,
         )
-        return solver.run(
+        dte_status = solver.run(
             h_dsamp = h_dsamp,
             R_n = imp_pre.R_n,
             sigma_x = imp_pre.sigma_X,
             pos = pos,
             per_ui = self.per_ui,
         )
+        dte_status.w_lim = SampledResponse.from_ir(dte_status.w_lim, self.cfg.link)
+        return dte_status
 
     def calculate_post_ffe_imp(
         self, 
@@ -2522,27 +2614,68 @@ class COM(com_93A.COM):
     ) -> COMImpairmentStatus:
         As = self.cfg.imp.R_LM / (self.cfg.L - 1)
         w_ir = _ffe_impulse_from_dte_status(dte_status)
-        h_w = np.convolve(imp_pre.h_dsamp, w_ir)
+        w_response = SampledResponse.from_ir(w_ir, self.cfg.link)
+        h_w_response = imp_pre.h_dsamp.cascade_ir(w_response, per_ui=self.per_ui)
+        post_link_cfg = LinkConfig.from_Nfft(
+            self.cfg.link.fb,
+            self.per_ui,
+            h_w_response.nfft * self.per_ui,
+        )
+        h_w_response = SampledResponse.from_ir(h_w_response.ir, post_link_cfg)
+        h_w = h_w_response.ir
+
         h_XTs_w = []
         for h_XT_dsamp in imp_pre.h_XTs_dsamp:
-            h_XTs_w.append(np.convolve(h_XT_dsamp, w_ir))
+            h_XT_response = SampledResponse.from_ir(h_XT_dsamp.ir, self.cfg.link)
+            h_XT_w_response = h_XT_response.cascade_ir(w_response, per_ui=self.per_ui)
+            h_XTs_w.append(SampledResponse.from_ir(h_XT_w_response.ir, post_link_cfg))
 
         h_ISI = h_w.copy()
         # Eq. 178A-40: the normalized desired cursor is not residual ISI.
         h_ISI[dte_status.d] = 0.0
         h_ISI[dte_status.d+1:dte_status.d+1+len(dte_status.b_lim)] -= dte_status.b_lim
 
-        sigma_ISI = np.sqrt(imp_pre.sigma_X**2 * np.sum((h_ISI)**2))
+        h_ISI_response = SampledResponse.from_ir(h_ISI, post_link_cfg)
+        sigma_ISI = np.sqrt(imp_pre.sigma_X**2 * np.sum(h_ISI**2))
 
-        h_w_J = _calculate_h_J(h, dte_status.pos, self.cfg.link, w_ir)
+        h_J_response = SampledResponse.from_ir(
+            _calculate_h_J(h, dte_status.pos, self.cfg.link),
+            self.cfg.link,
+        )
+        h_w_J = h_J_response.cascade_ir(w_response, per_ui=self.per_ui)
+        h_w_J = SampledResponse.from_ir(h_w_J.ir, post_link_cfg)
+
+        # Keep post-FFE PSD components on the same sampled grid as pre-DTE.
+        # The PSD records are useful for reporting; final PMF construction
+        # still treats DDJ separately as a dual-Dirac PMF.
+        H_ffe = SampledResponse.from_ir(w_ir, post_link_cfg)
+
+        def _filter_on_post_grid(source: SampledPSD) -> SampledPSD:
+            psd = np.interp(post_link_cfg.theta, source.theta, source.psd)
+            return SampledPSD(
+                theta=post_link_cfg.theta,
+                psd=psd,
+                fb=post_link_cfg.fb,
+            ).filtered_by(H_ffe)
+
+        S_rn = _filter_on_post_grid(imp_pre.S_rn)
+        S_xn = _filter_on_post_grid(imp_pre.S_xn)
+        S_tn = _filter_on_post_grid(imp_pre.S_tn)
+
+        S_jn = _build_psd_from_DFT_response(
+            h_w_J.ir,
+            post_link_cfg,
+            pre_dte_imp_common.sigma_X**2
+            * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+        )
 
         # Separate RJ from DDJ for final PMF construction after the selected phase is known.
         S_jn_RJ = _build_psd_from_DFT_response(
-            imp_pre.h_J,
-            self.cfg.link,
+            h_w_J.ir,
+            post_link_cfg,
             pre_dte_imp_common.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
         )
-        S_gn_adc = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ)
+        S_gn_adc = S_rn.add(S_tn).add(S_jn_RJ)
         sigma_gn_adc = S_gn_adc.to_sigma()
 
         pmf_cfg = self.cfg.pmf.resolve(As)
@@ -2552,36 +2685,58 @@ class COM(com_93A.COM):
         else:
             adc_input_pmf = _build_adc_input_pmf_exact(
                 p_sig=p_sig,
-                h_dsamp=imp_pre.h_dsamp,
+                h_dsamp=imp_pre.h_dsamp.ir,
                 h_XTs_dsamp=imp_pre.h_XTs_dsamp,
                 A_DD=self.cfg.imp.A_DD,
-                h_J=imp_pre.h_J,
+                h_J=imp_pre.h_J.ir,
                 sigma_gn=sigma_gn_adc,
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
                 pmf_cfg=pmf_cfg,
             )
 
+        if adc_input_pmf.delta is None:
+            S_qn = _zero_sampled_psd(self.cfg.link)
+        else:
+            S_qn = SampledPSD.from_constant(
+                post_link_cfg.theta,
+                (adc_input_pmf.delta**2 / 12.0) / self.cfg.link.fb,
+                post_link_cfg.fb,
+            )
+        S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
+
         return COMImpairmentStatus(
             post_ffe=COMImpStageStatus(
                 psd=COMPSDStatus(
                 As=As,
+                S_rn=S_rn,
+                sigma_rn=S_rn.to_sigma(),
+                S_xn=S_xn,
+                sigma_xn=S_xn.to_sigma(),
+                S_tn=S_tn,
+                sigma_tn=S_tn.to_sigma(),
+                S_jn=S_jn,
+                sigma_jn=S_jn.to_sigma(),
+                S_qn=S_qn,
+                sigma_qn=S_qn.to_sigma(),
+                S_total=S_total,
+                sigma_total=S_total.to_sigma(),
                 S_jn_RJ=S_jn_RJ,
                 S_gn_adc=S_gn_adc,
                 sigma_gn_adc=sigma_gn_adc,
                 sigma_ISI=sigma_ISI,
                 ),
-                eq_ch=COMEqChannelStatus(
-                    h_XTs_dsamp=imp_pre.h_XTs_dsamp,
-                    h_dsamp=imp_pre.h_dsamp,
-                    h_tn=imp_pre.h_tn,
-                    h_J=imp_pre.h_J,
-                    h_w=h_w,
-                    h_XTs_w=h_XTs_w,
-                    h_ISI=h_ISI,
-                    h_w_J=h_w_J,
-                ),
                 adc_input=adc_input_pmf,
+            ),
+            eq_ch=COMEqChannelStatus(
+                h_XTs_dsamp=imp_pre.h_XTs_dsamp,
+                h_dsamp=imp_pre.h_dsamp,
+                h_tn=imp_pre.h_tn,
+                h_J=imp_pre.h_J,
+                h_w=h_w_response,
+                h_XTs_w=h_XTs_w,
+                h_ISI=h_ISI_response,
+                h_w_J=h_w_J,
             ),
         )
 
@@ -2604,13 +2759,18 @@ class COM(com_93A.COM):
         p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg)
 
         # pmf of ISI
-        p_ISI = _build_pmf_interference_93A(p_sig, imp_status.h_ISI, pmf_cfg, name="ISI")
+        p_ISI = _build_pmf_interference_93A(p_sig, imp_status.h_ISI.ir, pmf_cfg, name="ISI")
 
         # pmf of XT (all combined)
         p_w_XT_all = _build_pmf_w_XT_all(p_sig, imp_status.h_XTs_w, pmf_cfg)
 
         # pmf of tx Dual-dirac jitter
-        p_w_DD = _build_pmf_interference_93A(p_sig, imp_cfg.A_DD * imp_status.h_w_J, pmf_cfg, name="Dual-Dirac")
+        p_w_DD = _build_pmf_interference_93A(
+            p_sig,
+            imp_cfg.A_DD * imp_status.h_w_J.ir,
+            pmf_cfg,
+            name="Dual-Dirac",
+        )
 
         # Final quantization PMF consumes the exact ADC-input material prepared
         # by calculate_post_ffe_imp(). Pre-DTE S_qn remains MMSE-only.
@@ -2626,7 +2786,7 @@ class COM(com_93A.COM):
                 )
             p_delta = Pmf1D.uniform(adc_input_pmf.delta, pmf_cfg)
             p_qn = p_delta.fir_filter(
-                dte_status.w_lim,
+                _ffe_impulse_from_dte_status(dte_status),
                 keep_mass = pmf_cfg.keep_mass,
                 dx_ref = pmf_cfg.dy,
                 tap_abs_th = pmf_cfg.tap_abs_th,
@@ -2713,6 +2873,7 @@ __all__ = [
     "COMRunStatus",
     "COMRunConfig",
     "COMMainCursorError",
+    "COMLengthMismatchError",
     "COMTxfirMainCursorError",
     "COMPkgConfig",
     "COMPSDStatus",
@@ -2743,33 +2904,33 @@ __all__ = [
 
 if __name__ == "__main__":
     # Debug entry point. Run this module, rather than this file directly:
-    #   python -m serdes_coding.com_model_178A
+    #   python -m serdes_coding.models.com_model_178A
     # Change only CASE_ID when switching between project-owned 178A cases.
     import sys
 
     # excel_to_config_178A imports the versioned config dataclasses from this
     # module. When run with ``-m``, expose the current ``__main__`` module at
     # its package name so that parser and runner share one class identity.
-    sys.modules["serdes_coding.com_model_178A"] = sys.modules[__name__]
+    sys.modules["serdes_coding.models.com_model_178A"] = sys.modules[__name__]
 
     # ``%run -m`` may reuse a previously imported parser in an IPython
     # kernel. Reload it so its imported 178A dataclasses always refer to the
     # module instance executing this debug entry.
     import importlib
     if __package__:
-        from . import com_excel_io
-        from .com_report_178A import COMReport178A
+        from ..io import com_excel_io
+        from ..reporting.com_report_178A import COMReport178A
     else:
-        from serdes_coding import com_excel_io
-        from serdes_coding.com_report_178A import COMReport178A
+        from serdes_coding.io import com_excel_io
+        from serdes_coding.reporting.com_report_178A import COMReport178A
 
     excel_to_config_178A = importlib.reload(com_excel_io).excel_to_config_178A
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[2]
-    CASE_ID = "c2m_8023dj_4p13p0_50mm"
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    CASE_ID = "c2m_8023dj_4p13p0_500mm"
     CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID
     CONFIG_PATH = CASE_ROOT / "config" / "config_178A.xlsx"
-    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run"
+    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run_compare"
 
     cfg = excel_to_config_178A(str(CONFIG_PATH))
     print("Single-run execution config:")

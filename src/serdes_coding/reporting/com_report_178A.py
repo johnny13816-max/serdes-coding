@@ -7,14 +7,15 @@ from typing import Any, Optional
 
 import numpy as np
 
-from .com_model_178A import (
+from ..models.com_model_178A import (
     COMAdcInputPMF,
     COMConfig,
     COMDTEStatus,
     COMImpStageStatus,
     COMStatus,
 )
-from .pmf_handler import Pmf1D
+from ..utilities.pmf import Pmf1D
+from ..utilities.link import SampledResponse
 
 
 class COMReport178A:
@@ -194,6 +195,31 @@ class COMReport178A:
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.8},
         )
 
+    def _annotate_imp_config(self, ax: Any) -> None:
+        """Annotate impairment plots with the physical impairment inputs."""
+        imp = self.cfg.imp
+        lines = [
+            f"R_LM={imp.R_LM:.4g}",
+            f"SNR_TX={imp.SNR_TX:.3g} dB",
+            f"sigma_RJ={imp.sigma_RJ:.3e} UI",
+            f"A_DD={imp.A_DD:.3e} UI",
+            f"eta_0={imp.eta_0:.3e} V^2/Hz",
+        ]
+        if imp.N_qb is not None:
+            lines.append(f"N_qb={imp.N_qb}")
+        if imp.P_qc is not None:
+            lines.append(f"P_qc={imp.P_qc:.3e}")
+        ax.text(
+            0.01,
+            0.01,
+            "\n".join(lines),
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=8,
+            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85},
+        )
+
     def _title(self, ax: Any, title: str, subtitle: str = "") -> None:
         ax.set_title(title, fontsize=14, pad=20 if subtitle else 8)
         if subtitle:
@@ -216,8 +242,12 @@ class COMReport178A:
         return str(Path(root) / name)
 
     def _frequency_xlim(self, freqs: np.ndarray) -> tuple[float, float]:
+        positive = np.asarray(freqs, dtype=float)
+        positive = positive[positive > 0.0]
+        if positive.size == 0:
+            raise ValueError("Frequency axis must contain a positive bin for log-scale plots.")
         hi = min(float(freqs[-1]), 1.1 * float(self.cfg.link.fb))
-        return (0.0, hi)
+        return (float(positive[0]), hi)
 
     @staticmethod
     def _available(stage: Optional[COMImpStageStatus]) -> bool:
@@ -243,7 +273,7 @@ class COMReport178A:
             ("S_all", path.S_all, "Cascaded Sdd path"),
         ):
             fig, ax, output = self._subplots(out_dir, f"{field_name}_sdd.png")
-            model.plot_sdd(ax=ax, xlim=self._frequency_xlim(model.freqs))
+            model.plot_sdd(ax=ax, logx=True, xlim=self._frequency_xlim(model.freqs))
             self._title(ax, f"{label} {field_name}", subtitle)
             self._annotate_config(ax)
             self._finish(fig, output)
@@ -253,8 +283,12 @@ class COMReport178A:
             fig, ax, output = self._subplots(out_dir, f"{field_name}_IL.png")
             model.plot_IL(
                 ax=ax,
+                logx=True,
                 xlim=self._frequency_xlim(model.freqs),
             )
+            f_nyq = self.cfg.link.fb / 2.0
+            if model.freqs[0] <= f_nyq <= model.freqs[-1]:
+                model.annotate_IL(ax, f_nyq, label="f_nyq")
             self._title(
                 ax,
                 f"{label} {field_name} IL",
@@ -264,6 +298,12 @@ class COMReport178A:
             self._finish(fig, output)
             outputs[f"{field_name}_IL"] = output
 
+        g_1 = self.cfg.filter.g_1
+        g_2 = self.cfg.filter.g_2
+        f_p3 = self.cfg.filter.f_p3
+        f_p3_note = "bypass" if f_p3 is None else f"{f_p3 / 1e9:.4g} GHz"
+        g_1_note = "bypass" if g_1 is None else f"{g_1:.4g} dB"
+        g_2_note = "bypass" if g_2 is None else f"{g_2:.4g} dB"
         filter_subtitles = {
             "H_ffe": f"txfir={np.asarray(self.cfg.filter.txfir).tolist()}",
             "H_t": f"Tr={self.cfg.filter.Tr * 1e12:.4g} ps",
@@ -275,11 +315,12 @@ class COMReport178A:
             ),
             "H_r": f"3dB BW: fr={self.cfg.filter.fr / 1e9:.4g} GHz",
             "H_ctf": (
+                f"g1={g_1_note}, g2={g_2_note}; "
                 f"zeros: fz1={self.cfg.filter.f_z1 / 1e9:.4g} GHz, "
                 f"fz2={self.cfg.filter.f_z2 / 1e9:.4g} GHz; "
                 f"poles: fp1={self.cfg.filter.f_p1 / 1e9:.4g} GHz, "
                 f"fp2={self.cfg.filter.f_p2 / 1e9:.4g} GHz, "
-                f"fp3={self.cfg.filter.f_p3 / 1e9:.4g} GHz"
+                f"fp3={f_p3_note}"
             ),
             "H_all": "All continuous-time filters cascaded",
         }
@@ -294,7 +335,7 @@ class COMReport178A:
             fig, ax, output = self._subplots(out_dir, f"{field_name}_tf.png")
             segment.plot_tf(
                 ax=ax,
-                x_scale="linear",
+                x_scale="log",
                 xlim=self._frequency_xlim(segment.freqs),
             )
             if field_name == "H_r":
@@ -311,6 +352,10 @@ class COMReport178A:
                         else "IL @ f_nyq = outside measured band"
                     )
                 )
+            if field_name in {"H_21", "H_all"}:
+                f_nyq = self.cfg.link.fb / 2.0
+                if segment.freqs[0] <= f_nyq <= segment.freqs[-1]:
+                    segment.annotate_f(ax, f_nyq)
             self._title(ax, f"{label} {field_name}", filter_subtitles[field_name])
             if field_name != "H_ctf":
                 self._annotate_config(ax)
@@ -393,18 +438,19 @@ class COMReport178A:
         outputs["mse_by_pos"] = output
 
         pre = self.status.imp.pre_dte if self.status.imp is not None else None
-        if pre is not None and pre.eq_ch is not None and pre.eq_ch.h_dsamp is not None:
+        eq_ch = self.status.imp.eq_ch if self.status.imp is not None else None
+        if pre is not None and eq_ch is not None and eq_ch.h_dsamp is not None:
             victim_pulse = self.status.paths[0].pulse if self.status.paths else None
             if victim_pulse is not None:
                 outputs["h_dsamp"] = self._plot_pulse_and_h_dsamp(
                     victim_pulse.ir,
-                    pre.eq_ch.h_dsamp,
+                    eq_ch.h_dsamp.ir,
                     dte,
                     out_dir,
                 )
             else:
                 outputs["h_dsamp"] = self._plot_sequence(
-                    pre.eq_ch.h_dsamp,
+                    eq_ch.h_dsamp.ir,
                     out_dir,
                     "h_dsamp.png",
                     "Selected h_dsamp",
@@ -466,13 +512,18 @@ class COMReport178A:
     def _plot_dte_coefficients(self, dte: COMDTEStatus, directory: str) -> dict[str, str]:
         """Plot limited and unlimited FFE/DFE coefficients with their limiters."""
         outputs: dict[str, str] = {}
-        w_index = np.arange(len(dte.w_lim), dtype=int) - self.cfg.dte.d_w
+        w_lim = dte.w_lim.ir if isinstance(dte.w_lim, SampledResponse) else dte.w_lim
+        # ``w_lim`` is stored as a SampledResponse and therefore includes its
+        # zero-padded FFT grid.  Coefficient plots must use only the actual FFE
+        # tap vector, whose length also defines the limiter mask.
+        w_lim = np.asarray(w_lim, dtype=float)[:len(dte.w)]
+        w_index = np.arange(len(w_lim), dtype=int) - self.cfg.dte.d_w
         b_index = np.arange(1, len(dte.b_lim) + 1, dtype=int)
 
         # DFE feedback is subtracted from the sampled response. Plot -b so both
         # families use the equalized-pulse sign convention.
         fig, ax, output = self._subplots(directory, "dte_coefficients.png", figsize=(9, 4))
-        ax.stem(w_index, dte.w_lim, linefmt="C0-", markerfmt="C0o", basefmt=" ", label="FFE w_lim")
+        ax.stem(w_index, w_lim, linefmt="C0-", markerfmt="C0o", basefmt=" ", label="FFE w_lim")
         if len(dte.b_lim):
             ax.stem(b_index, -dte.b_lim, linefmt="C1-", markerfmt="C1s", basefmt=" ", label="DFE -b_lim")
         ax.axvline(0.0, color="tab:green", linestyle="--", linewidth=0.8, label="FFE main")
@@ -604,15 +655,15 @@ class COMReport178A:
         outputs: dict[str, str] = {}
 
         if stage.psd is not None:
-            names = ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total") if pre_dte else ("S_jn_RJ", "S_gn_adc")
+            names = ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total")
             psd_values = [(name, getattr(stage.psd, name)) for name in names if getattr(stage.psd, name) is not None]
             if psd_values:
                 outputs["psd"] = self._plot_psd_group(psd_values, directory, "psd_components.png", f"{directory_name} PSD")
 
         outputs["imp_proportion"] = self._plot_imp_proportion(stage, directory, directory_name, pre_dte=pre_dte)
 
-        if stage.eq_ch is not None:
-            eq = stage.eq_ch
+        eq = self.status.imp.eq_ch if self.status.imp is not None else None
+        if eq is not None:
             primary = [("h_dsamp", eq.h_dsamp), ("h_tn", eq.h_tn), ("h_J", eq.h_J)] if pre_dte else [("h_w", eq.h_w), ("h_ISI", eq.h_ISI), ("h_w_J", eq.h_w_J)]
             reference_index = (
                 int(self.status.dfe.d) - int(self.cfg.dte.d_w)
@@ -624,7 +675,7 @@ class COMReport178A:
             for name, values in primary:
                 if values is not None:
                     outputs[name] = self._plot_sequence(
-                        values,
+                        values.ir if isinstance(values, SampledResponse) else values,
                         directory,
                         f"{name}.png",
                         f"{directory_name} {name}",
@@ -634,7 +685,7 @@ class COMReport178A:
             xtalk_name, xtalk_values = ("h_XTs_dsamp", eq.h_XTs_dsamp) if pre_dte else ("h_XTs_w", eq.h_XTs_w)
             if xtalk_values:
                 outputs[xtalk_name] = self._plot_sequence_group(
-                    xtalk_values,
+                    [value.ir if isinstance(value, SampledResponse) else value for value in xtalk_values],
                     directory,
                     f"{xtalk_name}.png",
                     f"{directory_name} {xtalk_name}",
@@ -699,7 +750,7 @@ class COMReport178A:
         ax.set_ylim(0.0, max(100.0, float(np.max(percentages)) * 1.18))
         ax.grid(axis="y", alpha=0.35)
         self._title(ax, f"{stage_name} Impairment Proportion", "Percentage of total impairment variance")
-        self._annotate_config(ax)
+        self._annotate_imp_config(ax)
         self._finish(fig, output)
         return output
 
@@ -903,8 +954,25 @@ class COMReport178A:
             )
             if pmf_status.y0 is not None:
                 cdf_ax.axhline(der0, color="tab:red", linestyle=":", linewidth=0.8)
-            self._title(pdf_ax, "Total PMF PDF", f"DER_0={der0:.3e}, A_ni={abs(y0):.3e} V")
-            self._title(cdf_ax, "Total PMF CDF", "DER_0 threshold")
+            cdf_values = np.asarray(total.cdf, dtype=float)
+            positive_cdf = cdf_values[np.isfinite(cdf_values) & (cdf_values > 0.0)]
+            cdf_ax.set_yscale("log")
+            cdf_lower = max(
+                1.0e-12,
+                float(np.min(positive_cdf)) * 0.5 if positive_cdf.size else 1.0e-12,
+            )
+            cdf_ax.set_ylim(cdf_lower, 1.0)
+            com_text = (
+                f"COM={pmf_status.COM:.3f} dB"
+                if pmf_status.COM is not None
+                else "COM=None"
+            )
+            self._title(
+                pdf_ax,
+                "Total PMF PDF",
+                f"{com_text}, DER_0={der0:.3e}, A_ni={abs(y0):.3e} V",
+            )
+            self._title(cdf_ax, "Total PMF CDF", f"{com_text}, DER_0 threshold")
             self._annotate_pmf_settings(cdf_ax, total)
             self._finish(fig, output)
             outputs["combined_cdf"] = output

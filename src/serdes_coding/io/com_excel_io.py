@@ -4,8 +4,8 @@ from pathlib import Path
 from typing import Optional
 import numpy as np
 
-from .link_segment import LinkConfig
-from .com_model_93A import (
+from ..utilities.link import LinkConfig
+from ..models.com_model_93A import (
     COMChannelConfig,
     COMConfig,
     COMDFEConfig,
@@ -16,7 +16,7 @@ from .com_model_93A import (
     COMPkgConfig,
 )
 
-from .com_model_178A import (
+from ..models.com_model_178A import (
     COMDevicePackageConfig,
     COMDeviceTermConfig,
     COMConfig as COMConfig_178A,
@@ -121,10 +121,11 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
             fr=_fixed_float(fixed, "fr"),
             g_DC=_fixed_float(fixed, "g_DC"),
             g_DC2=_fixed_float(fixed, "g_DC2"),
-            f_z=_fixed_float(fixed, "f_z"),
-            f_LF=_fixed_float(fixed, "f_LF"),
+            f_z1=_fixed_float(fixed, "f_z1"),
+            f_z2=_fixed_float(fixed, "f_z2"),
             f_p1=_fixed_float(fixed, "f_p1"),
             f_p2=_fixed_float(fixed, "f_p2"),
+            f_p3=_fixed_optional_float(fixed, "f_p3"),
             A_v=_fixed_float(fixed, "A_v"),
             A_fe=_fixed_float(fixed, "A_fe"),
             A_ne=_fixed_float(fixed, "A_ne"),
@@ -301,7 +302,7 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             f_z2=_fixed_float(fixed, "f_z2"),
             f_p1=_fixed_float(fixed, "f_p1"),
             f_p2=_fixed_float(fixed, "f_p2"),
-            f_p3=_fixed_float(fixed, "f_p3"),
+            f_p3=_fixed_optional_float(fixed, "f_p3"),
             A_v=_fixed_float(fixed, "A_v"),
             A_fe=_fixed_float(fixed, "A_fe"),
             A_ne=_fixed_float(fixed, "A_ne"),
@@ -658,6 +659,10 @@ def _coerce_bool(value: object) -> bool:
     if isinstance(value, (int, float, np.integer, np.floating)):
         return bool(value)
     text = str(value).strip().lower()
+    if text.startswith("="):
+        text = text[1:].strip()
+    if text.endswith("()"):
+        text = text[:-2].strip()
     if text in {"true", "yes", "y", "1"}:
         return True
     if text in {"false", "no", "n", "0"}:

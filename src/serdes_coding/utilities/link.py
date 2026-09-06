@@ -1093,6 +1093,38 @@ class SampledResponse:
             raise ValueError("SampledResponse theta grids must match.")
         return type(self).from_tf(self.theta, self.tf * other.tf, self.fb)
 
+    def cascade_ir(self, other: 'SampledResponse', *, per_ui: int) -> 'SampledResponse':
+        """Cascade finite sampled-time responses by full linear convolution.
+
+        The stored ``ir`` arrays are normally zero-padded for their own FFT
+        grids.  Trailing zero padding is removed before convolution, then a
+        new sampled-domain grid is created for the complete linear result.
+        No continuous-time ``dt`` factor is applied to this discrete-time
+        cascade.
+        """
+        if not np.isclose(self.fb, other.fb):
+            raise ValueError("SampledResponse fb values must match.")
+
+        def _finite_support(ir: np.ndarray) -> np.ndarray:
+            ir = np.asarray(ir, dtype=float)
+            nonzero = np.flatnonzero(ir != 0.0)
+            return ir[: int(nonzero[-1]) + 1] if len(nonzero) else ir[:1]
+
+        ir_total = np.convolve(_finite_support(self.ir), _finite_support(other.ir))
+        if len(ir_total) % 2 != 0:
+            ir_total = np.r_[ir_total, 0.0]
+
+        per_ui = int(per_ui)
+        if per_ui <= 0:
+            raise ValueError("per_ui must be positive.")
+        # SampledResponse does not retain per_ui, so the caller supplies it
+        # to construct the corresponding LinkConfig sampled grid.
+        cfg_nfft = max(2, len(ir_total))
+        return type(self).from_ir(
+            ir_total,
+            LinkConfig.from_Nfft(self.fb, per_ui, cfg_nfft * per_ui),
+        )
+
     def plot_tf(
         self,
         ax: Optional[Axes] = None,

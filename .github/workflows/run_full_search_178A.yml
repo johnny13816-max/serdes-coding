@@ -1,6 +1,9 @@
 name: Run 178A full search
 
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       case_id:
@@ -11,6 +14,23 @@ on:
         description: "Candidates per matrix runner"
         required: true
         default: "1000"
+      mode:
+        description: "Use dry-run first; full executes the complete search space"
+        required: true
+        type: choice
+        options:
+          - dry-run
+          - scaled
+          - full
+        default: dry-run
+      candidate_limit:
+        description: "Maximum candidates; use 10000 for the first limited full run"
+        required: true
+        default: "10000"
+      target_candidates:
+        description: "Target size for scaled mode"
+        required: true
+        default: "10000"
 
 permissions:
   contents: read
@@ -36,13 +56,19 @@ jobs:
       - name: Create search plan
         id: plan
         env:
-          CASE_ID: ${{ inputs.case_id }}
-          GROUP_SIZE: ${{ inputs.group_size }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
+          MODE: ${{ inputs.mode || 'dry-run' }}
+          CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '10000' }}
+          TARGET_CANDIDATES: ${{ inputs.target_candidates || '10000' }}
         run: >-
           python scripts/run_full_search_178A.py prepare
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
           --group-size "${GROUP_SIZE}"
+          --mode "${MODE}"
+          --candidate-limit "${CANDIDATE_LIMIT}"
+          --target-candidates "${TARGET_CANDIDATES}"
           --matrix-output "$GITHUB_OUTPUT"
 
       - name: Upload search plan
@@ -80,8 +106,8 @@ jobs:
 
       - name: Run partial group
         env:
-          CASE_ID: ${{ inputs.case_id }}
-          GROUP_SIZE: ${{ inputs.group_size }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
         run: >-
           python scripts/run_full_search_178A.py partial
           --case-root "cases/${CASE_ID}"
@@ -93,7 +119,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: full-search-group-${{ matrix.group_id }}
-          path: artifacts/partial_search/group_results/group_${{ format('{0:03d}', matrix.group_id) }}.csv
+          path: artifacts/partial_search/group_results/*.csv
 
   finalize:
     needs: partial_search
@@ -126,11 +152,13 @@ jobs:
 
       - name: Merge and finalize
         env:
-          CASE_ID: ${{ inputs.case_id }}
+          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
+          MODE: ${{ inputs.mode || 'dry-run' }}
         run: >-
           python scripts/run_full_search_178A.py finalize
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
+          --mode "${MODE}"
 
       - name: Upload final results
         if: always()
