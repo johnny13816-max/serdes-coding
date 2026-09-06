@@ -659,6 +659,10 @@ def _coerce_bool(value: object) -> bool:
     if isinstance(value, (int, float, np.integer, np.floating)):
         return bool(value)
     text = str(value).strip().lower()
+    if text.startswith("="):
+        text = text[1:].strip()
+    if text.endswith("()"):
+        text = text[:-2].strip()
     if text in {"true", "yes", "y", "1"}:
         return True
     if text in {"false", "no", "n", "0"}:
