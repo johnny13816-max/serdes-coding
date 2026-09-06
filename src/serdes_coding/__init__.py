@@ -1,6 +1,6 @@
 """SerDes coding utilities and COM modeling experiments."""
 
-from .com_model_93A import (
+from .models.com_model_93A import (
     COM as COM93A,
     COMChannelConfig,
     COMConfig,
@@ -23,7 +23,8 @@ from .com_model_93A import (
     IEEECOMFilter,
     IEEECOMSparam,
 )
-from .link_segment import ContinuousPSD, OneSidePSD, SampledPSD, SampledResponse, SparamModel
+from .utilities.link import ContinuousPSD, OneSidePSD, SampledPSD, SampledResponse
+from .utilities.sparam import SparamModel
 
 
 def __getattr__(name: str):
@@ -34,11 +35,11 @@ def __getattr__(name: str):
     identity before runpy executes it as ``__main__``.
     """
     if name == "COM178A":
-        from .com_model_178A import COM
+        from .models.com_model_178A import COM
 
         return COM
     if name == "COMReport178A":
-        from .com_report_178A import COMReport178A
+        from .reporting.com_report_178A import COMReport178A
 
         return COMReport178A
     if name in {
@@ -48,7 +49,7 @@ def __getattr__(name: str):
         "excel_to_search_config",
         "excel_to_search_config_178A",
     }:
-        from . import com_excel_io
+        from .io import com_excel_io
 
         return getattr(com_excel_io, name)
     if name in {
@@ -61,7 +62,7 @@ def __getattr__(name: str):
         "finalize_search_178A",
         "run_full_search_178A",
     }:
-        from . import com_search_178A
+        from .search import com_search_178A
 
         source_name = {
             "COMSearchRow178A": "COMSearchRow",
