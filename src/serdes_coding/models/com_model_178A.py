@@ -24,7 +24,7 @@ try:
     from ..search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
     from . import com_model_93A as com_93A
 except ImportError:
-    # Support direct interactive execution: ``%run .../com_model_178A.py``.
+    # Support direct interactive execution of this canonical module.
     # Package execution continues to use the relative imports above.
     source_root = str(Path(__file__).resolve().parents[2])
     if source_root not in sys.path:
@@ -686,6 +686,11 @@ class COMImpairmentConfig(_PrettyDataclass):
             if not np.isfinite(self.P_qc) or self.P_qc <= 0.0 or self.P_qc >= 1.0:
                 raise ValueError("COMImpairmentConfig.P_qc must be in (0, 1) when provided.")
 
+@dataclass(repr=False)
+class COMMLSDConfig(_PrettyDataclass):
+    enable: bool
+    trunc_len: int
+    delta_com_an: float
 
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
@@ -2894,7 +2899,6 @@ if __name__ == "__main__":
     # excel_to_config_178A imports the versioned config dataclasses from this
     # module. When run with ``-m``, expose the current ``__main__`` module at
     # its package name so that parser and runner share one class identity.
-    sys.modules["serdes_coding.com_model_178A"] = sys.modules[__name__]
     sys.modules["serdes_coding.models.com_model_178A"] = sys.modules[__name__]
 
     # ``%run -m`` may reuse a previously imported parser in an IPython

@@ -30,9 +30,8 @@ from .utilities.sparam import SparamModel
 def __getattr__(name: str):
     """Load optional 178A public APIs without pre-importing its runnable module.
 
-    This keeps ``python -m serdes_coding.com_model_178A`` to one module
-    instance. Eagerly importing that module here would create a second class
-    identity before runpy executes it as ``__main__``.
+    This keeps the versioned model modules lazy and avoids importing the
+    runnable debug module during package initialization.
     """
     if name == "COM178A":
         from .models.com_model_178A import COM

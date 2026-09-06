@@ -242,8 +242,12 @@ class COMReport178A:
         return str(Path(root) / name)
 
     def _frequency_xlim(self, freqs: np.ndarray) -> tuple[float, float]:
+        positive = np.asarray(freqs, dtype=float)
+        positive = positive[positive > 0.0]
+        if positive.size == 0:
+            raise ValueError("Frequency axis must contain a positive bin for log-scale plots.")
         hi = min(float(freqs[-1]), 1.1 * float(self.cfg.link.fb))
-        return (0.0, hi)
+        return (float(positive[0]), hi)
 
     @staticmethod
     def _available(stage: Optional[COMImpStageStatus]) -> bool:
@@ -269,7 +273,7 @@ class COMReport178A:
             ("S_all", path.S_all, "Cascaded Sdd path"),
         ):
             fig, ax, output = self._subplots(out_dir, f"{field_name}_sdd.png")
-            model.plot_sdd(ax=ax, xlim=self._frequency_xlim(model.freqs))
+            model.plot_sdd(ax=ax, logx=True, xlim=self._frequency_xlim(model.freqs))
             self._title(ax, f"{label} {field_name}", subtitle)
             self._annotate_config(ax)
             self._finish(fig, output)
@@ -279,6 +283,7 @@ class COMReport178A:
             fig, ax, output = self._subplots(out_dir, f"{field_name}_IL.png")
             model.plot_IL(
                 ax=ax,
+                logx=True,
                 xlim=self._frequency_xlim(model.freqs),
             )
             self._title(
@@ -320,7 +325,7 @@ class COMReport178A:
             fig, ax, output = self._subplots(out_dir, f"{field_name}_tf.png")
             segment.plot_tf(
                 ax=ax,
-                x_scale="linear",
+                x_scale="log",
                 xlim=self._frequency_xlim(segment.freqs),
             )
             if field_name == "H_r":
@@ -494,6 +499,10 @@ class COMReport178A:
         """Plot limited and unlimited FFE/DFE coefficients with their limiters."""
         outputs: dict[str, str] = {}
         w_lim = dte.w_lim.ir if isinstance(dte.w_lim, SampledResponse) else dte.w_lim
+        # ``w_lim`` is stored as a SampledResponse and therefore includes its
+        # zero-padded FFT grid.  Coefficient plots must use only the actual FFE
+        # tap vector, whose length also defines the limiter mask.
+        w_lim = np.asarray(w_lim, dtype=float)[:len(dte.w)]
         w_index = np.arange(len(w_lim), dtype=int) - self.cfg.dte.d_w
         b_index = np.arange(1, len(dte.b_lim) + 1, dtype=int)
 
