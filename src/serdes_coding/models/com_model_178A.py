@@ -296,13 +296,13 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
         f_z2: float,
         f_p1: float,
         f_p2: float,
-        f_p3: float,
+        f_p3: float | None = None,
     ) -> 'IEEECOMFilter':
         """
         Build the 178A receiver equalizer transfer function.
 
-        The IO follows the 178A CTF shape with two independent zeros and
-        three independent poles.
+        The IO follows the 178A CTF shape with two independent zeros and two
+        required poles. An optional third pole is included only when supplied.
 
         Parameters
         ----------
@@ -312,11 +312,18 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
             178A CTF gain terms in dB.
         f_z1, f_z2:
             178A CTF zero frequencies in Hz.
-        f_p1, f_p2, f_p3:
-            178A CTF pole frequencies in Hz.
+        f_p1, f_p2:
+            Required 178A CTF pole frequencies in Hz.
+        f_p3:
+            Optional third pole frequency in Hz. ``None`` bypasses this pole.
         """
         f = cfg.freqs
-        denom = (1 + 1j * f / f_p1) * (1 + 1j * f / f_p2) * (1 + 1j * f / f_p3)
+        pole_values = (f_p1, f_p2) if f_p3 is None else (f_p1, f_p2, f_p3)
+        if any(float(value) <= 0.0 or not np.isfinite(float(value)) for value in pole_values):
+            raise ValueError("CTF pole frequencies must be finite and positive.")
+        denom = np.ones_like(f, dtype=complex)
+        for pole in pole_values:
+            denom *= 1 + 1j * f / float(pole)
         H_ctf = (10**(g_1 / 20) + 1j * f / f_z1) * (10**(g_2 / 20) + 1j * f / f_z2) / denom
         return cls.from_tf(f, H_ctf, cfg)
 
@@ -1142,7 +1149,6 @@ def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter
         "f_z2": ft_cfg.f_z2,
         "f_p1": ft_cfg.f_p1,
         "f_p2": ft_cfg.f_p2,
-        "f_p3": ft_cfg.f_p3,
     }
     missing = [name for name, value in required.items() if value is None]
     if missing:
@@ -1159,7 +1165,7 @@ def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter
         required["f_z2"],
         required["f_p1"],
         required["f_p2"],
-        required["f_p3"],
+        ft_cfg.f_p3,
     )
 
 def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:
@@ -2918,7 +2924,7 @@ if __name__ == "__main__":
     CASE_ID = "c2m_8023dj_4p13p0_50mm"
     CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID
     CONFIG_PATH = CASE_ROOT / "config" / "config_178A.xlsx"
-    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run"
+    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run_compare"
 
     cfg = excel_to_config_178A(str(CONFIG_PATH))
     print("Single-run execution config:")
