@@ -33,6 +33,7 @@ PARTIAL_RESULT_FIELDS = (
     "status", "error", "mse", "mse_dB", "ts", "pos",
 )
 FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + ("final_status", "final_error", "COM_dB")
+PARTIAL_RESULT_REPORT_MULTIPLIER = 10
 
 
 @dataclass(repr=False)
@@ -276,7 +277,12 @@ def finalize_search(
     *,
     include_plots: bool = True,
 ) -> COMSearchStatus:
-    """Re-run top-K minimum-MSE candidates with `search_final` and export them."""
+    """Re-run top-K candidates and export a wider partial-result ranking.
+
+    ``search_top_k`` controls the expensive full COM reruns.  The CSV keeps
+    ten times that many successful partial-search rows for diagnosis; rows
+    beyond top-K have blank final-status and COM columns by design.
+    """
     artifacts = SearchArtifacts(Path(report_dir))
     partial_rows = merge_partial_results(artifacts.root)
     successful = sorted(
@@ -287,9 +293,15 @@ def finalize_search(
         raise RuntimeError("No successful partial-search candidate is available for finalization.")
 
     artifacts.top_k_dir.mkdir(parents=True, exist_ok=True)
-    final_rows: list[dict[str, Any]] = []
+    full_com_rows = successful[:cfg.execution.search_top_k]
+    report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * cfg.execution.search_top_k
+    report_rows = successful[:report_limit]
+    final_rows_by_idx = {
+        row.idx: _final_row(row, status="")
+        for row in report_rows
+    }
     finalized: list[tuple[COMSearchRow, Any]] = []
-    for row in successful[:cfg.execution.search_top_k]:
+    for row in full_com_rows:
         candidate_cfg = _config_with_candidate(cfg, row.candidate)
         try:
             from ..models.com_model_178A import COM
@@ -305,12 +317,16 @@ def finalize_search(
                 include_plots=include_plots,
             )
             finalized.append((row, status))
-            final_rows.append(_final_row(row, status="ok", com_value=status.pmf.COM if status.pmf else None))
+            final_rows_by_idx[row.idx] = _final_row(
+                row,
+                status="ok",
+                com_value=status.pmf.COM if status.pmf else None,
+            )
         except Exception as exc:
             # Finalization is an aggregation stage: preserve one candidate's
             # failure and continue so the remaining top-K candidates can be
             # evaluated and reported.
-            final_rows.append(
+            final_rows_by_idx[row.idx] = (
                 _final_row(
                     row,
                     status="error",
@@ -318,6 +334,7 @@ def finalize_search(
                 )
             )
 
+    final_rows = [final_rows_by_idx[row.idx] for row in report_rows]
     _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
     if not finalized:
         raise RuntimeError(
@@ -458,7 +475,7 @@ def _row_to_dict(row: COMSearchRow) -> dict[str, Any]:
 def _final_row(
     row: COMSearchRow,
     *,
-    status: Literal["ok", "error"],
+    status: Literal["", "ok", "error"],
     com_value: Optional[float] = None,
     error: str = "",
 ) -> dict[str, Any]:
