@@ -31,6 +31,14 @@ on:
         description: "Target size for scaled mode"
         required: true
         default: "10000"
+      phase_sweep:
+        description: "Sampling-phase policy for search_sweep"
+        required: true
+        type: choice
+        options:
+          - coarse_fine
+          - each_phase
+        default: coarse_fine
 
 permissions:
   contents: read
@@ -61,6 +69,7 @@ jobs:
           MODE: ${{ inputs.mode || 'dry-run' }}
           CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '10000' }}
           TARGET_CANDIDATES: ${{ inputs.target_candidates || '10000' }}
+          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
         run: >-
           python scripts/run_full_search_178A.py prepare
           --case-root "cases/${CASE_ID}"
@@ -69,6 +78,7 @@ jobs:
           --mode "${MODE}"
           --candidate-limit "${CANDIDATE_LIMIT}"
           --target-candidates "${TARGET_CANDIDATES}"
+          --phase-sweep "${PHASE_SWEEP}"
           --matrix-output "$GITHUB_OUTPUT"
 
       - name: Upload search plan
@@ -108,11 +118,13 @@ jobs:
         env:
           CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
           GROUP_SIZE: ${{ inputs.group_size || '1000' }}
+          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
         run: >-
           python scripts/run_full_search_178A.py partial
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
           --group-size "${GROUP_SIZE}"
+          --phase-sweep "${PHASE_SWEEP}"
           --group-id "${{ matrix.group_id }}"
 
       - name: Upload partial result
@@ -154,11 +166,13 @@ jobs:
         env:
           CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
           MODE: ${{ inputs.mode || 'dry-run' }}
+          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
         run: >-
           python scripts/run_full_search_178A.py finalize
           --case-root "cases/${CASE_ID}"
           --output-root artifacts/partial_search
           --mode "${MODE}"
+          --phase-sweep "${PHASE_SWEEP}"
 
       - name: Upload final results
         if: always()

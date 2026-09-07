@@ -89,6 +89,22 @@ def _load(case_root: Path):
     )
 
 
+def _apply_phase_sweep(cfg, phase_sweep: str | None):
+    """Override only the search phase policy for controlled A/B runs."""
+    if phase_sweep is None:
+        return cfg
+    if phase_sweep not in {"coarse_fine", "each_phase"}:
+        raise ValueError("phase_sweep must be 'coarse_fine' or 'each_phase'.")
+    execution = replace(
+        cfg.execution,
+        search_sweep=replace(
+            cfg.execution.search_sweep,
+            pos_sweep_method=phase_sweep,
+        ),
+    )
+    return replace(cfg, execution=execution)
+
+
 def prepare(
     case_root: Path,
     output_root: Path,
@@ -97,10 +113,12 @@ def prepare(
     mode: str,
     candidate_limit: int | None,
     target_candidates: int,
+    phase_sweep: str | None,
 ) -> None:
     if group_size <= 0:
         raise ValueError("group_size must be positive.")
     cfg, search = _load(case_root)
+    cfg = _apply_phase_sweep(cfg, phase_sweep)
     if mode == "dry-run":
         search = _dry_run_search(search)
     elif mode == "scaled":
@@ -126,15 +144,28 @@ def prepare(
     print(f"Prepared {len(matrix)} groups for {sum(int(row['candidate_count']) for row in groups)} candidates.")
 
 
-def partial(case_root: Path, output_root: Path, group_id: int, group_size: int) -> None:
+def partial(
+    case_root: Path,
+    output_root: Path,
+    group_id: int,
+    group_size: int,
+    phase_sweep: str | None,
+) -> None:
     cfg, search = _load(case_root)
+    cfg = _apply_phase_sweep(cfg, phase_sweep)
     cfg = replace(cfg, execution=replace(cfg.execution, search_group_size=group_size))
     output_path = run_partial_group(cfg, search, output_root, group_id)
     print(f"Wrote {output_path}")
 
 
-def finalize(case_root: Path, output_root: Path, mode: str) -> None:
+def finalize(
+    case_root: Path,
+    output_root: Path,
+    mode: str,
+    phase_sweep: str | None,
+) -> None:
     cfg, search = _load(case_root)
+    cfg = _apply_phase_sweep(cfg, phase_sweep)
     rows = merge_partial_results(output_root)
     print(f"Merged {len(rows)} partial-search rows.")
     if mode == "dry-run":
@@ -142,7 +173,7 @@ def finalize(case_root: Path, output_root: Path, mode: str) -> None:
         return
     if mode not in ("scaled", "full"):
         raise ValueError("mode must be 'dry-run', 'scaled', or 'full'.")
-    status = finalize_search(cfg, search, output_root, include_plots=False)
+    status = finalize_search(cfg, search, output_root, include_plots=True)
     print(f"Finalized best candidate {status.best_row.idx}; COM={status.COM}")
 
 
@@ -157,6 +188,12 @@ def main() -> None:
     parser.add_argument("--mode", choices=("dry-run", "scaled", "full"), default="dry-run")
     parser.add_argument("--candidate-limit", type=int)
     parser.add_argument("--target-candidates", type=int, default=10000)
+    parser.add_argument(
+        "--phase-sweep",
+        choices=("coarse_fine", "each_phase"),
+        default=None,
+        help="Override the search_sweep sampling-phase policy for an A/B run.",
+    )
     args = parser.parse_args()
 
     if args.command == "prepare":
@@ -170,13 +207,14 @@ def main() -> None:
             args.mode,
             args.candidate_limit,
             args.target_candidates,
+            args.phase_sweep,
         )
     elif args.command == "partial":
         if args.group_id is None:
             raise ValueError("partial requires --group-id.")
-        partial(args.case_root, args.output_root, args.group_id, args.group_size)
+        partial(args.case_root, args.output_root, args.group_id, args.group_size, args.phase_sweep)
     else:
-        finalize(args.case_root, args.output_root, args.mode)
+        finalize(args.case_root, args.output_root, args.mode, args.phase_sweep)
 
 
 if __name__ == "__main__":
