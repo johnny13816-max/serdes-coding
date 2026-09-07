@@ -60,7 +60,10 @@ def fir_filtered_pmf(
     name:
         Optional name for the output PMF.
     """
-    pass
+    raise NotImplementedError(
+        "fir_filtered_pmf() is a reserved public API. Use Pmf1D.fir_filter() "
+        "until its standalone truncation contract is implemented."
+    )
 
 def _truncate_keep_mass(p: Pmf1D, *, keep_mass: float) -> Pmf1D:
     """

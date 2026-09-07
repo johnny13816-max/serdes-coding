@@ -16,7 +16,8 @@ import sys
 import time
 from typing import Any, Literal, Optional, Sequence
 import numpy as np
-from serdes_coding.utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse
+from serdes_coding.utilities.psd import ContinuousPSD, SampledPSD
 from serdes_coding.utilities.sparam import SparamModel
 from serdes_coding.utilities.pmf import Pmf1D
 

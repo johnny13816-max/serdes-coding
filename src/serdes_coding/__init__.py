@@ -23,7 +23,8 @@ from .models.com_model_93A import (
     IEEECOMFilter,
     IEEECOMSparam,
 )
-from .utilities.link import ContinuousPSD, OneSidePSD, SampledPSD, SampledResponse
+from .utilities.link import SampledResponse
+from .utilities.psd import ContinuousPSD, OneSidePSD, SampledPSD
 from .utilities.sparam import SparamModel
 
 
