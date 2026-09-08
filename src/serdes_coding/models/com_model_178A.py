@@ -700,9 +700,40 @@ class COMImpairmentConfig(_PrettyDataclass):
 
 @dataclass(repr=False)
 class COMMLSDConfig(_PrettyDataclass):
-    enable: bool
-    trunc_len: int
-    delta_com_an: float
+    """Configuration required to enable the Annex 178A MLSD receiver."""
+    enable: bool = False
+    trunc_len: int = 0
+    delta_com_an: Optional[float] = None
+    minimum_com_limit: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        self.enable = bool(self.enable)
+        self.trunc_len = int(self.trunc_len)
+        if self.trunc_len < 0 or (self.enable and self.trunc_len <= 0):
+            raise ValueError(
+                "COMMLSDConfig.trunc_len must be positive when MLSD is enabled."
+            )
+        for name in ("delta_com_an", "minimum_com_limit"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            value = float(value)
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    f"COMMLSDConfig.{name} must be finite and non-negative when provided."
+                )
+            setattr(self, name, value)
+
+    def resolved_delta_com_an(self) -> float:
+        """Return the explicit MLSD penalty or its clause/annex fallback."""
+        if self.delta_com_an is not None:
+            return self.delta_com_an
+        if self.minimum_com_limit is not None:
+            return self.minimum_com_limit
+        raise ValueError(
+            "MLSD requires delta_com_an or minimum_com_limit; the added-noise "
+            "target must not be guessed."
+        )
 
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
@@ -720,6 +751,7 @@ class COMConfig(_PrettyDataclass):
     DER_0: float                      # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
     execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
+    mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
 
     def to_export_dict(self) -> dict[str, object]:
         """
@@ -808,6 +840,10 @@ class COMMLSDStatus(_PrettyDataclass):
     R_ni: Optional[np.ndarray] = None
     der_by_j: Optional[np.ndarray] = None
     DER_MLSD: Optional[float] = None
+    A_MLSD: Optional[float] = None
+    delta_COM: Optional[float] = None
+    COM_MLSD_raw: Optional[float] = None
+    COM_MLSD: Optional[float] = None
 
 
 @dataclass(repr=False)
@@ -1074,6 +1110,13 @@ class COMStatus(com_93A.COMStatus):
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
     mlsd: Optional[COMMLSDStatus] = None
+
+    @property
+    def final_COM(self) -> Optional[float]:
+        """Return the selected MLSD result when available, else COM_DFE."""
+        if self.mlsd is not None and self.mlsd.COM_MLSD is not None:
+            return self.mlsd.COM_MLSD
+        return None if self.pmf is None else self.pmf.COM
 
     def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
         """Export a 178A status without invoking the legacy 93A exporter.
@@ -2473,12 +2516,22 @@ class COM(com_93A.COM):
 
         ``target="mse"`` returns after the best valid DTE result.
         ``target="dfe"`` additionally produces post-FFE impairment and DFE
-        COM PMFs. ``mlsd`` and ``full`` enter the reserved MLSD stage, which
-        currently raises NotImplementedError instead of returning an invalid
-        result.
+        COM PMFs. ``target="mlsd"`` includes that DFE baseline and then runs
+        the enabled MLSD receiver stage. ``target="full"`` includes MLSD only
+        when ``cfg.mlsd.enable`` is true.
         """
         self.status = COMStatus()
         started = perf_counter()
+
+        mlsd_requested = run_cfg.target == "mlsd" or (
+            run_cfg.target == "full" and self.cfg.mlsd.enable
+        )
+        if run_cfg.target == "mlsd" and not self.cfg.mlsd.enable:
+            raise ValueError("target='mlsd' requires cfg.mlsd.enable=True.")
+        if mlsd_requested and self.cfg.dte.N_b != 1:
+            raise ValueError(
+                "Annex 178A MLSD requires the receiver DTE configuration to use N_b=1."
+            )
 
         def report(message: str) -> None:
             if progress:
@@ -2586,14 +2639,15 @@ class COM(com_93A.COM):
         if not isinstance(merged_imp_status, COMImpairmentStatus):
             raise RuntimeError("Merged 178A impairment status is not available after post-FFE impairment.")
 
-        if run_cfg.target in {"dfe", "full"}:
+        if run_cfg.target in {"dfe", "mlsd", "full"}:
             report("calculate_COM_DFE: start")
             self._assign_pmf(self.calculate_COM_DFE(merged_imp_status, best_dte))
             report("calculate_COM_DFE: done")
 
-        if run_cfg.target in {"mlsd", "full"}:
+        if mlsd_requested:
             report("calculate_COM_MLSD: start")
             self.calculate_COM_MLSD()
+            report("calculate_COM_MLSD: done")
         report("single-run complete")
         return self._require_status()
 
@@ -3246,17 +3300,83 @@ class COM(com_93A.COM):
             COM=COM,
         )
 
-    def calculate_COM_MLSD(self) -> None:
-        """
-        Placeholder for the 178A MLSD COM stage.
+    def calculate_COM_MLSD(self) -> COMMLSDStatus:
+        """Calculate the Annex 178A MLSD COM adjustment after COM_DFE.
 
-        The current project flow explicitly reserves this stage after
-        calculate_COM_DFE(), but the MLSD algorithm is not implemented yet.
+        The DFE PMF remains the immutable baseline.  Eq. (178A-47) derives
+        ``COM_MLSD_raw`` from its ``COM_DFE`` and ``A_ni``; the specification
+        then floors the selected result at ``COM_DFE``.
         """
-        raise NotImplementedError(
-            "178A COM MLSD is not implemented. Use target='mse' or 'dfe' "
-            "until the pre-MLSD and MLSD stages are implemented."
+        if not self.cfg.mlsd.enable:
+            raise ValueError("calculate_COM_MLSD requires cfg.mlsd.enable=True.")
+        if self.cfg.dte.N_b != 1:
+            raise ValueError("Annex 178A MLSD requires cfg.dte.N_b == 1.")
+
+        status = self._require_status()
+        imp_status = status.imp
+        dte_status = status.dte
+        pmf_dfe = status.pmf
+        if not isinstance(imp_status, COMImpairmentStatus):
+            raise RuntimeError("calculate_COM_MLSD requires completed 178A impairment status.")
+        if not isinstance(dte_status, COMDTEStatus):
+            raise RuntimeError("calculate_COM_MLSD requires the selected N_b=1 DTE status.")
+        if not isinstance(pmf_dfe, COMPMFStatus):
+            raise RuntimeError("calculate_COM_MLSD requires completed COM_DFE PMF status.")
+        if imp_status.post_ffe is None:
+            raise RuntimeError("calculate_COM_MLSD requires the post-FFE impairment stage.")
+
+        b_lim = np.asarray(dte_status.b_lim, dtype=float)
+        if b_lim.shape != (1,):
+            raise COMLengthMismatchError(
+                "MLSD requires exactly one DFE feedback coefficient; "
+                f"got b_lim shape {b_lim.shape}."
+            )
+        if pmf_dfe.A_ni is None or pmf_dfe.COM is None:
+            raise RuntimeError("calculate_COM_MLSD requires finite COM_DFE and A_ni.")
+        A_ni = float(pmf_dfe.A_ni)
+        COM_DFE = float(pmf_dfe.COM)
+        if not np.isfinite(A_ni) or A_ni <= 0.0 or not np.isfinite(COM_DFE):
+            raise COMError(
+                "calculate_COM_MLSD requires finite COM_DFE and positive A_ni; "
+                f"got COM_DFE={COM_DFE!r}, A_ni={A_ni!r}."
+            )
+
+        pmf_cfg = self.cfg.pmf.resolve(imp_status.As)
+        added_noise = solve_g_an(
+            self.cfg.mlsd.resolved_delta_com_an(),
+            imp_status.post_ffe,
+            pmf_dfe,
+            pmf_cfg,
+            self.cfg.DER_0,
         )
+        mlsd_status = self.initialize_mlsd_status(imp_status, added_noise)
+        DER_MLSD, _ = calculate_der_mlsd(
+            mlsd_status,
+            L=self.cfg.L,
+            As=imp_status.As,
+            b_lim_1=float(b_lim[0]),
+            trunc_len=self.cfg.mlsd.trunc_len,
+        )
+        if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:
+            raise COMError(
+                "MLSD DER must be finite and in (0, 0.5) to evaluate Eq. (178A-47); "
+                f"got {DER_MLSD!r}."
+            )
+
+        A_MLSD = -float(added_noise.p_an.quantile(DER_MLSD))
+        if not np.isfinite(A_MLSD) or A_MLSD <= 0.0:
+            raise COMError(
+                "MLSD inverse-CDF amplitude must be finite and positive; "
+                f"got {A_MLSD!r} at DER_MLSD={DER_MLSD:.6e}."
+            )
+        delta_COM = float(20.0 * np.log10(A_MLSD / A_ni))
+        COM_MLSD_raw = COM_DFE + delta_COM
+        mlsd_status.A_MLSD = A_MLSD
+        mlsd_status.delta_COM = delta_COM
+        mlsd_status.COM_MLSD_raw = COM_MLSD_raw
+        mlsd_status.COM_MLSD = max(COM_DFE, COM_MLSD_raw)
+        self._assign_mlsd(mlsd_status)
+        return mlsd_status
 
     def calculate_COM(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
         """Backward-compatible alias for the DFE-based 178A COM stage."""
@@ -3303,6 +3423,7 @@ __all__ = [
     "COMRunConfig",
     "COMMainCursorError",
     "COMLengthMismatchError",
+    "COMMLSDConfig",
     "COMMLSDStatus",
     "COMTxfirMainCursorError",
     "COMPkgConfig",

@@ -24,6 +24,7 @@ from ..models.com_model_178A import (
     COMExecutionConfig,
     COMFilterConfig as COMFilterConfig_178A,
     COMImpairmentConfig as COMImpairmentConfig_178A,
+    COMMLSDConfig,
     COMPartialHostConfig,
     COMPkgConfig as COMPkgConfig_178A,
     COMRunConfig,
@@ -349,6 +350,12 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
         execution=_read_project_execution_config(excel_path),
+        mlsd=COMMLSDConfig(
+            enable=_coerce_bool(fixed.get("mlsd_enable", False)),
+            trunc_len=_fixed_optional_int(fixed, "mlsd_trunc_len") or 0,
+            delta_com_an=_fixed_optional_float(fixed, "delta_com_an"),
+            minimum_com_limit=_fixed_optional_float(fixed, "minimum_com_limit"),
+        ),
     )
 
 
