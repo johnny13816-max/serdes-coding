@@ -543,7 +543,7 @@ class COMDTEConfig(_PrettyDataclass):
     b_rest_min: float                # unit: dimensionless, later DFE feedback lower limits
     N_wg: int = 0                    # unit: groups, number of floating FFE tap groups
     N_wf: int = 0                    # unit: taps/group, taps per floating group
-    N_max: Optional[int] = None      # unit: tap index, highest allowed FFE tap index
+    N_max: Optional[int] = None      # unit: taps, FFE vector length / exclusive index bound
     N_b: int = 0                     # unit: taps, number of DFE feedback taps
 
     # derived coefficient-limit arrays used by COM_MMSE_DTE
@@ -844,6 +844,7 @@ class COMImpairmentStatus(_PrettyDataclass):
     post_ffe: Optional[COMImpStageStatus] = None
     pre_mlsd: Optional[COMImpStageStatus] = None
     eq_ch: Optional[COMEqChannelStatus] = None
+    H_rxffe: Optional[SampledResponse] = None
     
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
         return tuple(
@@ -874,6 +875,13 @@ class COMImpairmentStatus(_PrettyDataclass):
             if stage.adc_input is not None:
                 return stage.adc_input
         raise AttributeError(f"{type(self).__name__}.adc_input_pmf is not available.")
+
+    @property
+    def w_lim(self) -> SampledResponse:
+        """Post-FFE sampled response proxy for the limited receiver FFE."""
+        if self.H_rxffe is None:
+            raise AttributeError(f"{type(self).__name__}.H_rxffe is not available.")
+        return self.H_rxffe
 
     @property
     def sigma_X(self) -> float:
@@ -1006,7 +1014,7 @@ class COMDTEStatus(_PrettyDataclass):
     ts: int                         # unit: sample index on cfg.times
     pos: int                        # unit: sample phase index, 0 <= pos < per_ui
     d: int
-    w_lim: SampledResponse       # unit: dimensionless, full FFE impulse response
+    w_lim: np.ndarray             # unit: dimensionless, raw zero-filled FFE taps, shape (N_max,)
     b_lim: np.ndarray             # unit: dimensionless, DFE coefficients b
     mse: float                      # unit: V^2, mean-square error from 178A-35
     H_all: np.ndarray 
@@ -1017,7 +1025,7 @@ class COMDTEStatus(_PrettyDataclass):
     H_b: np.ndarray
 
     # without limter results
-    w: np.ndarray
+    w: np.ndarray                  # unit: dimensionless, raw zero-filled unlimited FFE taps, shape (N_max,)
     b: np.ndarray
 
     @property
@@ -1693,11 +1701,13 @@ class COM_MMSE_DTE:
 
     def _validate_equalized_main_cursor(self, dte_status: COMDTEStatus) -> None:
         """Require the limited FFE output pulse to peak at the DTE main index d."""
-        w_lim = (
-            dte_status.w_lim.ir
-            if isinstance(dte_status.w_lim, SampledResponse)
-            else dte_status.w_lim
-        )
+        w_lim = np.asarray(dte_status.w_lim, dtype=float)
+        expected_shape = (int(self.cfg.N_max),)
+        if w_lim.shape != expected_shape:
+            raise COMLengthMismatchError(
+                "COMDTEStatus.w_lim must be the full zero-filled FFE tap vector; "
+                f"expected shape {expected_shape}, got {w_lim.shape}."
+            )
         h_w = np.convolve(self.h_dsamp, w_lim)
         peak_index = int(np.argmax(np.abs(h_w)))
         if peak_index != dte_status.d:
@@ -1978,21 +1988,6 @@ def _build_pmf_w_XT_all(
         [value.ir if isinstance(value, SampledResponse) else value for value in h_XTs_w],
         pmf_cfg,
     )
-
-def _ffe_impulse_from_dte_status(dte_status: COMDTEStatus) -> np.ndarray:
-    """Return the full FFE impulse response stored in COMDTEStatus.w_lim."""
-    pruned_index = np.asarray(dte_status.pruned_index, dtype=int)
-    w_lim_value = dte_status.w_lim
-    w_lim = (
-        np.asarray(w_lim_value.ir, dtype=float)
-        if isinstance(w_lim_value, SampledResponse)
-        else np.asarray(w_lim_value, dtype=float)
-    )
-    if len(pruned_index) == 0:
-        raise ValueError("dte_status.pruned_index must not be empty.")
-    if len(w_lim) <= int(np.max(pruned_index)):
-        raise ValueError("dte_status.w_lim must be a full FFE impulse covering every pruned_index.")
-    return w_lim
 
 def _build_adc_input_pmf_exact(
     p_sig: Pmf1D, 
@@ -2278,6 +2273,8 @@ class COM(com_93A.COM):
         current = self.status.imp
         if imp_status.eq_ch is not None:
             current.eq_ch = imp_status.eq_ch
+        if imp_status.H_rxffe is not None:
+            current.H_rxffe = imp_status.H_rxffe
         for name in ("pre_dte", "post_ffe", "pre_mlsd"):
             value = getattr(imp_status, name)
             if value is not None:
@@ -2602,7 +2599,6 @@ class COM(com_93A.COM):
             pos = pos,
             per_ui = self.per_ui,
         )
-        dte_status.w_lim = SampledResponse.from_ir(dte_status.w_lim, self.cfg.link)
         return dte_status
 
     def calculate_post_ffe_imp(
@@ -2613,7 +2609,13 @@ class COM(com_93A.COM):
         h: np.ndarray,
     ) -> COMImpairmentStatus:
         As = self.cfg.imp.R_LM / (self.cfg.L - 1)
-        w_ir = _ffe_impulse_from_dte_status(dte_status)
+        w_ir = np.asarray(dte_status.w_lim, dtype=float)
+        expected_shape = (int(self.cfg.dte.N_max),)
+        if w_ir.shape != expected_shape:
+            raise COMLengthMismatchError(
+                "calculate_post_ffe_imp() requires COMDTEStatus.w_lim to be the "
+                f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_ir.shape}."
+            )
         w_response = SampledResponse.from_ir(w_ir, self.cfg.link)
         h_w_response = imp_pre.h_dsamp.cascade_ir(w_response, per_ui=self.per_ui)
         post_link_cfg = LinkConfig.from_Nfft(
@@ -2648,7 +2650,7 @@ class COM(com_93A.COM):
         # Keep post-FFE PSD components on the same sampled grid as pre-DTE.
         # The PSD records are useful for reporting; final PMF construction
         # still treats DDJ separately as a dual-Dirac PMF.
-        H_ffe = SampledResponse.from_ir(w_ir, post_link_cfg)
+        H_rxffe = SampledResponse.from_ir(w_ir, post_link_cfg)
 
         def _filter_on_post_grid(source: SampledPSD) -> SampledPSD:
             psd = np.interp(post_link_cfg.theta, source.theta, source.psd)
@@ -2656,7 +2658,7 @@ class COM(com_93A.COM):
                 theta=post_link_cfg.theta,
                 psd=psd,
                 fb=post_link_cfg.fb,
-            ).filtered_by(H_ffe)
+            ).filtered_by(H_rxffe)
 
         S_rn = _filter_on_post_grid(imp_pre.S_rn)
         S_xn = _filter_on_post_grid(imp_pre.S_xn)
@@ -2738,6 +2740,7 @@ class COM(com_93A.COM):
                 h_ISI=h_ISI_response,
                 h_w_J=h_w_J,
             ),
+            H_rxffe=H_rxffe,
         )
 
     def calculate_COM_DFE(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
@@ -2785,8 +2788,15 @@ class COM(com_93A.COM):
                     "calculate_COM_DFE requires post-DTE ADC input material with method='pmf_exact'."
                 )
             p_delta = Pmf1D.uniform(adc_input_pmf.delta, pmf_cfg)
+            w_lim = np.asarray(dte_status.w_lim, dtype=float)
+            expected_shape = (int(self.cfg.dte.N_max),)
+            if w_lim.shape != expected_shape:
+                raise COMLengthMismatchError(
+                    "calculate_COM_DFE() requires COMDTEStatus.w_lim to be the "
+                    f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_lim.shape}."
+                )
             p_qn = p_delta.fir_filter(
-                _ffe_impulse_from_dte_status(dte_status),
+                w_lim,
                 keep_mass = pmf_cfg.keep_mass,
                 dx_ref = pmf_cfg.dy,
                 tap_abs_th = pmf_cfg.tap_abs_th,

@@ -512,11 +512,13 @@ class COMReport178A:
     def _plot_dte_coefficients(self, dte: COMDTEStatus, directory: str) -> dict[str, str]:
         """Plot limited and unlimited FFE/DFE coefficients with their limiters."""
         outputs: dict[str, str] = {}
-        w_lim = dte.w_lim.ir if isinstance(dte.w_lim, SampledResponse) else dte.w_lim
-        # ``w_lim`` is stored as a SampledResponse and therefore includes its
-        # zero-padded FFT grid.  Coefficient plots must use only the actual FFE
-        # tap vector, whose length also defines the limiter mask.
-        w_lim = np.asarray(w_lim, dtype=float)[:len(dte.w)]
+        w_lim = np.asarray(dte.w_lim, dtype=float)
+        expected_shape = (int(self.cfg.dte.N_max),)
+        if w_lim.shape != expected_shape:
+            raise COMLengthMismatchError(
+                "COMDTEStatus.w_lim must be the raw full FFE tap vector for coefficient plotting; "
+                f"expected shape {expected_shape}, got {w_lim.shape}."
+            )
         w_index = np.arange(len(w_lim), dtype=int) - self.cfg.dte.d_w
         b_index = np.arange(1, len(dte.b_lim) + 1, dtype=int)
 
