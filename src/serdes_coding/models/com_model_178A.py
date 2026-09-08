@@ -800,6 +800,15 @@ class COMAddedNoiseStatus(_PrettyDataclass):
 
 
 @dataclass(repr=False)
+class COMMLSDStatus(_PrettyDataclass):
+    """MLSD-only inputs and results, separate from physical impairment stages."""
+    added_noise: COMAddedNoiseStatus
+    S_ni: Optional[SampledPSD] = None
+    sigma_ni: Optional[float] = None
+    R_ni: Optional[np.ndarray] = None
+
+
+@dataclass(repr=False)
 class COMEqChannelStatus(_PrettyDataclass):
     """
     178A equivalent-channel status.
@@ -856,14 +865,13 @@ class COMImpairmentStatus(_PrettyDataclass):
     """
     pre_dte: Optional[COMImpStageStatus] = None
     post_ffe: Optional[COMImpStageStatus] = None
-    pre_mlsd: Optional[COMImpStageStatus] = None
     eq_ch: Optional[COMEqChannelStatus] = None
     H_rxffe: Optional[SampledResponse] = None
     
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
         return tuple(
             stage
-            for stage in (self.pre_mlsd, self.post_ffe, self.pre_dte)
+            for stage in (self.post_ffe, self.pre_dte)
             if stage is not None
         )
 
@@ -1013,7 +1021,7 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._eq_attr("h_XTs_w")
 
     @property
-    def h_ISI(self) -> np.ndarray:
+    def h_ISI(self) -> SampledResponse:
         return self._eq_attr("h_ISI")
 
     @property
@@ -1063,6 +1071,7 @@ class COMStatus(com_93A.COMStatus):
     dte: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
+    mlsd: Optional[COMMLSDStatus] = None
 
     def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
         """Export a 178A status without invoking the legacy 93A exporter.
@@ -2501,7 +2510,7 @@ class COM(com_93A.COM):
             current.eq_ch = imp_status.eq_ch
         if imp_status.H_rxffe is not None:
             current.H_rxffe = imp_status.H_rxffe
-        for name in ("pre_dte", "post_ffe", "pre_mlsd"):
+        for name in ("pre_dte", "post_ffe"):
             value = getattr(imp_status, name)
             if value is not None:
                 setattr(current, name, value)
@@ -2511,6 +2520,12 @@ class COM(com_93A.COM):
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
         self.status.pmf = pmf_status
+
+    def _assign_mlsd(self, mlsd_status: COMMLSDStatus) -> None:
+        """Assign MLSD-only status into the incremental run status."""
+        if self.status is None or isinstance(self.status, COMSearchStatus):
+            self.status = COMStatus()
+        self.status.mlsd = mlsd_status
 
     def _require_status(self) -> COMStatus:
         if self.status is None:
@@ -2969,6 +2984,65 @@ class COM(com_93A.COM):
             H_rxffe=H_rxffe,
         )
 
+    def initialize_mlsd_status(
+        self,
+        imp_status: COMImpairmentStatus,
+        added_noise: COMAddedNoiseStatus,
+    ) -> COMMLSDStatus:
+        """Build Eq. (178A-54) MLSD input PSD and autocorrelation once.
+
+        ``S_ni`` and ``R_ni`` are independent of MLSD sequence length ``j``.
+        They are therefore computed before the DER summation and stored with
+        the MLSD analysis result rather than in the physical impairment status.
+        """
+        post_ffe = imp_status.post_ffe
+        if post_ffe is None or post_ffe.psd is None or post_ffe.psd.S_rn is None:
+            raise ValueError(
+                "initialize_mlsd_status requires post-FFE receiver noise PSD S_rn."
+            )
+
+        S_rn = post_ffe.psd.S_rn
+        h_ISI = imp_status.h_ISI
+        if not isinstance(h_ISI, SampledResponse):
+            raise TypeError(
+                "initialize_mlsd_status requires h_ISI to be a SampledResponse."
+            )
+        if not np.isfinite(imp_status.sigma_X) or imp_status.sigma_X < 0.0:
+            raise ValueError("initialize_mlsd_status requires finite non-negative sigma_X.")
+
+        for name, psd in (("added_noise.S_an", added_noise.S_an),):
+            if not np.isclose(psd.fb, S_rn.fb) or not np.allclose(
+                psd.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+            ):
+                raise ValueError(
+                    f"{name} must share the post-FFE S_rn theta grid and fb."
+                )
+        if not np.isclose(h_ISI.fb, S_rn.fb) or not np.allclose(
+            h_ISI.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+        ):
+            raise ValueError("h_ISI must share the post-FFE S_rn theta grid and fb.")
+
+        # Eq. (178A-54). post-FFE S_rn already includes |H_rxffe|^2.
+        S_isi = SampledPSD(
+            theta=S_rn.theta,
+            psd=(imp_status.sigma_X**2 / S_rn.fb) * h_ISI.magnitude_squared(),
+            fb=S_rn.fb,
+        )
+        S_ni = S_rn.add(added_noise.S_an).add(S_isi)
+        R_ni = S_ni.to_autocorrelation()
+        if not np.all(np.isfinite(R_ni)) or R_ni.size == 0 or R_ni[0] <= 0.0:
+            raise COMError(
+                "Eq. (178A-54) produced an invalid MLSD autocorrelation: "
+                f"R_ni[0]={R_ni[0] if R_ni.size else None!r}."
+            )
+
+        return COMMLSDStatus(
+            added_noise=added_noise,
+            S_ni=S_ni,
+            sigma_ni=S_ni.to_sigma(),
+            R_ni=R_ni,
+        )
+
     def calculate_COM_DFE(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
         """
         Calculate 178A final COM result after DFE.
@@ -3111,6 +3185,7 @@ __all__ = [
     "COMRunConfig",
     "COMMainCursorError",
     "COMLengthMismatchError",
+    "COMMLSDStatus",
     "COMTxfirMainCursorError",
     "COMPkgConfig",
     "COMPSDStatus",
