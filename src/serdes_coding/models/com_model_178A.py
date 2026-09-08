@@ -2058,6 +2058,110 @@ def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link
         name="Noise"
     )
 
+
+def evaluate_delta_com_an(
+    g_an: float,
+    post_ffe: COMImpStageStatus,
+    pmf_dfe: COMPMFStatus,
+    pmf_cfg: COMPMFRuntimeConfig,
+    der_0: float,
+) -> tuple[Pmf1D, float]:
+    """Evaluate the Annex 178A MLSD added-receiver-noise penalty.
+
+    This implements the calibration calculation in 178A.1.10.1 only.  The
+    added noise is defined at the receiver FFE output, so the pre-existing ADC
+    quantization distribution is retained.  In particular, ``p_qn`` is not
+    recomputed: its quantizer range was already determined at the ADC input.
+
+    Parameters
+    ----------
+    g_an:
+        Non-negative PSD scale factor from Eq. (178A-50).
+    post_ffe:
+        Post-FFE impairment stage from the DFE calculation.  Its ``S_rn``
+        already includes the receiver FFE response.
+    pmf_dfe:
+        Complete COM_DFE PMF result at the same sampling phase.
+    pmf_cfg:
+        Resolved PMF numerical settings used for the COM_DFE calculation.
+    der_0:
+        Target detector error rate used for the inverse-CDF comparison.
+
+    Returns
+    -------
+    p_an, delta_com_an_temp:
+        ``p_an`` is the full noise-and-interference PDF including added noise.
+        ``delta_com_an_temp`` is the dB value of
+        ``20 * log10(abs(P_an^-1(der_0)) / abs(P^-1(der_0)))``.
+    """
+    g_an = float(g_an)
+    if not np.isfinite(g_an) or g_an < 0.0:
+        raise ValueError("g_an must be finite and non-negative.")
+
+    der_0 = float(der_0)
+    if not np.isfinite(der_0) or not 0.0 < der_0 < 0.5:
+        raise ValueError("der_0 must be finite and in (0, 0.5).")
+
+    if not np.isclose(pmf_dfe.dy, pmf_cfg.dy):
+        raise ValueError(
+            "pmf_dfe and pmf_cfg must use the same PMF grid spacing: "
+            f"{pmf_dfe.dy!r} != {pmf_cfg.dy!r}."
+        )
+
+    post_psd = post_ffe.psd
+    if post_psd is None or post_psd.S_rn is None or post_psd.S_gn_adc is None:
+        raise ValueError(
+            "post_ffe must contain S_rn and S_gn_adc from the completed "
+            "post-FFE impairment stage."
+        )
+
+    missing_pmf = [
+        name
+        for name in ("p_ISI", "p_XT", "p_DD", "p_qn", "p_combined")
+        if getattr(pmf_dfe, name) is None
+    ]
+    if missing_pmf:
+        raise ValueError(
+            "pmf_dfe must be the complete COM_DFE PMF result; missing "
+            + ", ".join(missing_pmf)
+            + "."
+        )
+
+    # Eq. (178A-50).  post_ffe.S_rn already contains |H_rxffe|^2.
+    S_an = SampledPSD(
+        theta=post_psd.S_rn.theta,
+        psd=g_an * post_psd.S_rn.psd,
+        fb=post_psd.S_rn.fb,
+    )
+    sigma_G = post_psd.S_gn_adc.to_sigma()
+    sigma_an = float(np.hypot(sigma_G, S_an.to_sigma()))
+
+    p_G_an = Pmf1D.gaussian(
+        mu=0.0,
+        sigma=sigma_an,
+        dx=pmf_cfg.dy,
+        n_sigma=pmf_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="Added receiver noise",
+    )
+    p_an = (
+        pmf_dfe.p_ISI
+        .combine(pmf_dfe.p_XT)
+        .combine(pmf_dfe.p_DD)
+        .combine(pmf_dfe.p_qn)
+        .combine(p_G_an, name="MLSD added-noise total")
+    )
+
+    a_ref = abs(float(pmf_dfe.p_combined.quantile(der_0)))
+    a_an = abs(float(p_an.quantile(der_0)))
+    if not np.isfinite(a_ref) or not np.isfinite(a_an) or a_ref <= 0.0 or a_an <= 0.0:
+        raise COMError(
+            "MLSD added-noise quantiles must be finite and non-zero at "
+            f"DER_0={der_0:.6e}; got reference={a_ref!r}, added={a_an!r}."
+        )
+
+    return p_an, float(20.0 * np.log10(a_an / a_ref))
+
 class COM(com_93A.COM):
     """
     IEEE 802.3 Annex 178A COM calculator.
@@ -2887,6 +2991,7 @@ __all__ = [
     "COMTxfirMainCursorError",
     "COMPkgConfig",
     "COMPSDStatus",
+    "evaluate_delta_com_an",
     "COMSearchConfig",
     "COMSearchRow",
     "COMSearchStatus",
