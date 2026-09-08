@@ -806,6 +806,8 @@ class COMMLSDStatus(_PrettyDataclass):
     S_ni: Optional[SampledPSD] = None
     sigma_ni: Optional[float] = None
     R_ni: Optional[np.ndarray] = None
+    der_by_j: Optional[np.ndarray] = None
+    DER_MLSD: Optional[float] = None
 
 
 @dataclass(repr=False)
@@ -2293,6 +2295,122 @@ def solve_g_an(
         f"best_residual={best.residual_dB:.6g} dB, cvg_th={cvg_th:.6g} dB."
     )
 
+
+def calculate_der_mlsd(
+    mlsd_status: COMMLSDStatus,
+    *,
+    L: int,
+    As: float,
+    b_lim_1: float,
+    trunc_len: int,
+) -> tuple[float, np.ndarray]:
+    """Evaluate the truncated Annex 178A MLSD detector error ratio.
+
+    This function implements the recurrence in Eqs. (178A-47) through
+    (178A-53).  ``p_j`` is deliberately local: it is only the state needed to
+    construct the next sequence-length term.  The returned ``der_by_j`` holds
+    the weighted Eq. (178A-47) contribution for each ``j=1..trunc_len``;
+    therefore ``der_by_j.sum()`` is the truncated ``DER_MLSD``.
+
+    ``initialize_mlsd_status()`` must have run first so that Eq. (178A-54)
+    autocorrelation ``R_ni`` is available on the same post-FFE model.
+    """
+    if not isinstance(mlsd_status, COMMLSDStatus):
+        raise TypeError("mlsd_status must be a COMMLSDStatus.")
+
+    L = int(L)
+    if L < 2:
+        raise ValueError("L must be at least 2 for PAM MLSD.")
+
+    As = float(As)
+    if not np.isfinite(As) or As <= 0.0:
+        raise ValueError("As must be finite and positive.")
+
+    b_lim_1 = float(b_lim_1)
+    if not np.isfinite(b_lim_1) or b_lim_1 == 0.0:
+        raise ValueError("b_lim_1 must be finite and non-zero for MLSD.")
+
+    trunc_len = int(trunc_len)
+    if trunc_len <= 0:
+        raise ValueError("trunc_len must be positive.")
+    if trunc_len > 1 and b_lim_1 == 1.0:
+        raise ValueError(
+            "b_lim_1 must differ from one when trunc_len is greater than one."
+        )
+
+    p_an = mlsd_status.added_noise.p_an
+    if not isinstance(p_an, Pmf1D):
+        raise TypeError("mlsd_status.added_noise.p_an must be a Pmf1D.")
+
+    if mlsd_status.R_ni is None:
+        raise ValueError("mlsd_status.R_ni is required before calculating DER_MLSD.")
+    R_ni = np.asarray(mlsd_status.R_ni)
+    if R_ni.ndim != 1 or R_ni.size < trunc_len + 1:
+        raise COMLengthMismatchError(
+            "MLSD R_ni must be one-dimensional with at least trunc_len + 1 "
+            f"entries; got shape {R_ni.shape}, trunc_len={trunc_len}."
+        )
+    if np.iscomplexobj(R_ni) and not np.allclose(R_ni.imag, 0.0, atol=1e-15):
+        raise ValueError("MLSD R_ni must be real-valued.")
+    R_ni = np.asarray(R_ni.real, dtype=float)
+    if not np.all(np.isfinite(R_ni)) or R_ni[0] <= 0.0:
+        raise ValueError("MLSD R_ni must be finite with positive R_ni[0].")
+
+    # This local import keeps scipy confined to the Toeplitz calculation that
+    # directly represents Eq. (178A-49).
+    from scipy.linalg import toeplitz
+
+    der_by_j = np.empty(trunc_len, dtype=float)
+    p_j: Optional[Pmf1D] = None
+    p_1_term = p_an.scale_x(-b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+    p_later_term: Optional[Pmf1D] = None
+    if trunc_len > 1:
+        p_later_term = p_an.scale_x(1.0 - b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+
+    for j in range(1, trunc_len + 1):
+        # Eqs. (178A-52) and (178A-53). scale_x preserves PMF mass, which is
+        # the discrete-grid equivalent of each equation's 1 / |scale| factor.
+        if j == 1:
+            p_j = p_an.combine(p_1_term, name="MLSD p_1")
+        else:
+            assert p_j is not None and p_later_term is not None
+            p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}")
+
+        # Eq. (178A-48): u_j is indexed from 1 in the specification.
+        u_j = np.empty(j + 1, dtype=float)
+        u_j[0] = 1.0
+        if j > 1:
+            indices = np.arange(2, j + 1, dtype=int)
+            u_j[1:j] = ((-1.0) ** (indices - 1)) * (1.0 - b_lim_1)
+        u_j[j] = ((-1.0) ** j) * b_lim_1
+
+        # Eq. (178A-49), normalized by R_ni(0).
+        V_j = toeplitz(R_ni[:j + 1] / R_ni[0])
+        quadratic = float(u_j @ V_j @ u_j)
+        norm_sq = float(u_j @ u_j)
+        if not np.isfinite(quadratic) or quadratic <= 0.0:
+            raise COMError(
+                f"MLSD V_{j} produced invalid u_j^T V_j u_j={quadratic!r}."
+            )
+        threshold = -As * norm_sq ** 1.5 / np.sqrt(quadratic)
+        der_event = float(p_j.cdf_at(threshold))
+        if not np.isfinite(der_event) or not 0.0 <= der_event <= 1.0:
+            raise COMError(
+                f"MLSD p_{j} CDF produced invalid event probability {der_event!r}."
+            )
+
+        # Eq. (178A-47), including the probability of a j-event sequence.
+        der_by_j[j - 1] = ((L - 1.0) / L) ** (j - 1) * der_event
+
+    if not np.all(np.isfinite(der_by_j)) or np.any(der_by_j < 0.0):
+        raise COMError("MLSD DER contributions must be finite and non-negative.")
+
+    DER_MLSD = float(np.sum(der_by_j))
+    mlsd_status.der_by_j = der_by_j
+    mlsd_status.DER_MLSD = DER_MLSD
+    return DER_MLSD, der_by_j
+
+
 class COM(com_93A.COM):
     """
     IEEE 802.3 Annex 178A COM calculator.
@@ -3189,6 +3307,7 @@ __all__ = [
     "COMTxfirMainCursorError",
     "COMPkgConfig",
     "COMPSDStatus",
+    "calculate_der_mlsd",
     "evaluate_delta_com_an",
     "solve_g_an",
     "COMSearchConfig",
