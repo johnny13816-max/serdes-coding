@@ -29,10 +29,10 @@
    - 再移出 smoke test。
    - 最後才拆 config/status/formula。
 
-5. 178A MLSD target delta COM resolver
-   - 在接入 `solve_g_an()` 與 MLSD 主流程前，確認每個啟用 MLSD 的 profile 都能解析 `delta_com_an`。
-   - 若 ad-hoc / project config 未顯式提供 `delta_com_an`，必須由對應 clause 或 annex 的 minimum COM limit 提供 spec default。
-   - 若兩者皆不存在，視為 blocking configuration error；不得由 solver 猜測或建立任意預設 dB 值。
+5. 178A MLSD profile source mapping
+   - `solve_g_an()` 與 single-run MLSD 已要求 `delta_com_an` 或 minimum COM limit；兩者皆不存在時必須報 configuration error。
+   - 待取得可追溯的 MLSD-enabled ad hoc profile 後，建立其 `mlsd_enable`、`mlsd_trunc_len`、`delta_com_an` / `minimum_com_limit` 的 project-workbook mapping。
+   - 再將 MLSD 納入 search、report 與外部 reference validation；不得以驗證用 dB 值作為正式 profile 預設。
 
 ## COM / 93A Core
 

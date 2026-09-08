@@ -624,6 +624,16 @@ from serdes_coding import COM_93A, COM_178A
 - 178A 的版本差異先放在 stage-level builder，例如 `device_termination_178A()` 與 `device_package_178A()`。
 - 依照目前 IEEE 802.3dj COM adhoc config/code，N-stage package TL 的 `zp` 與 `Zc` 是 stage-specific，`gamma0/a1/a2/tau` 是 package-level shared propagation model。
 - 若後續確認 178A 修改了單顆 primitive 的公式或單位，再新增對應 `_178A` primitive。
+
+## 178A MLSD Single-Run Contract
+
+- `COMMLSDConfig` 由 project workbook 的 `fixed_config` 讀取：`mlsd_enable`、`mlsd_trunc_len`、`delta_com_an`、`minimum_com_limit`。
+- `mlsd_enable=False` 是現有未提供 MLSD profile 的安全預設；其 single run 與 full run 皆維持 DFE-only，不隱式執行 MLSD。
+- 啟用 MLSD 時，`mlsd_trunc_len` 必須為正整數，且 `N_b` 必須為 1。MLSD target 優先使用 `delta_com_an`；未提供時才使用所屬 clause / annex 的 `minimum_com_limit`。
+- 若兩種 target 都沒有，`solve_g_an()` 必須拋出 configuration error，不得使用測試值或自行猜測 default。
+- MLSD stage 保留 `COM_DFE` baseline，計算 `p_an`、`S_ni`、`R_ni`、`DER_MLSD` 與 `COM_MLSD_raw`；最終值為 `max(COM_DFE, COM_MLSD_raw)`，不允許 MLSD 導致報告 COM 低於 DFE baseline。
+- 本 contract 目前只涵蓋 single-run stage；MLSD search、report、及外部 reference validation 仍是待完成項目。
+
 ## PSD / Sampled Response Theta Contract
 
 本節是目前 PSD / sampled-domain response 的有效命名與 grid contract。
