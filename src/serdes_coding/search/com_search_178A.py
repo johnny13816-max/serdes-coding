@@ -14,10 +14,10 @@ from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from . import com_model_93A as com_93A
+from ..models import com_model_93A as com_93A
 
 if TYPE_CHECKING:
-    from .com_model_178A import COMConfig, COMStatus
+    from ..models.com_model_178A import COMConfig, COMStatus
 
 
 _PrettyDataclass = com_93A._PrettyDataclass
@@ -33,6 +33,7 @@ PARTIAL_RESULT_FIELDS = (
     "status", "error", "mse", "mse_dB", "ts", "pos",
 )
 FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + ("final_status", "final_error", "COM_dB")
+PARTIAL_RESULT_REPORT_MULTIPLIER = 10
 
 
 @dataclass(repr=False)
@@ -173,6 +174,8 @@ def create_search_plan(
     cfg: "COMConfig",
     search: COMSearchConfig,
     report_dir: str | Path,
+    *,
+    candidate_limit: Optional[int] = None,
 ) -> SearchArtifacts:
     """Write the candidate manifest and contiguous partial-search group plan."""
     artifacts = SearchArtifacts(Path(report_dir))
@@ -180,6 +183,10 @@ def create_search_plan(
     artifacts.group_results_dir.mkdir(parents=True, exist_ok=True)
 
     candidates = search.candidates(cfg.filter)
+    if candidate_limit is not None:
+        if candidate_limit <= 0:
+            raise ValueError("candidate_limit must be positive when specified.")
+        candidates = candidates[:candidate_limit]
     if not candidates:
         raise ValueError("178A search candidate list is empty.")
     manifest = [_manifest_dict(idx, candidate) for idx, candidate in enumerate(candidates)]
@@ -217,7 +224,7 @@ def run_partial_group(
         search_index = int(entry["search_index"])
         candidate = _candidate_from_manifest(entry)
         try:
-            from .com_model_178A import COM, COMTxfirMainCursorError
+            from ..models.com_model_178A import COM, COMTxfirMainCursorError
 
             candidate_cfg = _config_with_candidate(cfg, candidate)
             status = COM(candidate_cfg)._run_once(
@@ -270,7 +277,12 @@ def finalize_search(
     *,
     include_plots: bool = True,
 ) -> COMSearchStatus:
-    """Re-run top-K minimum-MSE candidates with `search_final` and export them."""
+    """Re-run top-K candidates and export a wider partial-result ranking.
+
+    ``search_top_k`` controls the expensive full COM reruns.  The CSV keeps
+    ten times that many successful partial-search rows for diagnosis; rows
+    beyond top-K have blank final-status and COM columns by design.
+    """
     artifacts = SearchArtifacts(Path(report_dir))
     partial_rows = merge_partial_results(artifacts.root)
     successful = sorted(
@@ -281,30 +293,53 @@ def finalize_search(
         raise RuntimeError("No successful partial-search candidate is available for finalization.")
 
     artifacts.top_k_dir.mkdir(parents=True, exist_ok=True)
-    final_rows: list[dict[str, Any]] = []
+    full_com_rows = successful[:cfg.execution.search_top_k]
+    report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * cfg.execution.search_top_k
+    report_rows = successful[:report_limit]
+    final_rows_by_idx = {
+        row.idx: _final_row(row, status="")
+        for row in report_rows
+    }
     finalized: list[tuple[COMSearchRow, Any]] = []
-    for row in successful[:cfg.execution.search_top_k]:
+    for row in full_com_rows:
         candidate_cfg = _config_with_candidate(cfg, row.candidate)
         try:
-            from .com_model_178A import COM
+            from ..models.com_model_178A import COM
 
             status = COM(candidate_cfg)._run_once(
                 run_cfg=candidate_cfg.execution.search_final,
             )
+            # 178A plotting is owned by COMReport178A, which needs the
+            # originating runtime/project config in addition to COMStatus.
+            status._config_for_report = candidate_cfg
             status.export(
                 str(artifacts.top_k_dir / f"{row.idx:06d}"),
                 include_plots=include_plots,
             )
             finalized.append((row, status))
-            final_rows.append(_final_row(row, status="ok", com_value=status.pmf.COM if status.pmf else None))
+            final_rows_by_idx[row.idx] = _final_row(
+                row,
+                status="ok",
+                com_value=status.pmf.COM if status.pmf else None,
+            )
         except Exception as exc:
-            if not search.continue_on_error:
-                raise
-            final_rows.append(_final_row(row, status="error", error=str(exc)))
+            # Finalization is an aggregation stage: preserve one candidate's
+            # failure and continue so the remaining top-K candidates can be
+            # evaluated and reported.
+            final_rows_by_idx[row.idx] = (
+                _final_row(
+                    row,
+                    status="error",
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
 
-    if not finalized:
-        raise RuntimeError("All top-K final candidates failed.")
+    final_rows = [final_rows_by_idx[row.idx] for row in report_rows]
     _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
+    if not finalized:
+        raise RuntimeError(
+            "All top-K final candidates failed; see full_search_results.csv for details."
+        )
 
     best_row, best_status = min(finalized, key=lambda item: item[0].mse)
     retained = _select_rows(partial_rows, search)
@@ -440,7 +475,7 @@ def _row_to_dict(row: COMSearchRow) -> dict[str, Any]:
 def _final_row(
     row: COMSearchRow,
     *,
-    status: Literal["ok", "error"],
+    status: Literal["", "ok", "error"],
     com_value: Optional[float] = None,
     error: str = "",
 ) -> dict[str, Any]:

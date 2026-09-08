@@ -8,9 +8,9 @@ from pathlib import Path
 
 import numpy as np
 
-from serdes_coding.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
-from serdes_coding.com_model_178A import COM
-from serdes_coding.com_search_178A import (
+from serdes_coding.io.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
+from serdes_coding.models.com_model_178A import COM
+from serdes_coding.search.com_search_178A import (
     COMSearchConfig,
     _config_with_candidate,
     create_search_plan,
