@@ -1046,7 +1046,7 @@ class COMRunStatus(_PrettyDataclass):
 @dataclass(repr=False)
 class COMStatus(com_93A.COMStatus):
     """178A COM status with selected stage outputs and runtime sweep records."""
-    dfe: Optional[COMDTEStatus] = None
+    dte: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
 
@@ -2254,7 +2254,7 @@ class COM(com_93A.COM):
         """Assign selected DTE stage output into the incremental run status."""
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
-        self.status.dfe = dte_status
+        self.status.dte = dte_status
 
     def _assign_run(self, run_status: COMRunStatus) -> None:
         """Assign run-local status that is accumulated across the sampling-phase sweep."""
@@ -2836,7 +2836,7 @@ class COM(com_93A.COM):
         calculate_COM_DFE(), but the MLSD algorithm is not implemented yet.
         """
         raise NotImplementedError(
-            "178A COM MLSD is not implemented. Use target='mse' or target='dfe' "
+            "178A COM MLSD is not implemented. Use target='mse' or 'dfe' "
             "until the pre-MLSD and MLSD stages are implemented."
         )
 
@@ -2937,17 +2937,27 @@ if __name__ == "__main__":
     excel_to_config_178A = importlib.reload(com_excel_io).excel_to_config_178A
 
     PROJECT_ROOT = Path(__file__).resolve().parents[3]
-    CASE_ID = "c2m_8023dj_4p13p0_500mm"
+    CASE_ID = "c2m_8023dj_4p13p0_50mm"
     CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID
     CONFIG_PATH = CASE_ROOT / "config" / "config_178A.xlsx"
-    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run_compare"
+    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run_arbitrary"
 
     cfg = excel_to_config_178A(str(CONFIG_PATH))
     print("Single-run execution config:")
     print(cfg.execution.single_run)
+    print("Outer-loop parameters from fixed_config:")
+    for name, value in (
+        ("c_m2", cfg.filter.c_m2),
+        ("c_m1", cfg.filter.c_m1),
+        ("c_1", cfg.filter.c_1),
+        ("g_1", cfg.filter.g_1),
+        ("g_2", cfg.filter.g_2),
+    ):
+        print(f"  {name} = {value}")
     started = perf_counter()
-    status = COM(cfg).run(progress=True)
+    status = COM(cfg).run(progress=False)
     elapsed_s = perf_counter() - started
-    print(status)
+    print("sigma_ISI: ",status.imp.post_ffe.psd.sigma_ISI)
+    print("MSE: ",status.dte.mse)
     print(f"Single-run elapsed time: {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
     COMReport178A(cfg, status).plot_single_run(REPORT_PATH)

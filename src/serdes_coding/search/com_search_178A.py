@@ -219,6 +219,7 @@ def run_partial_group(
     start, stop = int(group["start"]), int(group["stop"])
     rows: list[dict[str, Any]] = []
     started = time.perf_counter()
+    signal_amplitude = _signal_amplitude(cfg)
 
     for offset, entry in enumerate(manifest[start:stop], start=1):
         search_index = int(entry["search_index"])
@@ -230,7 +231,9 @@ def run_partial_group(
             status = COM(candidate_cfg)._run_once(
                 run_cfg=candidate_cfg.execution.search_sweep,
             )
-            rows.append(_partial_row_from_status(search_index, candidate, status))
+            rows.append(_partial_row_from_status(
+                search_index, candidate, status, signal_amplitude=signal_amplitude
+            ))
         except COMTxfirMainCursorError as exc:
             rows.append(_partial_infeasible_row(search_index, candidate, exc))
         except Exception as exc:
@@ -296,8 +299,9 @@ def finalize_search(
     full_com_rows = successful[:cfg.execution.search_top_k]
     report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * cfg.execution.search_top_k
     report_rows = successful[:report_limit]
+    signal_amplitude = _signal_amplitude(cfg)
     final_rows_by_idx = {
-        row.idx: _final_row(row, status="")
+        row.idx: _final_row(row, status="", signal_amplitude=signal_amplitude)
         for row in report_rows
     }
     finalized: list[tuple[COMSearchRow, Any]] = []
@@ -321,6 +325,7 @@ def finalize_search(
                 row,
                 status="ok",
                 com_value=status.pmf.COM if status.pmf else None,
+                signal_amplitude=signal_amplitude,
             )
         except Exception as exc:
             # Finalization is an aggregation stage: preserve one candidate's
@@ -331,6 +336,7 @@ def finalize_search(
                     row,
                     status="error",
                     error=f"{type(exc).__name__}: {exc}",
+                    signal_amplitude=signal_amplitude,
                 )
             )
 
@@ -402,18 +408,44 @@ def _candidate_from_manifest(row: dict[str, str]) -> COMSearchCandidate:
     )
 
 
-def _partial_row_from_status(idx: int, candidate: COMSearchCandidate, status: Any) -> dict[str, Any]:
-    if status.dfe is None:
+def _signal_amplitude(cfg: "COMConfig") -> float:
+    """Return the 178A signal amplitude used to normalize DTE MSE."""
+    L = int(cfg.L)
+    if L <= 1:
+        raise ValueError("COMConfig.L must be greater than 1 to define A_s.")
+    amplitude = float(cfg.imp.R_LM) / (L - 1)
+    if not np.isfinite(amplitude) or amplitude <= 0.0:
+        raise ValueError("A_s = R_LM/(L-1) must be finite and positive.")
+    return amplitude
+
+
+def _mse_db(mse: float, signal_amplitude: float) -> float:
+    """Return normalized MSE in dB: 10*log10(A_s^2 / MSE)."""
+    if not np.isfinite(mse):
+        return float("inf")
+    if mse <= 0.0:
+        return float("inf")
+    return 10.0 * np.log10((signal_amplitude * signal_amplitude) / mse)
+
+
+def _partial_row_from_status(
+    idx: int,
+    candidate: COMSearchCandidate,
+    status: Any,
+    *,
+    signal_amplitude: float,
+) -> dict[str, Any]:
+    if status.dte is None:
         raise RuntimeError("search_sweep target must return COMDTEStatus with MSE.")
-    mse = float(status.dfe.mse)
+    mse = float(status.dte.mse)
     return {
         **_manifest_dict(idx, candidate),
         "status": "ok",
         "error": "",
         "mse": mse,
-        "mse_dB": 10.0 * np.log10(mse) if mse > 0.0 else float("-inf"),
-        "ts": int(status.dfe.ts),
-        "pos": int(status.dfe.pos),
+        "mse_dB": _mse_db(mse, signal_amplitude),
+        "ts": int(status.dte.ts),
+        "pos": int(status.dte.pos),
     }
 
 
@@ -478,8 +510,9 @@ def _final_row(
     status: Literal["", "ok", "error"],
     com_value: Optional[float] = None,
     error: str = "",
+    signal_amplitude: float,
 ) -> dict[str, Any]:
-    partial = _partial_row_dict(row)
+    partial = _partial_row_dict(row, signal_amplitude=signal_amplitude)
     return {
         **partial,
         "final_status": status,
@@ -488,13 +521,13 @@ def _final_row(
     }
 
 
-def _partial_row_dict(row: COMSearchRow) -> dict[str, Any]:
+def _partial_row_dict(row: COMSearchRow, *, signal_amplitude: float) -> dict[str, Any]:
     return {
         **_manifest_dict(row.idx, row.candidate),
         "status": row.status,
         "error": row.error or "",
         "mse": row.mse,
-        "mse_dB": 10.0 * np.log10(row.mse) if row.mse > 0.0 and np.isfinite(row.mse) else row.mse,
+        "mse_dB": _mse_db(row.mse, signal_amplitude),
         "ts": "" if row.ts is None else row.ts,
         "pos": "" if row.pos is None else row.pos,
     }
