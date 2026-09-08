@@ -785,6 +785,20 @@ class COMPSDStatus(_PrettyDataclass):
     sigma_gn_adc: Optional[float] = None
     sigma_ISI: Optional[float] = None
 
+
+@dataclass(repr=False)
+class COMAddedNoiseStatus(_PrettyDataclass):
+    """178A.1.10.1 added-noise calibration result shared by MLSD stages."""
+    g_an: float
+    S_an: SampledPSD
+    sigma_an: float
+    p_an: Pmf1D
+    delta_com_an_temp: float
+    target_delta_com_an: Optional[float] = None
+    residual_dB: Optional[float] = None
+    iterations: Optional[int] = None
+
+
 @dataclass(repr=False)
 class COMEqChannelStatus(_PrettyDataclass):
     """
@@ -2065,7 +2079,7 @@ def evaluate_delta_com_an(
     pmf_dfe: COMPMFStatus,
     pmf_cfg: COMPMFRuntimeConfig,
     der_0: float,
-) -> tuple[Pmf1D, float]:
+) -> COMAddedNoiseStatus:
     """Evaluate the Annex 178A MLSD added-receiver-noise penalty.
 
     This implements the calibration calculation in 178A.1.10.1 only.  The
@@ -2089,10 +2103,9 @@ def evaluate_delta_com_an(
 
     Returns
     -------
-    p_an, delta_com_an_temp:
-        ``p_an`` is the full noise-and-interference PDF including added noise.
-        ``delta_com_an_temp`` is the dB value of
-        ``20 * log10(abs(P_an^-1(der_0)) / abs(P^-1(der_0)))``.
+    COMAddedNoiseStatus
+        The full noise-and-interference PDF, added-noise PSD, and the dB
+        value of ``20 * log10(abs(P_an^-1(der_0)) / abs(P^-1(der_0)))``.
     """
     g_an = float(g_an)
     if not np.isfinite(g_an) or g_an < 0.0:
@@ -2160,7 +2173,116 @@ def evaluate_delta_com_an(
             f"DER_0={der_0:.6e}; got reference={a_ref!r}, added={a_an!r}."
         )
 
-    return p_an, float(20.0 * np.log10(a_an / a_ref))
+    return COMAddedNoiseStatus(
+        g_an=g_an,
+        S_an=S_an,
+        sigma_an=sigma_an,
+        p_an=p_an,
+        delta_com_an_temp=float(20.0 * np.log10(a_an / a_ref)),
+    )
+
+
+def solve_g_an(
+    target_delta_com_an: float,
+    post_ffe: COMImpStageStatus,
+    pmf_dfe: COMPMFStatus,
+    pmf_cfg: COMPMFRuntimeConfig,
+    der_0: float,
+    *,
+    cvg_th: float = 1e-2,
+    max_iter: int = 64,
+) -> COMAddedNoiseStatus:
+    """Solve Eq. (178A-50) scale factor for a target added-noise penalty.
+
+    The evaluator is numerical because it includes PMF convolution and an
+    inverse-CDF measurement.  This solver therefore finds a non-negative
+    bracket by doubling ``g_an`` and then bisects it until the dB residual is
+    within ``cvg_th``.
+    """
+    target_delta_com_an = float(target_delta_com_an)
+    if not np.isfinite(target_delta_com_an) or target_delta_com_an < 0.0:
+        raise ValueError("target_delta_com_an must be finite and non-negative.")
+
+    cvg_th = float(cvg_th)
+    if not np.isfinite(cvg_th) or cvg_th <= 0.0:
+        raise ValueError("cvg_th must be finite and positive in dB.")
+
+    max_iter = int(max_iter)
+    if max_iter <= 0:
+        raise ValueError("max_iter must be positive.")
+
+    low = evaluate_delta_com_an(0.0, post_ffe, pmf_dfe, pmf_cfg, der_0)
+    low.target_delta_com_an = target_delta_com_an
+    low.residual_dB = low.delta_com_an_temp - target_delta_com_an
+    low.iterations = 0
+    if abs(low.residual_dB) <= cvg_th:
+        return low
+    if low.residual_dB > 0.0:
+        raise COMError(
+            "Non-negative g_an cannot reduce the baseline added-noise penalty: "
+            f"delta(0)={low.delta_com_an_temp:.6g} dB, "
+            f"target={target_delta_com_an:.6g} dB."
+        )
+
+    high_g_an = 1.0
+    high: Optional[COMAddedNoiseStatus] = None
+    for iteration in range(1, max_iter + 1):
+        candidate = evaluate_delta_com_an(high_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        candidate.target_delta_com_an = target_delta_com_an
+        candidate.residual_dB = candidate.delta_com_an_temp - target_delta_com_an
+        candidate.iterations = iteration
+        if candidate.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
+            raise COMError(
+                "Added-noise penalty must be non-decreasing while bracketing "
+                f"g_an; delta({high_g_an / 2.0:.6g})={low.delta_com_an_temp:.6g} dB, "
+                f"delta({high_g_an:.6g})={candidate.delta_com_an_temp:.6g} dB."
+            )
+        if abs(candidate.residual_dB) <= cvg_th:
+            return candidate
+        if candidate.residual_dB > 0.0:
+            high = candidate
+            break
+        low = candidate
+        high_g_an *= 2.0
+
+    if high is None:
+        raise COMError(
+            "Unable to bracket target_delta_com_an within max_iter: "
+            f"target={target_delta_com_an:.6g} dB, "
+            f"last_delta={low.delta_com_an_temp:.6g} dB, max_iter={max_iter}."
+        )
+
+    low_g_an = low.g_an
+    high_g_an = high.g_an
+    best = min((low, high), key=lambda status: abs(status.residual_dB))
+    for iteration in range(int(high.iterations) + 1, max_iter + 1):
+        mid_g_an = (low_g_an + high_g_an) / 2.0
+        mid = evaluate_delta_com_an(mid_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        mid.target_delta_com_an = target_delta_com_an
+        mid.residual_dB = mid.delta_com_an_temp - target_delta_com_an
+        mid.iterations = iteration
+        if mid.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
+            raise COMError(
+                "Added-noise penalty decreased inside the bisection bracket: "
+                f"delta({low_g_an:.6g})={low.delta_com_an_temp:.6g} dB, "
+                f"delta({mid_g_an:.6g})={mid.delta_com_an_temp:.6g} dB."
+            )
+        if abs(mid.residual_dB) < abs(best.residual_dB):
+            best = mid
+        if abs(mid.residual_dB) <= cvg_th:
+            return mid
+        if mid.residual_dB < 0.0:
+            low_g_an = mid_g_an
+            low = mid
+        else:
+            high_g_an = mid_g_an
+            high = mid
+
+    raise COMError(
+        "solve_g_an did not converge within the bisection iteration budget: "
+        f"target={target_delta_com_an:.6g} dB, best_g_an={best.g_an:.6g}, "
+        f"best_residual={best.residual_dB:.6g} dB, cvg_th={cvg_th:.6g} dB."
+    )
 
 class COM(com_93A.COM):
     """
@@ -2971,6 +3093,7 @@ build_psd_xtalk = _build_psd_xtalk
 __all__ = [
     "COM",
     "COMAdcInputPMF",
+    "COMAddedNoiseStatus",
     "COMChannelConfig",
     "COMConfig",
     "COMDTEConfig",
@@ -2992,6 +3115,7 @@ __all__ = [
     "COMPkgConfig",
     "COMPSDStatus",
     "evaluate_delta_com_an",
+    "solve_g_an",
     "COMSearchConfig",
     "COMSearchRow",
     "COMSearchStatus",
