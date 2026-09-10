@@ -70,6 +70,18 @@
    - 檢查 `h_J` boundary handling。
    - 檢查 `pos == 0` / `pos == per_ui - 1` edge cases。
 
+29. 178A phase sweep corner-case diagnostic
+   - 從已完成的 `each_phase` vs `coarse_fine` full search comparison 中，挑選 phase difference / MSE difference 較大的 candidate。
+   - 整理或產生每個 candidate 的 `mse_by_pos`，確認 `coarse_fine` 是近似最佳 phase，還是真的錯過 narrow/global minimum。
+   - 建立 phase-sensitive diagnostic cases，例如 narrow minimum、reflection/ringing、notch、multiple local minima、cursor/ISI tradeoff 對 phase 高敏感的 pulse response。
+   - 目標是判斷 `coarse_fine` 可否作為 runtime optimization default，以及哪些條件下必須退回 exhaustive `each_phase`。
+   - claim boundary：目前 50 mm C2M evidence 只能支持該 case top ranking / final COM 對兩種 phase policy 等效；不能外推成所有 channel 或 corner case 等效。
+
+30. 178A external reference intake checklist
+   - 已先建立 `docs/178A_intermediate_value_checklist.md` 作為 v0。
+   - 等 Hansel / Rich / public Python COM reference output 到手後，先依 checklist 填 source metadata、config/channel identity、phase/DTE、impairment、PMF/final COM。
+   - 若 external result 只提供 final COM，先不要直接 claim validation；應回頭要求或自行產生 intermediate-value evidence。
+
 10. 802.3ck floating DFE
    - 未來項目。
    - 需要釐清 floating bank、overlap removal、tail RSS constraint、tap indexing。
