@@ -184,3 +184,16 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# COM case run outputs are local generated artifacts.
+cases/**/report/**/*
+!cases/**/report/**/
+!cases/**/report/**/.gitkeep
+
+# Per-case local scratch and downloaded/generated run artifacts.
+cases/**/.run/
+
+# Local scratch, environments and generated case results.
+/tmp/
+cases/**/results/
+*.xlsx.inspect.ndjson

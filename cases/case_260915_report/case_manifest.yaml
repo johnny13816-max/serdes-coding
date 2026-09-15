@@ -1,0 +1,12 @@
+case_id: case_260915_report
+purpose: 93A and 178A comparison on one C2M channel
+status: 178A_ready_for_local_validation
+models:
+  - 178A
+planned_models:
+  - 93A
+configs:
+  178A: 178A/config.xlsx
+channel_authority: 178A/config.xlsx#channels
+results:
+  178A: 178A/results

@@ -387,9 +387,9 @@ class COMReport178A:
     # ------------------------------------------------------------------
     def plot_phase_dte(self, save_path: str | Path = "") -> dict[str, str]:
         """Plot sampling-phase selection and selected MMSE-DTE fields."""
-        if self.status.dfe is None or self.status.run is None:
-            raise ValueError("COMStatus.run and COMStatus.dfe are required for DTE reporting.")
-        dte = self.status.dfe
+        if self.status.dte is None or self.status.run is None:
+            raise ValueError("COMStatus.run and COMStatus.dte are required for DTE reporting.")
+        dte = self.status.dte
         out_dir = str(Path(save_path) / "phase_dte") if save_path else ""
         outputs: dict[str, str] = {}
 
@@ -427,11 +427,12 @@ class COMReport178A:
         ax.set_ylabel("MMSE (V^2)")
         ax.grid(True)
         ax.legend()
-        subtitle = (
+        sweep_description = (
             "Coarse phase sweep followed by fine search"
             if fine_pos.size
             else "MSE is minimized over valid phases only"
         )
+        subtitle = f"{sweep_description}; final MSE={float(dte.mse):.6e} V^2"
         self._title(ax, "Sampling Phase Search", subtitle)
         self._annotate_config(ax)
         self._finish(fig, output)
@@ -668,10 +669,10 @@ class COMReport178A:
         if eq is not None:
             primary = [("h_dsamp", eq.h_dsamp), ("h_tn", eq.h_tn), ("h_J", eq.h_J)] if pre_dte else [("h_w", eq.h_w), ("h_ISI", eq.h_ISI), ("h_w_J", eq.h_w_J)]
             reference_index = (
-                int(self.status.dfe.d) - int(self.cfg.dte.d_w)
-                if pre_dte and self.status.dfe is not None
-                else int(self.status.dfe.d)
-                if not pre_dte and self.status.dfe is not None
+                int(self.status.dte.d) - int(self.cfg.dte.d_w)
+                if pre_dte and self.status.dte is not None
+                else int(self.status.dte.d)
+                if not pre_dte and self.status.dte is not None
                 else None
             )
             for name, values in primary:
@@ -986,7 +987,7 @@ class COMReport178A:
     def plot_single_run(self, save_path: str | Path = "", path_idx: int = 0) -> dict[str, Any]:
         """Export the first-pass 178A single-run report grouped by pipeline stage."""
         outputs: dict[str, Any] = {"path": self.plot_path(path_idx, save_path)}
-        if self.status.run is not None and self.status.dfe is not None:
+        if self.status.run is not None and self.status.dte is not None:
             outputs["phase_dte"] = self.plot_phase_dte(save_path)
         if self.status.imp is not None and self.status.imp.pre_dte is not None:
             outputs["imp_pre_dte"] = self.plot_pre_dte_imp(save_path)

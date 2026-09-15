@@ -24,6 +24,7 @@ from ..models.com_model_178A import (
     COMExecutionConfig,
     COMFilterConfig as COMFilterConfig_178A,
     COMImpairmentConfig as COMImpairmentConfig_178A,
+    COMMLSDConfig,
     COMPartialHostConfig,
     COMPkgConfig as COMPkgConfig_178A,
     COMRunConfig,
@@ -349,6 +350,12 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
         execution=_read_project_execution_config(excel_path),
+        mlsd=COMMLSDConfig(
+            enable=_coerce_bool(fixed.get("mlsd_enable", False)),
+            trunc_len=_fixed_optional_int(fixed, "mlsd_trunc_len") or 0,
+            delta_com_an=_fixed_optional_float(fixed, "delta_com_an"),
+            minimum_com_limit=_fixed_optional_float(fixed, "minimum_com_limit"),
+        ),
     )
 
 
@@ -390,6 +397,12 @@ def _read_project_fixed_config(excel_path: Path) -> dict[str, object]:
     required_cols = {"Parameter", "Value"}
     if not required_cols.issubset(df.columns):
         raise ValueError("fixed_config must contain Parameter and Value columns.")
+
+    if "Parameter Class" in df.columns:
+        allowed_classes = {"intrinsic", "policy", "derived", "runtime", "compatibility"}
+        invalid = {str(v).strip() for v in df["Parameter Class"].dropna()} - allowed_classes
+        if invalid:
+            raise ValueError(f"fixed_config contains unsupported Parameter Class values: {sorted(invalid)}")
 
     fixed: dict[str, object] = {}
     for _, row in df.iterrows():
@@ -502,6 +515,8 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
     if common_port_order is None or common_R0 is None or common_gamma_src is None or common_gamma_load is None:
         raise ValueError("channels sheet has no enabled channel rows.")
 
+    fixed = _read_project_fixed_config(excel_path)
+    missing_dc_policy = str(fixed.get("missing_dc_policy", "error")).strip().lower()
     return COMChannelConfig(
         victim_s4p_path=victim_paths[0],
         next_s4p_paths=tuple(next_paths),
@@ -510,6 +525,7 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
         R0=common_R0,
         gamma_src=common_gamma_src,
         gamma_load=common_gamma_load,
+        missing_dc_policy=missing_dc_policy,
     )
 
 

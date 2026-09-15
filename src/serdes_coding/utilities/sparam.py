@@ -1328,6 +1328,7 @@ class SparamModel:
         cfg: 'LinkConfig',
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal['error', 'hold', 'skrf'] = 'error',
     ) -> 'LinkSegment':
         """
         Build a scalar LinkSegment from the terminated voltage transfer H21(f).
@@ -1345,7 +1346,10 @@ class SparamModel:
         3. let LinkSegment.from_tf() resample / extend the scalar transfer
            function to cfg.freqs / cfg.f_nyq using the project TF rule
         """
-        H21 = self.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
-        return LinkSegment.from_tf(self.freqs, H21, cfg)
+        if dc not in {'error', 'hold', 'skrf'}:
+            raise ValueError('dc must be error, hold, or skrf.')
+        model = self.extrapolated_to_dc() if dc == 'skrf' and not np.isclose(self.freqs[0], 0.0) else self
+        H21 = model.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        return LinkSegment.from_tf(model.freqs, H21, cfg, dc='hold' if dc == 'hold' else 'error')
 
 __all__ = ["SparamModel", "SparamProcessor"]

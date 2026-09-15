@@ -626,6 +626,11 @@ class COMChannelConfig(_PrettyDataclass):
     R0: float = 50.0                                        # unit: ohm, single-ended reference resistance
     gamma_src: complex | np.ndarray = 0.0                   # unit: dimensionless source reflection coefficient
     gamma_load: complex | np.ndarray = 0.0                  # unit: dimensionless load reflection coefficient
+    missing_dc_policy: Literal["error", "hold", "skrf"] = "error"
+
+    def __post_init__(self) -> None:
+        if self.missing_dc_policy not in {"error", "hold", "skrf"}:
+            raise ValueError("missing_dc_policy must be error, hold, or skrf.")
 
     def align_grid(self, channels: list[SparamModel]) -> np.ndarray:
         """
@@ -3227,6 +3232,7 @@ def _build_path_93A(
         link_cfg,
         gamma_src=channel_cfg.gamma_src,
         gamma_load=channel_cfg.gamma_load,
+        dc=channel_cfg.missing_dc_policy,
     )
     H_all = (
         H_ffe

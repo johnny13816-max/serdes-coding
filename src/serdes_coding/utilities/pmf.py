@@ -675,6 +675,36 @@ class Pmf1D:
         idx = min(idx, len(self.pmf) - 1)
         return float(self.x[idx])
 
+    def cdf_at(self, x: float | np.ndarray) -> float | np.ndarray:
+        """Evaluate the right-continuous discrete CDF at one or more values.
+
+        Each PMF entry is probability mass located at its corresponding grid
+        value. Therefore ``cdf_at(y)`` returns the sum of all mass whose
+        ``x <= y``. This is the value-level counterpart to :attr:`cdf` and is
+        suitable for expressions such as the Annex 178A ``P_j(x_j)`` term.
+
+        ``-inf`` and ``inf`` return 0 and 1 respectively; NaN is invalid.
+        Scalar inputs return ``float`` and array-like inputs return an ndarray
+        with the same shape.
+        """
+        values = np.asarray(x, dtype=float)
+        if np.any(np.isnan(values)):
+            raise ValueError("CDF evaluation points must not contain NaN.")
+
+        indices = np.searchsorted(self.x, values, side="right") - 1
+        result = np.empty(values.shape, dtype=float)
+        below = indices < 0
+        above = indices >= len(self.pmf)
+        inside = ~(below | above)
+        result[below] = 0.0
+        result[above] = 1.0
+        if np.any(inside):
+            result[inside] = self.cdf[indices[inside]]
+
+        if values.ndim == 0:
+            return float(result)
+        return result
+
     def shift_x(self, idx_shift: int) -> 'Pmf1D':
         """
         Return a copy with the x grid shifted by idx_shift samples.

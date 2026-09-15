@@ -9,7 +9,7 @@ only stable v1 primitives from ``com_model_93A.py``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from itertools import combinations, product
 from pathlib import Path
 import sys
@@ -700,9 +700,40 @@ class COMImpairmentConfig(_PrettyDataclass):
 
 @dataclass(repr=False)
 class COMMLSDConfig(_PrettyDataclass):
-    enable: bool
-    trunc_len: int
-    delta_com_an: float
+    """Configuration required to enable the Annex 178A MLSD receiver."""
+    enable: bool = False
+    trunc_len: int = 0
+    delta_com_an: Optional[float] = None
+    minimum_com_limit: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        self.enable = bool(self.enable)
+        self.trunc_len = int(self.trunc_len)
+        if self.trunc_len < 0 or (self.enable and self.trunc_len <= 0):
+            raise ValueError(
+                "COMMLSDConfig.trunc_len must be positive when MLSD is enabled."
+            )
+        for name in ("delta_com_an", "minimum_com_limit"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            value = float(value)
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    f"COMMLSDConfig.{name} must be finite and non-negative when provided."
+                )
+            setattr(self, name, value)
+
+    def resolved_delta_com_an(self) -> float:
+        """Return the explicit MLSD penalty or its clause/annex fallback."""
+        if self.delta_com_an is not None:
+            return self.delta_com_an
+        if self.minimum_com_limit is not None:
+            return self.minimum_com_limit
+        raise ValueError(
+            "MLSD requires delta_com_an or minimum_com_limit; the added-noise "
+            "target must not be guessed."
+        )
 
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
@@ -720,6 +751,7 @@ class COMConfig(_PrettyDataclass):
     DER_0: float                      # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
     execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
+    mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
 
     def to_export_dict(self) -> dict[str, object]:
         """
@@ -785,6 +817,35 @@ class COMPSDStatus(_PrettyDataclass):
     sigma_gn_adc: Optional[float] = None
     sigma_ISI: Optional[float] = None
 
+
+@dataclass(repr=False)
+class COMAddedNoiseStatus(_PrettyDataclass):
+    """178A.1.10.1 added-noise calibration result shared by MLSD stages."""
+    g_an: float
+    S_an: SampledPSD
+    sigma_an: float
+    p_an: Pmf1D
+    delta_com_an_temp: float
+    target_delta_com_an: Optional[float] = None
+    residual_dB: Optional[float] = None
+    iterations: Optional[int] = None
+
+
+@dataclass(repr=False)
+class COMMLSDStatus(_PrettyDataclass):
+    """MLSD-only inputs and results, separate from physical impairment stages."""
+    added_noise: COMAddedNoiseStatus
+    S_ni: Optional[SampledPSD] = None
+    sigma_ni: Optional[float] = None
+    R_ni: Optional[np.ndarray] = None
+    der_by_j: Optional[np.ndarray] = None
+    DER_MLSD: Optional[float] = None
+    A_MLSD: Optional[float] = None
+    delta_COM: Optional[float] = None
+    COM_MLSD_raw: Optional[float] = None
+    COM_MLSD: Optional[float] = None
+
+
 @dataclass(repr=False)
 class COMEqChannelStatus(_PrettyDataclass):
     """
@@ -842,14 +903,13 @@ class COMImpairmentStatus(_PrettyDataclass):
     """
     pre_dte: Optional[COMImpStageStatus] = None
     post_ffe: Optional[COMImpStageStatus] = None
-    pre_mlsd: Optional[COMImpStageStatus] = None
     eq_ch: Optional[COMEqChannelStatus] = None
     H_rxffe: Optional[SampledResponse] = None
     
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
         return tuple(
             stage
-            for stage in (self.pre_mlsd, self.post_ffe, self.pre_dte)
+            for stage in (self.post_ffe, self.pre_dte)
             if stage is not None
         )
 
@@ -999,7 +1059,7 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._eq_attr("h_XTs_w")
 
     @property
-    def h_ISI(self) -> np.ndarray:
+    def h_ISI(self) -> SampledResponse:
         return self._eq_attr("h_ISI")
 
     @property
@@ -1046,9 +1106,17 @@ class COMRunStatus(_PrettyDataclass):
 @dataclass(repr=False)
 class COMStatus(com_93A.COMStatus):
     """178A COM status with selected stage outputs and runtime sweep records."""
-    dfe: Optional[COMDTEStatus] = None
+    dte: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
     run: Optional[COMRunStatus] = None
+    mlsd: Optional[COMMLSDStatus] = None
+
+    @property
+    def final_COM(self) -> Optional[float]:
+        """Return the selected MLSD result when available, else COM_DFE."""
+        if self.mlsd is not None and self.mlsd.COM_MLSD is not None:
+            return self.mlsd.COM_MLSD
+        return None if self.pmf is None else self.pmf.COM
 
     def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
         """Export a 178A status without invoking the legacy 93A exporter.
@@ -1072,7 +1140,33 @@ class COMStatus(com_93A.COMStatus):
             from ..reporting.com_report_178A import COMReport178A
 
             plot_dir = out_dir / "plots"
-            COMReport178A(cfg, self).plot_single_run(plot_dir)
+            report = COMReport178A(cfg, self).plot_single_run(plot_dir)
+            # Validate every PNG returned by the reporter, rather than a fixed
+            # figure count: enabled stages can legitimately produce more plots.
+            import json
+            import hashlib
+            plot_files = []
+            def collect(value):
+                if isinstance(value, dict):
+                    for item in value.values():
+                        collect(item)
+                elif isinstance(value, (list, tuple)):
+                    for item in value:
+                        collect(item)
+                elif isinstance(value, (str, Path)) and str(value).endswith(".png"):
+                    plot_files.append(Path(value))
+            collect(report)
+            if not plot_files:
+                raise RuntimeError("178A report produced no PNG outputs.")
+            records = []
+            for path in sorted(set(plot_files)):
+                data = path.read_bytes()
+                if len(data) < 100 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                    raise RuntimeError(f"Invalid or empty report PNG: {path}")
+                records.append({"path": path.relative_to(out_dir).as_posix(),
+                                "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
+            (out_dir / "plot_manifest.json").write_text(
+                json.dumps({"count": len(records), "files": records}, indent=2), encoding="utf-8")
             outputs["plots"] = str(plot_dir)
         return outputs
 
@@ -1230,6 +1324,7 @@ def _build_path(
         link_cfg,
         gamma_src=channel_cfg.gamma_src,
         gamma_load=channel_cfg.gamma_load,
+        dc=channel_cfg.missing_dc_policy,
     )
     H_all = (
         H_ffe
@@ -2058,6 +2153,334 @@ def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link
         name="Noise"
     )
 
+
+def evaluate_delta_com_an(
+    g_an: float,
+    post_ffe: COMImpStageStatus,
+    pmf_dfe: COMPMFStatus,
+    pmf_cfg: COMPMFRuntimeConfig,
+    der_0: float,
+) -> COMAddedNoiseStatus:
+    """Evaluate the Annex 178A MLSD added-receiver-noise penalty.
+
+    This implements the calibration calculation in 178A.1.10.1 only.  The
+    added noise is defined at the receiver FFE output, so the pre-existing ADC
+    quantization distribution is retained.  In particular, ``p_qn`` is not
+    recomputed: its quantizer range was already determined at the ADC input.
+
+    Parameters
+    ----------
+    g_an:
+        Non-negative PSD scale factor from Eq. (178A-50).
+    post_ffe:
+        Post-FFE impairment stage from the DFE calculation.  Its ``S_rn``
+        already includes the receiver FFE response.
+    pmf_dfe:
+        Complete COM_DFE PMF result at the same sampling phase.
+    pmf_cfg:
+        Resolved PMF numerical settings used for the COM_DFE calculation.
+    der_0:
+        Target detector error rate used for the inverse-CDF comparison.
+
+    Returns
+    -------
+    COMAddedNoiseStatus
+        The full noise-and-interference PDF, added-noise PSD, and the dB
+        value of ``20 * log10(abs(P_an^-1(der_0)) / abs(P^-1(der_0)))``.
+    """
+    g_an = float(g_an)
+    if not np.isfinite(g_an) or g_an < 0.0:
+        raise ValueError("g_an must be finite and non-negative.")
+
+    der_0 = float(der_0)
+    if not np.isfinite(der_0) or not 0.0 < der_0 < 0.5:
+        raise ValueError("der_0 must be finite and in (0, 0.5).")
+
+    if not np.isclose(pmf_dfe.dy, pmf_cfg.dy):
+        raise ValueError(
+            "pmf_dfe and pmf_cfg must use the same PMF grid spacing: "
+            f"{pmf_dfe.dy!r} != {pmf_cfg.dy!r}."
+        )
+
+    post_psd = post_ffe.psd
+    if post_psd is None or post_psd.S_rn is None or post_psd.S_gn_adc is None:
+        raise ValueError(
+            "post_ffe must contain S_rn and S_gn_adc from the completed "
+            "post-FFE impairment stage."
+        )
+
+    missing_pmf = [
+        name
+        for name in ("p_ISI", "p_XT", "p_DD", "p_qn", "p_combined")
+        if getattr(pmf_dfe, name) is None
+    ]
+    if missing_pmf:
+        raise ValueError(
+            "pmf_dfe must be the complete COM_DFE PMF result; missing "
+            + ", ".join(missing_pmf)
+            + "."
+        )
+
+    # Eq. (178A-50).  post_ffe.S_rn already contains |H_rxffe|^2.
+    S_an = SampledPSD(
+        theta=post_psd.S_rn.theta,
+        psd=g_an * post_psd.S_rn.psd,
+        fb=post_psd.S_rn.fb,
+    )
+    sigma_G = post_psd.S_gn_adc.to_sigma()
+    sigma_an = float(np.hypot(sigma_G, S_an.to_sigma()))
+
+    p_G_an = Pmf1D.gaussian(
+        mu=0.0,
+        sigma=sigma_an,
+        dx=pmf_cfg.dy,
+        n_sigma=pmf_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="Added receiver noise",
+    )
+    p_an = (
+        pmf_dfe.p_ISI
+        .combine(pmf_dfe.p_XT)
+        .combine(pmf_dfe.p_DD)
+        .combine(pmf_dfe.p_qn)
+        .combine(p_G_an, name="MLSD added-noise total")
+    )
+
+    a_ref = abs(float(pmf_dfe.p_combined.quantile(der_0)))
+    a_an = abs(float(p_an.quantile(der_0)))
+    if not np.isfinite(a_ref) or not np.isfinite(a_an) or a_ref <= 0.0 or a_an <= 0.0:
+        raise COMError(
+            "MLSD added-noise quantiles must be finite and non-zero at "
+            f"DER_0={der_0:.6e}; got reference={a_ref!r}, added={a_an!r}."
+        )
+
+    return COMAddedNoiseStatus(
+        g_an=g_an,
+        S_an=S_an,
+        sigma_an=sigma_an,
+        p_an=p_an,
+        delta_com_an_temp=float(20.0 * np.log10(a_an / a_ref)),
+    )
+
+
+def solve_g_an(
+    target_delta_com_an: float,
+    post_ffe: COMImpStageStatus,
+    pmf_dfe: COMPMFStatus,
+    pmf_cfg: COMPMFRuntimeConfig,
+    der_0: float,
+    *,
+    cvg_th: float = 1e-2,
+    max_iter: int = 64,
+) -> COMAddedNoiseStatus:
+    """Solve Eq. (178A-50) scale factor for a target added-noise penalty.
+
+    The evaluator is numerical because it includes PMF convolution and an
+    inverse-CDF measurement.  This solver therefore finds a non-negative
+    bracket by doubling ``g_an`` and then bisects it until the dB residual is
+    within ``cvg_th``.
+    """
+    target_delta_com_an = float(target_delta_com_an)
+    if not np.isfinite(target_delta_com_an) or target_delta_com_an < 0.0:
+        raise ValueError("target_delta_com_an must be finite and non-negative.")
+
+    cvg_th = float(cvg_th)
+    if not np.isfinite(cvg_th) or cvg_th <= 0.0:
+        raise ValueError("cvg_th must be finite and positive in dB.")
+
+    max_iter = int(max_iter)
+    if max_iter <= 0:
+        raise ValueError("max_iter must be positive.")
+
+    low = evaluate_delta_com_an(0.0, post_ffe, pmf_dfe, pmf_cfg, der_0)
+    low.target_delta_com_an = target_delta_com_an
+    low.residual_dB = low.delta_com_an_temp - target_delta_com_an
+    low.iterations = 0
+    if abs(low.residual_dB) <= cvg_th:
+        return low
+    if low.residual_dB > 0.0:
+        raise COMError(
+            "Non-negative g_an cannot reduce the baseline added-noise penalty: "
+            f"delta(0)={low.delta_com_an_temp:.6g} dB, "
+            f"target={target_delta_com_an:.6g} dB."
+        )
+
+    high_g_an = 1.0
+    high: Optional[COMAddedNoiseStatus] = None
+    for iteration in range(1, max_iter + 1):
+        candidate = evaluate_delta_com_an(high_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        candidate.target_delta_com_an = target_delta_com_an
+        candidate.residual_dB = candidate.delta_com_an_temp - target_delta_com_an
+        candidate.iterations = iteration
+        if candidate.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
+            raise COMError(
+                "Added-noise penalty must be non-decreasing while bracketing "
+                f"g_an; delta({high_g_an / 2.0:.6g})={low.delta_com_an_temp:.6g} dB, "
+                f"delta({high_g_an:.6g})={candidate.delta_com_an_temp:.6g} dB."
+            )
+        if abs(candidate.residual_dB) <= cvg_th:
+            return candidate
+        if candidate.residual_dB > 0.0:
+            high = candidate
+            break
+        low = candidate
+        high_g_an *= 2.0
+
+    if high is None:
+        raise COMError(
+            "Unable to bracket target_delta_com_an within max_iter: "
+            f"target={target_delta_com_an:.6g} dB, "
+            f"last_delta={low.delta_com_an_temp:.6g} dB, max_iter={max_iter}."
+        )
+
+    low_g_an = low.g_an
+    high_g_an = high.g_an
+    best = min((low, high), key=lambda status: abs(status.residual_dB))
+    for iteration in range(int(high.iterations) + 1, max_iter + 1):
+        mid_g_an = (low_g_an + high_g_an) / 2.0
+        mid = evaluate_delta_com_an(mid_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        mid.target_delta_com_an = target_delta_com_an
+        mid.residual_dB = mid.delta_com_an_temp - target_delta_com_an
+        mid.iterations = iteration
+        if mid.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
+            raise COMError(
+                "Added-noise penalty decreased inside the bisection bracket: "
+                f"delta({low_g_an:.6g})={low.delta_com_an_temp:.6g} dB, "
+                f"delta({mid_g_an:.6g})={mid.delta_com_an_temp:.6g} dB."
+            )
+        if abs(mid.residual_dB) < abs(best.residual_dB):
+            best = mid
+        if abs(mid.residual_dB) <= cvg_th:
+            return mid
+        if mid.residual_dB < 0.0:
+            low_g_an = mid_g_an
+            low = mid
+        else:
+            high_g_an = mid_g_an
+            high = mid
+
+    raise COMError(
+        "solve_g_an did not converge within the bisection iteration budget: "
+        f"target={target_delta_com_an:.6g} dB, best_g_an={best.g_an:.6g}, "
+        f"best_residual={best.residual_dB:.6g} dB, cvg_th={cvg_th:.6g} dB."
+    )
+
+
+def calculate_der_mlsd(
+    mlsd_status: COMMLSDStatus,
+    *,
+    L: int,
+    As: float,
+    b_lim_1: float,
+    trunc_len: int,
+) -> tuple[float, np.ndarray]:
+    """Evaluate the truncated Annex 178A MLSD detector error ratio.
+
+    This function implements the recurrence in Eqs. (178A-47) through
+    (178A-53).  ``p_j`` is deliberately local: it is only the state needed to
+    construct the next sequence-length term.  The returned ``der_by_j`` holds
+    the weighted Eq. (178A-47) contribution for each ``j=1..trunc_len``;
+    therefore ``der_by_j.sum()`` is the truncated ``DER_MLSD``.
+
+    ``initialize_mlsd_status()`` must have run first so that Eq. (178A-54)
+    autocorrelation ``R_ni`` is available on the same post-FFE model.
+    """
+    if not isinstance(mlsd_status, COMMLSDStatus):
+        raise TypeError("mlsd_status must be a COMMLSDStatus.")
+
+    L = int(L)
+    if L < 2:
+        raise ValueError("L must be at least 2 for PAM MLSD.")
+
+    As = float(As)
+    if not np.isfinite(As) or As <= 0.0:
+        raise ValueError("As must be finite and positive.")
+
+    b_lim_1 = float(b_lim_1)
+    if not np.isfinite(b_lim_1) or b_lim_1 == 0.0:
+        raise ValueError("b_lim_1 must be finite and non-zero for MLSD.")
+
+    trunc_len = int(trunc_len)
+    if trunc_len <= 0:
+        raise ValueError("trunc_len must be positive.")
+    if trunc_len > 1 and b_lim_1 == 1.0:
+        raise ValueError(
+            "b_lim_1 must differ from one when trunc_len is greater than one."
+        )
+
+    p_an = mlsd_status.added_noise.p_an
+    if not isinstance(p_an, Pmf1D):
+        raise TypeError("mlsd_status.added_noise.p_an must be a Pmf1D.")
+
+    if mlsd_status.R_ni is None:
+        raise ValueError("mlsd_status.R_ni is required before calculating DER_MLSD.")
+    R_ni = np.asarray(mlsd_status.R_ni)
+    if R_ni.ndim != 1 or R_ni.size < trunc_len + 1:
+        raise COMLengthMismatchError(
+            "MLSD R_ni must be one-dimensional with at least trunc_len + 1 "
+            f"entries; got shape {R_ni.shape}, trunc_len={trunc_len}."
+        )
+    if np.iscomplexobj(R_ni) and not np.allclose(R_ni.imag, 0.0, atol=1e-15):
+        raise ValueError("MLSD R_ni must be real-valued.")
+    R_ni = np.asarray(R_ni.real, dtype=float)
+    if not np.all(np.isfinite(R_ni)) or R_ni[0] <= 0.0:
+        raise ValueError("MLSD R_ni must be finite with positive R_ni[0].")
+
+    # This local import keeps scipy confined to the Toeplitz calculation that
+    # directly represents Eq. (178A-49).
+    from scipy.linalg import toeplitz
+
+    der_by_j = np.empty(trunc_len, dtype=float)
+    p_j: Optional[Pmf1D] = None
+    p_1_term = p_an.scale_x(-b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+    p_later_term: Optional[Pmf1D] = None
+    if trunc_len > 1:
+        p_later_term = p_an.scale_x(1.0 - b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+
+    for j in range(1, trunc_len + 1):
+        # Eqs. (178A-52) and (178A-53). scale_x preserves PMF mass, which is
+        # the discrete-grid equivalent of each equation's 1 / |scale| factor.
+        if j == 1:
+            p_j = p_an.combine(p_1_term, name="MLSD p_1")
+        else:
+            assert p_j is not None and p_later_term is not None
+            p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}")
+
+        # Eq. (178A-48): u_j is indexed from 1 in the specification.
+        u_j = np.empty(j + 1, dtype=float)
+        u_j[0] = 1.0
+        if j > 1:
+            indices = np.arange(2, j + 1, dtype=int)
+            u_j[1:j] = ((-1.0) ** (indices - 1)) * (1.0 - b_lim_1)
+        u_j[j] = ((-1.0) ** j) * b_lim_1
+
+        # Eq. (178A-49), normalized by R_ni(0).
+        V_j = toeplitz(R_ni[:j + 1] / R_ni[0])
+        quadratic = float(u_j @ V_j @ u_j)
+        norm_sq = float(u_j @ u_j)
+        if not np.isfinite(quadratic) or quadratic <= 0.0:
+            raise COMError(
+                f"MLSD V_{j} produced invalid u_j^T V_j u_j={quadratic!r}."
+            )
+        threshold = -As * norm_sq ** 1.5 / np.sqrt(quadratic)
+        der_event = float(p_j.cdf_at(threshold))
+        if not np.isfinite(der_event) or not 0.0 <= der_event <= 1.0:
+            raise COMError(
+                f"MLSD p_{j} CDF produced invalid event probability {der_event!r}."
+            )
+
+        # Eq. (178A-47), including the probability of a j-event sequence.
+        der_by_j[j - 1] = ((L - 1.0) / L) ** (j - 1) * der_event
+
+    if not np.all(np.isfinite(der_by_j)) or np.any(der_by_j < 0.0):
+        raise COMError("MLSD DER contributions must be finite and non-negative.")
+
+    DER_MLSD = float(np.sum(der_by_j))
+    mlsd_status.der_by_j = der_by_j
+    mlsd_status.DER_MLSD = DER_MLSD
+    return DER_MLSD, der_by_j
+
+
 class COM(com_93A.COM):
     """
     IEEE 802.3 Annex 178A COM calculator.
@@ -2120,12 +2543,22 @@ class COM(com_93A.COM):
 
         ``target="mse"`` returns after the best valid DTE result.
         ``target="dfe"`` additionally produces post-FFE impairment and DFE
-        COM PMFs. ``mlsd`` and ``full`` enter the reserved MLSD stage, which
-        currently raises NotImplementedError instead of returning an invalid
-        result.
+        COM PMFs. ``target="mlsd"`` includes that DFE baseline and then runs
+        the enabled MLSD receiver stage. ``target="full"`` includes MLSD only
+        when ``cfg.mlsd.enable`` is true.
         """
         self.status = COMStatus()
         started = perf_counter()
+
+        mlsd_requested = run_cfg.target == "mlsd" or (
+            run_cfg.target == "full" and self.cfg.mlsd.enable
+        )
+        if run_cfg.target == "mlsd" and not self.cfg.mlsd.enable:
+            raise ValueError("target='mlsd' requires cfg.mlsd.enable=True.")
+        if mlsd_requested and self.cfg.dte.N_b != 1:
+            raise ValueError(
+                "Annex 178A MLSD requires the receiver DTE configuration to use N_b=1."
+            )
 
         def report(message: str) -> None:
             if progress:
@@ -2233,14 +2666,15 @@ class COM(com_93A.COM):
         if not isinstance(merged_imp_status, COMImpairmentStatus):
             raise RuntimeError("Merged 178A impairment status is not available after post-FFE impairment.")
 
-        if run_cfg.target in {"dfe", "full"}:
+        if run_cfg.target in {"dfe", "mlsd", "full"}:
             report("calculate_COM_DFE: start")
             self._assign_pmf(self.calculate_COM_DFE(merged_imp_status, best_dte))
             report("calculate_COM_DFE: done")
 
-        if run_cfg.target in {"mlsd", "full"}:
+        if mlsd_requested:
             report("calculate_COM_MLSD: start")
             self.calculate_COM_MLSD()
+            report("calculate_COM_MLSD: done")
         report("single-run complete")
         return self._require_status()
 
@@ -2254,7 +2688,7 @@ class COM(com_93A.COM):
         """Assign selected DTE stage output into the incremental run status."""
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
-        self.status.dfe = dte_status
+        self.status.dte = dte_status
 
     def _assign_run(self, run_status: COMRunStatus) -> None:
         """Assign run-local status that is accumulated across the sampling-phase sweep."""
@@ -2275,7 +2709,7 @@ class COM(com_93A.COM):
             current.eq_ch = imp_status.eq_ch
         if imp_status.H_rxffe is not None:
             current.H_rxffe = imp_status.H_rxffe
-        for name in ("pre_dte", "post_ffe", "pre_mlsd"):
+        for name in ("pre_dte", "post_ffe"):
             value = getattr(imp_status, name)
             if value is not None:
                 setattr(current, name, value)
@@ -2285,6 +2719,12 @@ class COM(com_93A.COM):
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
         self.status.pmf = pmf_status
+
+    def _assign_mlsd(self, mlsd_status: COMMLSDStatus) -> None:
+        """Assign MLSD-only status into the incremental run status."""
+        if self.status is None or isinstance(self.status, COMSearchStatus):
+            self.status = COMStatus()
+        self.status.mlsd = mlsd_status
 
     def _require_status(self) -> COMStatus:
         if self.status is None:
@@ -2743,6 +3183,65 @@ class COM(com_93A.COM):
             H_rxffe=H_rxffe,
         )
 
+    def initialize_mlsd_status(
+        self,
+        imp_status: COMImpairmentStatus,
+        added_noise: COMAddedNoiseStatus,
+    ) -> COMMLSDStatus:
+        """Build Eq. (178A-54) MLSD input PSD and autocorrelation once.
+
+        ``S_ni`` and ``R_ni`` are independent of MLSD sequence length ``j``.
+        They are therefore computed before the DER summation and stored with
+        the MLSD analysis result rather than in the physical impairment status.
+        """
+        post_ffe = imp_status.post_ffe
+        if post_ffe is None or post_ffe.psd is None or post_ffe.psd.S_rn is None:
+            raise ValueError(
+                "initialize_mlsd_status requires post-FFE receiver noise PSD S_rn."
+            )
+
+        S_rn = post_ffe.psd.S_rn
+        h_ISI = imp_status.h_ISI
+        if not isinstance(h_ISI, SampledResponse):
+            raise TypeError(
+                "initialize_mlsd_status requires h_ISI to be a SampledResponse."
+            )
+        if not np.isfinite(imp_status.sigma_X) or imp_status.sigma_X < 0.0:
+            raise ValueError("initialize_mlsd_status requires finite non-negative sigma_X.")
+
+        for name, psd in (("added_noise.S_an", added_noise.S_an),):
+            if not np.isclose(psd.fb, S_rn.fb) or not np.allclose(
+                psd.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+            ):
+                raise ValueError(
+                    f"{name} must share the post-FFE S_rn theta grid and fb."
+                )
+        if not np.isclose(h_ISI.fb, S_rn.fb) or not np.allclose(
+            h_ISI.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+        ):
+            raise ValueError("h_ISI must share the post-FFE S_rn theta grid and fb.")
+
+        # Eq. (178A-54). post-FFE S_rn already includes |H_rxffe|^2.
+        S_isi = SampledPSD(
+            theta=S_rn.theta,
+            psd=(imp_status.sigma_X**2 / S_rn.fb) * h_ISI.magnitude_squared(),
+            fb=S_rn.fb,
+        )
+        S_ni = S_rn.add(added_noise.S_an).add(S_isi)
+        R_ni = S_ni.to_autocorrelation()
+        if not np.all(np.isfinite(R_ni)) or R_ni.size == 0 or R_ni[0] <= 0.0:
+            raise COMError(
+                "Eq. (178A-54) produced an invalid MLSD autocorrelation: "
+                f"R_ni[0]={R_ni[0] if R_ni.size else None!r}."
+            )
+
+        return COMMLSDStatus(
+            added_noise=added_noise,
+            S_ni=S_ni,
+            sigma_ni=S_ni.to_sigma(),
+            R_ni=R_ni,
+        )
+
     def calculate_COM_DFE(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
         """
         Calculate 178A final COM result after DFE.
@@ -2828,17 +3327,83 @@ class COM(com_93A.COM):
             COM=COM,
         )
 
-    def calculate_COM_MLSD(self) -> None:
-        """
-        Placeholder for the 178A MLSD COM stage.
+    def calculate_COM_MLSD(self) -> COMMLSDStatus:
+        """Calculate the Annex 178A MLSD COM adjustment after COM_DFE.
 
-        The current project flow explicitly reserves this stage after
-        calculate_COM_DFE(), but the MLSD algorithm is not implemented yet.
+        The DFE PMF remains the immutable baseline.  Eq. (178A-47) derives
+        ``COM_MLSD_raw`` from its ``COM_DFE`` and ``A_ni``; the specification
+        then floors the selected result at ``COM_DFE``.
         """
-        raise NotImplementedError(
-            "178A COM MLSD is not implemented. Use target='mse' or target='dfe' "
-            "until the pre-MLSD and MLSD stages are implemented."
+        if not self.cfg.mlsd.enable:
+            raise ValueError("calculate_COM_MLSD requires cfg.mlsd.enable=True.")
+        if self.cfg.dte.N_b != 1:
+            raise ValueError("Annex 178A MLSD requires cfg.dte.N_b == 1.")
+
+        status = self._require_status()
+        imp_status = status.imp
+        dte_status = status.dte
+        pmf_dfe = status.pmf
+        if not isinstance(imp_status, COMImpairmentStatus):
+            raise RuntimeError("calculate_COM_MLSD requires completed 178A impairment status.")
+        if not isinstance(dte_status, COMDTEStatus):
+            raise RuntimeError("calculate_COM_MLSD requires the selected N_b=1 DTE status.")
+        if not isinstance(pmf_dfe, COMPMFStatus):
+            raise RuntimeError("calculate_COM_MLSD requires completed COM_DFE PMF status.")
+        if imp_status.post_ffe is None:
+            raise RuntimeError("calculate_COM_MLSD requires the post-FFE impairment stage.")
+
+        b_lim = np.asarray(dte_status.b_lim, dtype=float)
+        if b_lim.shape != (1,):
+            raise COMLengthMismatchError(
+                "MLSD requires exactly one DFE feedback coefficient; "
+                f"got b_lim shape {b_lim.shape}."
+            )
+        if pmf_dfe.A_ni is None or pmf_dfe.COM is None:
+            raise RuntimeError("calculate_COM_MLSD requires finite COM_DFE and A_ni.")
+        A_ni = float(pmf_dfe.A_ni)
+        COM_DFE = float(pmf_dfe.COM)
+        if not np.isfinite(A_ni) or A_ni <= 0.0 or not np.isfinite(COM_DFE):
+            raise COMError(
+                "calculate_COM_MLSD requires finite COM_DFE and positive A_ni; "
+                f"got COM_DFE={COM_DFE!r}, A_ni={A_ni!r}."
+            )
+
+        pmf_cfg = self.cfg.pmf.resolve(imp_status.As)
+        added_noise = solve_g_an(
+            self.cfg.mlsd.resolved_delta_com_an(),
+            imp_status.post_ffe,
+            pmf_dfe,
+            pmf_cfg,
+            self.cfg.DER_0,
         )
+        mlsd_status = self.initialize_mlsd_status(imp_status, added_noise)
+        DER_MLSD, _ = calculate_der_mlsd(
+            mlsd_status,
+            L=self.cfg.L,
+            As=imp_status.As,
+            b_lim_1=float(b_lim[0]),
+            trunc_len=self.cfg.mlsd.trunc_len,
+        )
+        if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:
+            raise COMError(
+                "MLSD DER must be finite and in (0, 0.5) to evaluate Eq. (178A-47); "
+                f"got {DER_MLSD!r}."
+            )
+
+        A_MLSD = -float(added_noise.p_an.quantile(DER_MLSD))
+        if not np.isfinite(A_MLSD) or A_MLSD <= 0.0:
+            raise COMError(
+                "MLSD inverse-CDF amplitude must be finite and positive; "
+                f"got {A_MLSD!r} at DER_MLSD={DER_MLSD:.6e}."
+            )
+        delta_COM = float(20.0 * np.log10(A_MLSD / A_ni))
+        COM_MLSD_raw = COM_DFE + delta_COM
+        mlsd_status.A_MLSD = A_MLSD
+        mlsd_status.delta_COM = delta_COM
+        mlsd_status.COM_MLSD_raw = COM_MLSD_raw
+        mlsd_status.COM_MLSD = max(COM_DFE, COM_MLSD_raw)
+        self._assign_mlsd(mlsd_status)
+        return mlsd_status
 
     def calculate_COM(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
         """Backward-compatible alias for the DFE-based 178A COM stage."""
@@ -2867,6 +3432,7 @@ build_psd_xtalk = _build_psd_xtalk
 __all__ = [
     "COM",
     "COMAdcInputPMF",
+    "COMAddedNoiseStatus",
     "COMChannelConfig",
     "COMConfig",
     "COMDTEConfig",
@@ -2884,9 +3450,14 @@ __all__ = [
     "COMRunConfig",
     "COMMainCursorError",
     "COMLengthMismatchError",
+    "COMMLSDConfig",
+    "COMMLSDStatus",
     "COMTxfirMainCursorError",
     "COMPkgConfig",
     "COMPSDStatus",
+    "calculate_der_mlsd",
+    "evaluate_delta_com_an",
+    "solve_g_an",
     "COMSearchConfig",
     "COMSearchRow",
     "COMSearchStatus",
@@ -2913,41 +3484,82 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    # Debug entry point. Run this module, rather than this file directly:
-    #   python -m serdes_coding.models.com_model_178A
-    # Change only CASE_ID when switching between project-owned 178A cases.
-    import sys
+    """Manual project entry point.
 
-    # excel_to_config_178A imports the versioned config dataclasses from this
-    # module. When run with ``-m``, expose the current ``__main__`` module at
-    # its package name so that parser and runner share one class identity.
-    sys.modules["serdes_coding.models.com_model_178A"] = sys.modules[__name__]
-
-    # ``%run -m`` may reuse a previously imported parser in an IPython
-    # kernel. Reload it so its imported 178A dataclasses always refer to the
-    # module instance executing this debug entry.
+    Edit only ``CASE_ID``, ``RUN_MODE`` and (when needed) ``EXEC_POLICY``
+    before running this file with ``%run com_model_178A.py``.  Search ranges
+    remain workbook-owned; internal sweep/final batching is not exposed here.
+    """
     import importlib
+
+    # User-facing controls for the manual entry point.
+    PROJECT_ROOT = Path(__file__).resolve().parents[3]
+    CASE_ID = "case_260915_report"
+    RUN_MODE = "search_run"  # "single_run" or "search_run"
+    EXEC_POLICY: dict[str, dict[str, object]] = {
+        # Example override:
+        # "single_run": {"pre_dte_pmf_method": "pmf_exact"},
+    }
+
+    CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID / "178A"
+    CONFIG_PATH = CASE_ROOT / "config.xlsx"
+    REPORT_ROOT = CASE_ROOT / "results"
+    SEARCH_OUTPUT_NAME = "scaled_search"
+
+    # Keep the module identity stable when this file is executed directly or
+    # through IPython, so the reader and runtime use the same dataclass classes.
+    sys.modules["serdes_coding.models.com_model_178A"] = sys.modules[__name__]
     if __package__:
         from ..io import com_excel_io
         from ..reporting.com_report_178A import COMReport178A
     else:
         from serdes_coding.io import com_excel_io
         from serdes_coding.reporting.com_report_178A import COMReport178A
+    com_excel_io = importlib.reload(com_excel_io)
 
-    excel_to_config_178A = importlib.reload(com_excel_io).excel_to_config_178A
+    if RUN_MODE not in {"single_run", "search_run"}:
+        raise ValueError("RUN_MODE must be 'single_run' or 'search_run'.")
+    if not CONFIG_PATH.exists():
+        raise FileNotFoundError(f"178A project workbook not found: {CONFIG_PATH}")
 
-    PROJECT_ROOT = Path(__file__).resolve().parents[3]
-    CASE_ID = "c2m_8023dj_4p13p0_500mm"
-    CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID
-    CONFIG_PATH = CASE_ROOT / "config" / "config_178A.xlsx"
-    REPORT_PATH = CASE_ROOT / "report" / "178A" / "single_run_compare"
+    cfg = com_excel_io.excel_to_config_178A(str(CONFIG_PATH))
 
-    cfg = excel_to_config_178A(str(CONFIG_PATH))
-    print("Single-run execution config:")
-    print(cfg.execution.single_run)
-    started = perf_counter()
-    status = COM(cfg).run(progress=True)
-    elapsed_s = perf_counter() - started
-    print(status)
-    print(f"Single-run elapsed time: {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
-    COMReport178A(cfg, status).plot_single_run(REPORT_PATH)
+    # Manual overrides apply only to execution-policy fields.  They do not
+    # alter fixed config, search ranges, or the COM calculation implementation.
+    profiles = {
+        "single_run": cfg.execution.single_run,
+        "search_sweep": cfg.execution.search_sweep,
+        "search_final": cfg.execution.search_final,
+    }
+    for profile_name, overrides in EXEC_POLICY.items():
+        if profile_name not in profiles:
+            raise ValueError(f"Unknown EXEC_POLICY profile: {profile_name}")
+        invalid = set(overrides) - set(profiles[profile_name].__dataclass_fields__)
+        if invalid:
+            raise ValueError(
+                f"Unsupported EXEC_POLICY fields for {profile_name}: {sorted(invalid)}"
+            )
+        profiles[profile_name] = replace(profiles[profile_name], **overrides)
+    cfg.execution = replace(
+        cfg.execution,
+        single_run=profiles["single_run"],
+        search_sweep=profiles["search_sweep"],
+        search_final=profiles["search_final"],
+    )
+
+    if RUN_MODE == "single_run":
+        REPORT_PATH = REPORT_ROOT / "single_run"
+        started = perf_counter()
+        status = COM(cfg).run(progress=True)
+        elapsed_s = perf_counter() - started
+        print(f"178A single_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
+        COMReport178A(cfg, status).plot_single_run(REPORT_PATH)
+    else:
+        REPORT_PATH = REPORT_ROOT / SEARCH_OUTPUT_NAME
+        search_cfg = com_excel_io.excel_to_search_config_178A(str(CONFIG_PATH))
+        candidate_count = len(search_cfg.candidates(cfg.filter))
+        print(f"178A search_run: {candidate_count} candidates from workbook search_config")
+        started = perf_counter()
+        status = COM(cfg).run(search=search_cfg, report_dir=REPORT_PATH)
+        elapsed_s = perf_counter() - started
+        print(f"178A search_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
