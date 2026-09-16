@@ -17,23 +17,108 @@ env:
   PYTHONUNBUFFERED: '1'
 
 jobs:
-  search:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 20
+    outputs:
+      worker_ids: ${{ steps.plan.outputs.worker_ids }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: python -m pip install -e .
-      - name: Run workbook-defined 93A search and verify artifacts
+      - name: Create workbook search plan
+        id: plan
         run: >-
-          python scripts/run_search_93A.py
+          python scripts/run_search_93A.py prepare
+          --case-root "cases/${CASE_ID}/93A"
+          --output-root "cases/${CASE_ID}/93A/results/actions"
+          --matrix-output "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: search-93A-plan
+          path: cases/${{ env.CASE_ID }}/93A/results/actions
+          if-no-files-found: error
+
+  partial_search:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix:
+        worker_id: ${{ fromJSON(needs.prepare.outputs.worker_ids) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: search-93A-plan
+          path: cases/${{ env.CASE_ID }}/93A/results/actions
+      - name: Run partial groups
+        run: >-
+          python scripts/run_search_93A.py partial
+          --case-root "cases/${CASE_ID}/93A"
+          --output-root "cases/${CASE_ID}/93A/results/actions"
+          --worker-id "${{ matrix.worker_id }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-93A-group-${{ matrix.worker_id }}
+          path: cases/${{ env.CASE_ID }}/93A/results/actions/group_results/*.csv
+          if-no-files-found: error
+
+  finalize:
+    needs: partial_search
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: search-93A-plan
+          path: cases/${{ env.CASE_ID }}/93A/results/actions
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: search-93A-group-*
+          path: cases/${{ env.CASE_ID }}/93A/results/actions/group_results
+          merge-multiple: true
+      - name: Merge, finalize and verify
+        run: >-
+          python scripts/run_search_93A.py finalize
           --case-root "cases/${CASE_ID}/93A"
           --output-root "cases/${CASE_ID}/93A/results/actions"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: search-93A-${{ env.CASE_ID }}
+          name: search-93A-final-${{ env.CASE_ID }}
           path: cases/${{ env.CASE_ID }}/93A/results/actions
           if-no-files-found: error
+
+  verify_artifact:
+    needs: finalize
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: search-93A-final-${{ env.CASE_ID }}
+          path: cases/${{ env.CASE_ID }}/93A/results/downloaded
+      - name: Verify downloaded result hashes and final status
+        run: >-
+          python scripts/run_search_93A.py verify
+          --output-root "cases/${CASE_ID}/93A/results/downloaded"
