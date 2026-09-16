@@ -26,6 +26,7 @@ subproject.
 - Prefer small modules with clear numerical conventions.
 - Document FFT, S-parameter, impedance, and COM equation conventions at the API boundary.
 - Keep private PDFs, work documents, raw spec excerpts, and long-form theory notes out of this public coding repository.
+- Keep workbook parsing model-neutral in `io/com_excel_common.py`; place 93A and 178A field mappings only in their versioned `com_excel_io_93A.py` and `com_excel_io_178A.py` adapters. Preserve `com_excel_io.py` as the public compatibility facade.
 
 ## Helper Placement
 
@@ -45,3 +46,13 @@ Prefer choosing helper placement by semantic ownership, not only by the current
 number of call sites. For example, an S4P-to-Sdd array conversion can be a
 module-level helper even if it is initially called only by one constructor,
 because the operation itself is not tied to one object instance.
+
+
+## Mandatory project structure and execution location
+
+- Follow [docs/project_structure_contract.md](docs/project_structure_contract.md) before creating folders, editing case inputs, installing environments, or preparing a run. It is the authoritative project layout reference.
+- Canonical root on this machine: `C:/Users/johnn/Documents/Serdes-learn/serdes-coding`. Verify resolved paths and Git worktree; stale tool cwd is not authority.
+- Use `<project_root>/.venv`, `<project_root>/src`, and `<project_root>/cases`. Do not edit, install, or run from `tmp/.codex-merge-main` or another temporary checkout unless the user explicitly requests that location.
+- Temporary worktree changes must be integrated and verified at the canonical root before handoff. Never silently substitute a worktree for the project root or copy a venv across paths.
+- Channels are defined in each model config.xlsx channels sheet. S4P files stay in reference_data; generated results belong in cases/<case_id>/<model>/results/<run_name>/.
+- Manual 93A and 178A entries expose single_run/search_run; workbook search_config alone defines search ranges. The 178A entry supports EXEC_POLICY overrides. The 93A entry rejects non-empty EXEC_POLICY until native 93A execution profiles are defined.

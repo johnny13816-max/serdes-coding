@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 
 import numpy as np
@@ -673,13 +674,18 @@ class SparamModel:
         ax.axvline(f_ghz, linestyle="--", color="tab:red", linewidth=1.0)
         y_min, y_max = ax.get_ylim()
         y_text = min(max(il_at_f, y_min), y_max)
+        x_min, x_max = ax.get_xlim()
+        x_mid = np.sqrt(x_min * x_max) if ax.get_xscale() == "log" and x_min > 0.0 else 0.5 * (x_min + x_max)
+        place_left = f_ghz >= x_mid
         ax.annotate(
             f"{label}@{f_ghz:.3f} GHz = {il_at_f:.2f} dB",
             xy=(f_ghz, y_text),
-            xytext=(6, 8),
+            xytext=(-8, 8) if place_left else (8, 8),
             textcoords="offset points",
+            ha="right" if place_left else "left",
             fontsize=8,
             color="tab:red",
+            bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "tab:red", "alpha": 0.9},
             arrowprops={"arrowstyle": "->", "color": "tab:red", "linewidth": 0.8},
         )
         return ax
@@ -1161,6 +1167,69 @@ class SparamModel:
         cascaded_network = self.network ** other.network
         return type(self).from_network(cascaded_network, mode="sdd", z0=cascaded_network.z0)
 
+    def write_touchstone_s2p(
+        self,
+        path: str | Path,
+        *,
+        form: Literal["ri", "ma", "db"] = "ri",
+    ) -> Path:
+        """Write the current differential two-port as a standard ``.s2p`` file.
+
+        The two Touchstone ports represent differential input and differential
+        output. The method preserves the internal differential reference
+        impedance and writes Touchstone 1.0 through scikit-rf for broad tool
+        compatibility. No single-ended 4-port response is synthesized.
+
+        Parameters
+        ----------
+        path:
+            Destination filename. It must end in ``.s2p``. Missing parent
+            directories are created.
+        form:
+            Touchstone data format: real/imaginary (``"ri"``),
+            magnitude/angle (``"ma"``), or dB/angle (``"db"``).
+
+        Returns
+        -------
+        pathlib.Path
+            The resolved path of the written Touchstone file.
+        """
+        output_path = Path(path).expanduser()
+        if output_path.suffix.lower() != ".s2p":
+            raise ValueError("Differential SparamModel export path must end with '.s2p'.")
+
+        network = self.network.copy()
+        z0 = np.asarray(network.z0, dtype=complex)
+        reference_z0 = z0[0, 0]
+        if not np.allclose(z0, reference_z0) or not np.isclose(reference_z0.imag, 0.0):
+            raise ValueError(
+                "Touchstone .s2p export requires one real differential reference "
+                "impedance shared by both ports and all frequency points."
+            )
+
+        network.frequency.unit = "Hz"
+        export_comment = (
+            "Differential 2-port S-parameter model\n"
+            "Port 1: differential input\n"
+            "Port 2: differential output\n"
+            f"Reference impedance: {reference_z0.real:g} ohm differential"
+        )
+        network.comments = "\n".join(
+            part for part in ((network.comments or '').strip(), export_comment) if part
+        )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        network.write_touchstone(
+            filename=output_path,
+            form=form,
+            version="1.0",
+            encoding="ISO-8859-1",
+            format_spec_freq="{:.16e}",
+            format_spec_A="{:.16e}",
+            format_spec_B="{:.16e}",
+        )
+        return output_path.resolve()
+
     def renormalized(self, z0_new: Union[float, np.ndarray], s_def: SdefT | None = None) -> 'SparamModel':
         """
         Return a copy with S-parameters renormalized to a new reference impedance.
@@ -1328,6 +1397,7 @@ class SparamModel:
         cfg: 'LinkConfig',
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal['error', 'hold', 'skrf'] = 'error',
     ) -> 'LinkSegment':
         """
         Build a scalar LinkSegment from the terminated voltage transfer H21(f).
@@ -1345,7 +1415,10 @@ class SparamModel:
         3. let LinkSegment.from_tf() resample / extend the scalar transfer
            function to cfg.freqs / cfg.f_nyq using the project TF rule
         """
-        H21 = self.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
-        return LinkSegment.from_tf(self.freqs, H21, cfg)
+        if dc not in {'error', 'hold', 'skrf'}:
+            raise ValueError('dc must be error, hold, or skrf.')
+        model = self.extrapolated_to_dc() if dc == 'skrf' and not np.isclose(self.freqs[0], 0.0) else self
+        H21 = model.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        return LinkSegment.from_tf(model.freqs, H21, cfg, dc='hold' if dc == 'hold' else 'error')
 
 __all__ = ["SparamModel", "SparamProcessor"]

@@ -281,14 +281,14 @@ class COMReport178A:
 
         for field_name, model in (("S_ch", path.S_ch), ("S_all", path.S_all)):
             fig, ax, output = self._subplots(out_dir, f"{field_name}_IL.png")
+            f_nyq = self.cfg.link.fb / 2.0
             model.plot_IL(
                 ax=ax,
                 logx=True,
                 xlim=self._frequency_xlim(model.freqs),
             )
-            f_nyq = self.cfg.link.fb / 2.0
             if model.freqs[0] <= f_nyq <= model.freqs[-1]:
-                model.annotate_IL(ax, f_nyq, label="f_nyq")
+                model.annotate_IL(ax, f_nyq, label="IL")
             self._title(
                 ax,
                 f"{label} {field_name} IL",
@@ -333,10 +333,11 @@ class COMReport178A:
             ("H_all", path.H_all),
         ):
             fig, ax, output = self._subplots(out_dir, f"{field_name}_tf.png")
+            xlim = self._frequency_xlim(segment.freqs)
             segment.plot_tf(
                 ax=ax,
                 x_scale="log",
-                xlim=self._frequency_xlim(segment.freqs),
+                xlim=xlim,
             )
             if field_name == "H_r":
                 f_r = self.cfg.filter.fr

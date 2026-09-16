@@ -47,6 +47,7 @@ def __getattr__(name: str):
         "excel_to_config_93A",
         "excel_to_config_178A",
         "excel_to_search_config",
+        "excel_to_search_config_93A",
         "excel_to_search_config_178A",
     }:
         from .io import com_excel_io
@@ -113,6 +114,7 @@ __all__ = [
     "excel_to_config_93A",
     "excel_to_config_178A",
     "excel_to_search_config",
+    "excel_to_search_config_93A",
     "excel_to_search_config_178A",
     "create_search_plan_178A",
     "run_partial_group_178A",

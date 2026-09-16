@@ -1,0 +1,39 @@
+name: Run 93A workbook search
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: "Case under cases/; its 93A/config.xlsx defines the entire search"
+        required: true
+        default: case_260915_report
+
+permissions:
+  contents: read
+
+env:
+  CASE_ID: ${{ inputs.case_id }}
+  MPLBACKEND: Agg
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: Run workbook-defined 93A search and verify artifacts
+        run: >-
+          python scripts/run_search_93A.py
+          --case-root "cases/${CASE_ID}/93A"
+          --output-root "cases/${CASE_ID}/93A/results/actions"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: search-93A-${{ env.CASE_ID }}
+          path: cases/${{ env.CASE_ID }}/93A/results/actions
+          if-no-files-found: error
