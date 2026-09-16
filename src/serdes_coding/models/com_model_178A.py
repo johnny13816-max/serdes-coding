@@ -812,9 +812,7 @@ class COMPSDStatus(_PrettyDataclass):
     S_total: Optional[SampledPSD] = None
     sigma_total: Optional[float] = None
     R_n: Optional[np.ndarray] = None
-    S_jn_RJ: Optional[SampledPSD] = None
-    S_gn_adc: Optional[SampledPSD] = None
-    sigma_gn_adc: Optional[float] = None
+    sigma_G: Optional[float] = None
     sigma_ISI: Optional[float] = None
 
 
@@ -1027,8 +1025,8 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._psd_attr("R_n")
 
     @property
-    def S_jn_RJ(self) -> SampledPSD:
-        return self._psd_attr("S_jn_RJ")
+    def sigma_G(self) -> float:
+        return self._psd_attr("sigma_G")
 
     @property
     def sigma_ISI(self) -> float:
@@ -2137,14 +2135,11 @@ def _build_adc_input_pmf_exact(
     )
 
 def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
-    # Post-FFE impairment construction already filters receiver noise,
-    # transmitter noise, and RJ onto one common expanded sampled grid.
+    del dte_status, link_cfg
     post_ffe = imp_status.post_ffe
-    if post_ffe is not None and post_ffe.psd is not None and post_ffe.psd.S_gn_adc is not None:
-        S_G = post_ffe.psd.S_gn_adc
-    else:
-        S_G = imp_status.S_tn.add(imp_status.S_jn_RJ).add(imp_status.S_rn)
-    sigma_G = S_G.to_sigma()
+    if post_ffe is None or post_ffe.psd is None or post_ffe.psd.sigma_G is None:
+        raise ValueError("Completed post-FFE impairment status must provide sigma_G.")
+    sigma_G = float(post_ffe.psd.sigma_G)
     return Pmf1D.gaussian(
         mu=0,
         sigma=sigma_G,
@@ -2204,9 +2199,9 @@ def evaluate_delta_com_an(
         )
 
     post_psd = post_ffe.psd
-    if post_psd is None or post_psd.S_rn is None or post_psd.S_gn_adc is None:
+    if post_psd is None or post_psd.S_rn is None or post_psd.sigma_G is None:
         raise ValueError(
-            "post_ffe must contain S_rn and S_gn_adc from the completed "
+            "post_ffe must contain S_rn and sigma_G from the completed "
             "post-FFE impairment stage."
         )
 
@@ -2228,7 +2223,7 @@ def evaluate_delta_com_an(
         psd=g_an * post_psd.S_rn.psd,
         fb=post_psd.S_rn.fb,
     )
-    sigma_G = post_psd.S_gn_adc.to_sigma()
+    sigma_G = float(post_psd.sigma_G)
     sigma_an = float(np.hypot(sigma_G, S_an.to_sigma()))
 
     p_G_an = Pmf1D.gaussian(
@@ -2656,7 +2651,6 @@ class COM(com_93A.COM):
         report("post_ffe_imp: start")
         imp_status = self.calculate_post_ffe_imp(
             dte_status=best_dte,
-            pre_dte_imp_common=pre_dte_imp_common,
             imp_pre=best_imp_pre,
             h=victim.pulse.ir,
         )
@@ -3043,84 +3037,90 @@ class COM(com_93A.COM):
         return dte_status
 
     def calculate_post_ffe_imp(
-        self, 
-        dte_status: COMDTEStatus, 
-        pre_dte_imp_common: COMPSDStatus,
+        self,
+        dte_status: COMDTEStatus,
         imp_pre: COMImpairmentStatus,
         h: np.ndarray,
     ) -> COMImpairmentStatus:
+        """Finalize selected-phase equivalent responses and post-DTE diagnostics.
+
+        The post-DTE component PSDs are 93A-aligned reporting quantities on the
+        expanded ``h_w`` grid.  DFE COM consumes the separately calculated
+        Gaussian sigma, ADC-input clipping material, and equivalent responses;
+        changing reporting PSD construction must not change MSE or COM.
+        """
         As = self.cfg.imp.R_LM / (self.cfg.L - 1)
-        w_ir = np.asarray(dte_status.w_lim, dtype=float)
+
+        w_lim_ndarray = np.asarray(dte_status.w_lim, dtype=float)
         expected_shape = (int(self.cfg.dte.N_max),)
-        if w_ir.shape != expected_shape:
+        if w_lim_ndarray.shape != expected_shape:
             raise COMLengthMismatchError(
                 "calculate_post_ffe_imp() requires COMDTEStatus.w_lim to be the "
-                f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_ir.shape}."
+                f"full zero-filled FFE tap vector with shape {expected_shape}, "
+                f"got {w_lim_ndarray.shape}."
             )
-        w_response = SampledResponse.from_ir(w_ir, self.cfg.link)
-        h_w_response = imp_pre.h_dsamp.cascade_ir(w_response, per_ui=self.per_ui)
+        if not np.all(np.isfinite(w_lim_ndarray)):
+            raise ValueError("COMDTEStatus.w_lim contains non-finite values.")
+
+        nonzero_w = np.flatnonzero(w_lim_ndarray != 0.0)
+        w_finite = (
+            w_lim_ndarray[: int(nonzero_w[-1]) + 1]
+            if len(nonzero_w)
+            else w_lim_ndarray[:1]
+        )
+        w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, self.cfg.link)
+
+        # Equivalent responses use complete linear convolution.  The victim
+        # response owns the common expanded post-DTE grid.
+        h_w = imp_pre.h_dsamp.cascade_ir(w_lim_pre, per_ui=self.per_ui)
         post_link_cfg = LinkConfig.from_Nfft(
             self.cfg.link.fb,
             self.per_ui,
-            h_w_response.nfft * self.per_ui,
+            h_w.nfft * self.per_ui,
         )
-        h_w_response = SampledResponse.from_ir(h_w_response.ir, post_link_cfg)
-        h_w = h_w_response.ir
+        H_rxffe = SampledResponse.from_ir(w_finite, post_link_cfg)
 
-        h_XTs_w = []
+        h_XTs_w: list[SampledResponse] = []
         for h_XT_dsamp in imp_pre.h_XTs_dsamp:
-            h_XT_response = SampledResponse.from_ir(h_XT_dsamp.ir, self.cfg.link)
-            h_XT_w_response = h_XT_response.cascade_ir(w_response, per_ui=self.per_ui)
-            h_XTs_w.append(SampledResponse.from_ir(h_XT_w_response.ir, post_link_cfg))
+            h_XT_w = h_XT_dsamp.cascade_ir(w_lim_pre, per_ui=self.per_ui)
+            h_XTs_w.append(SampledResponse.from_ir(h_XT_w.ir, post_link_cfg))
 
-        h_ISI = h_w.copy()
-        # Eq. 178A-40: the normalized desired cursor is not residual ISI.
-        h_ISI[dte_status.d] = 0.0
-        h_ISI[dte_status.d+1:dte_status.d+1+len(dte_status.b_lim)] -= dte_status.b_lim
+        h_ISI_ndarray = h_w.ir.copy()
+        d = int(dte_status.d)
+        dfe_stop = d + 1 + len(dte_status.b_lim)
+        if d < 0 or d >= len(h_ISI_ndarray) or dfe_stop > len(h_ISI_ndarray):
+            raise COMLengthMismatchError(
+                "DTE main cursor or feedback taps exceed the post-DTE response: "
+                f"d={d}, feedback_stop={dfe_stop}, len(h_w)={len(h_ISI_ndarray)}."
+            )
+        h_ISI_ndarray[d] = 0.0
+        h_ISI_ndarray[d + 1:dfe_stop] -= dte_status.b_lim
+        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, post_link_cfg)
+        sigma_ISI = float(imp_pre.sigma_X * np.sqrt(np.sum(h_ISI.ir**2)))
 
-        h_ISI_response = SampledResponse.from_ir(h_ISI, post_link_cfg)
-        sigma_ISI = np.sqrt(imp_pre.sigma_X**2 * np.sum(h_ISI**2))
-
-        h_J_response = SampledResponse.from_ir(
-            _calculate_h_J(h, dte_status.pos, self.cfg.link),
+        # DDJ uses the original selected-phase construction: take the two
+        # adjacent victim-pulse phases through the FFE, then difference them.
+        h_w_J_ndarray = _calculate_h_J(
+            h,
+            dte_status.pos,
             self.cfg.link,
+            w_finite,
         )
-        h_w_J = h_J_response.cascade_ir(w_response, per_ui=self.per_ui)
-        h_w_J = SampledResponse.from_ir(h_w_J.ir, post_link_cfg)
+        h_w_J = SampledResponse.from_ir(h_w_J_ndarray, post_link_cfg)
 
-        # Keep post-FFE PSD components on the same sampled grid as pre-DTE.
-        # The PSD records are useful for reporting; final PMF construction
-        # still treats DDJ separately as a dual-Dirac PMF.
-        H_rxffe = SampledResponse.from_ir(w_ir, post_link_cfg)
-
-        def _filter_on_post_grid(source: SampledPSD) -> SampledPSD:
-            psd = np.interp(post_link_cfg.theta, source.theta, source.psd)
-            return SampledPSD(
-                theta=post_link_cfg.theta,
-                psd=psd,
-                fb=post_link_cfg.fb,
-            ).filtered_by(H_rxffe)
-
-        S_rn = _filter_on_post_grid(imp_pre.S_rn)
-        S_xn = _filter_on_post_grid(imp_pre.S_xn)
-        S_tn = _filter_on_post_grid(imp_pre.S_tn)
-
-        S_jn = _build_psd_from_DFT_response(
-            h_w_J.ir,
-            post_link_cfg,
-            pre_dte_imp_common.sigma_X**2
-            * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+        # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
+        # three Gaussian sources there, and filter once by the pre-grid FFE.
+        S_jn_RJ_pre = _build_psd_from_DFT_response(
+            imp_pre.h_J.ir,
+            self.cfg.link,
+            imp_pre.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
         )
+        S_G_pre = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ_pre)
+        sigma_gn_adc = S_G_pre.to_sigma()
+        sigma_G = S_G_pre.filtered_by(w_lim_pre).to_sigma()
 
-        # Separate RJ from DDJ for final PMF construction after the selected phase is known.
-        S_jn_RJ = _build_psd_from_DFT_response(
-            h_w_J.ir,
-            post_link_cfg,
-            pre_dte_imp_common.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
-        )
-        S_gn_adc = S_rn.add(S_tn).add(S_jn_RJ)
-        sigma_gn_adc = S_gn_adc.to_sigma()
-
+        # Exact selected-phase ADC-input material remains in the pre-DTE
+        # physical domain.  Its delta is then propagated through the FFE below.
         pmf_cfg = self.cfg.pmf.resolve(As)
         p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg)
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
@@ -3138,36 +3138,65 @@ class COM(com_93A.COM):
                 pmf_cfg=pmf_cfg,
             )
 
+        # 93A-aligned post-DTE component PSDs for reporting.  Every component
+        # is represented on the common expanded h_w grid.
+        def _regrid_pre_psd(source: SampledPSD) -> SampledPSD:
+            return SampledPSD(
+                theta=post_link_cfg.theta,
+                psd=np.interp(post_link_cfg.theta, source.theta, source.psd),
+                fb=post_link_cfg.fb,
+            )
+
+        S_rn = _regrid_pre_psd(imp_pre.S_rn).filtered_by(H_rxffe)
+        S_tn = _regrid_pre_psd(imp_pre.S_tn).filtered_by(H_rxffe)
+
+        S_xn = _zero_sampled_psd(post_link_cfg)
+        for h_XT_w in h_XTs_w:
+            S_xn = S_xn.add(
+                _build_psd_from_DFT_response(
+                    h_XT_w.ir,
+                    post_link_cfg,
+                    imp_pre.sigma_X**2,
+                )
+            )
+
+        S_jn = _build_psd_from_DFT_response(
+            h_w_J.ir,
+            post_link_cfg,
+            imp_pre.sigma_X**2
+            * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+        )
+
         if adc_input_pmf.delta is None:
-            S_qn = _zero_sampled_psd(self.cfg.link)
+            S_qn = _zero_sampled_psd(post_link_cfg)
         else:
-            S_qn = SampledPSD.from_constant(
+            S_qn_adc = SampledPSD.from_constant(
                 post_link_cfg.theta,
-                (adc_input_pmf.delta**2 / 12.0) / self.cfg.link.fb,
+                (adc_input_pmf.delta**2 / 12.0) / post_link_cfg.fb,
                 post_link_cfg.fb,
             )
+            S_qn = S_qn_adc.filtered_by(H_rxffe)
+
         S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
 
         return COMImpairmentStatus(
             post_ffe=COMImpStageStatus(
                 psd=COMPSDStatus(
-                As=As,
-                S_rn=S_rn,
-                sigma_rn=S_rn.to_sigma(),
-                S_xn=S_xn,
-                sigma_xn=S_xn.to_sigma(),
-                S_tn=S_tn,
-                sigma_tn=S_tn.to_sigma(),
-                S_jn=S_jn,
-                sigma_jn=S_jn.to_sigma(),
-                S_qn=S_qn,
-                sigma_qn=S_qn.to_sigma(),
-                S_total=S_total,
-                sigma_total=S_total.to_sigma(),
-                S_jn_RJ=S_jn_RJ,
-                S_gn_adc=S_gn_adc,
-                sigma_gn_adc=sigma_gn_adc,
-                sigma_ISI=sigma_ISI,
+                    As=As,
+                    S_rn=S_rn,
+                    sigma_rn=S_rn.to_sigma(),
+                    S_xn=S_xn,
+                    sigma_xn=S_xn.to_sigma(),
+                    S_tn=S_tn,
+                    sigma_tn=S_tn.to_sigma(),
+                    S_jn=S_jn,
+                    sigma_jn=S_jn.to_sigma(),
+                    S_qn=S_qn,
+                    sigma_qn=S_qn.to_sigma(),
+                    S_total=S_total,
+                    sigma_total=S_total.to_sigma(),
+                    sigma_G=sigma_G,
+                    sigma_ISI=sigma_ISI,
                 ),
                 adc_input=adc_input_pmf,
             ),
@@ -3176,9 +3205,9 @@ class COM(com_93A.COM):
                 h_dsamp=imp_pre.h_dsamp,
                 h_tn=imp_pre.h_tn,
                 h_J=imp_pre.h_J,
-                h_w=h_w_response,
+                h_w=h_w,
                 h_XTs_w=h_XTs_w,
-                h_ISI=h_ISI_response,
+                h_ISI=h_ISI,
                 h_w_J=h_w_J,
             ),
             H_rxffe=H_rxffe,
