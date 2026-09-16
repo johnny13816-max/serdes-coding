@@ -91,8 +91,8 @@ def validate(case_root: Path, mode: str, output_root: Path) -> None:
     for index, candidate in enumerate(candidates):
         candidate_cfg = _config_with_candidate(cfg, candidate)
         direct = COM(candidate_cfg)._run_once(run_cfg=cfg.execution.search_sweep)
-        if direct.dfe is not None:
-            baseline_mse[index] = float(direct.dfe.mse)
+        if direct.dte is not None:
+            baseline_mse[index] = float(direct.dte.mse)
 
     for row in rows:
         if row.status != "ok":

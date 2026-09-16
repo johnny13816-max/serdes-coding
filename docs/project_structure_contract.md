@@ -47,9 +47,11 @@ Temporary Git worktrees are not the default editing, installation, workbook or e
 
 `fixed_config` uses the existing Domain, Parameter, Parameter Class, Value, Unit and Description schema. Preserve model-defined PMF settings. Reference parameters, including MLSD_en, are intrinsic; project model-processing methods are fixed-config policy. Execution policy contains per-stage calculation/acceleration choices and may affect results. Validate reference-to-project and project-to-runtime mappings at their boundaries.
 
+Excel I/O is versioned under `src/serdes_coding/io/`: `com_excel_common.py` owns model-neutral workbook parsing, `com_excel_io_93A.py` and `com_excel_io_178A.py` own their respective field-to-runtime mappings, and `com_excel_io.py` is the compatibility facade. Version-specific mapping must not be added to the common parser.
+
 ## Manual execution
 
-The supported manual entry is `src/serdes_coding/models/com_model_178A.py`, executed with `%run com_model_178A.py` from its directory. The file defines case/config/output selection, RUN_MODE and EXEC_POLICY overrides. RUN_MODE has only `single_run` and `search_run`. Search ranges come exclusively from workbook search_config; a smaller grid is still search_run. Execution policies belong to single_run, search_sweep and search_final. Batching, top-K and timeout remain internal controls.
+The supported manual entries are `src/serdes_coding/models/com_model_93A.py` and `src/serdes_coding/models/com_model_178A.py`, executed with `%run com_model_93A.py` or `%run com_model_178A.py` from their directory. Both define case/config/output selection and RUN_MODE. RUN_MODE has only `single_run` and `search_run`; search ranges come exclusively from workbook search_config, and a smaller grid is still search_run. The 178A entry also applies EXEC_POLICY overrides for single_run, search_sweep and search_final. The 93A entry exposes the same top-level control name but rejects non-empty overrides until native 93A execution profiles are defined. Batching, top-K and timeout remain internal controls.
 
 Before handoff, verify the interpreter and imported module paths, workbook channel resolution, and output write access at the canonical root. Output-path permission failures must be resolved there, not by silently redirecting to tmp or a different checkout. Record changes to folder ownership in this document and summarize them in AGENTS.md.
 

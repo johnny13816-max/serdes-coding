@@ -6,6 +6,11 @@
 
 ## 近期優先項目
 
+0. Public GitHub Actions split search
+   - 以 `group_id` 為 GitHub Actions matrix/job unit，呼叫 178A `run_partial_group()`，產生可合併的 `group_XXX.csv`。
+   - 僅允許已確認可公開的 project config、channel S4P、search result 進入 workflow；不得放入公司名稱、內部路徑、客戶資訊或任何公司文件。
+   - final merge/top-K 可先維持本機或 Codespaces 手動執行；之後再決定是否也加入 Actions workflow。
+
 1. COM v1.0 search flow
    - 完成 93A search candidate sweep。
    - search parameters: `c_m2`, `c_m1`, `c_1`, `g_DC`, `g_DC2`。
@@ -22,12 +27,21 @@
    - 完成 project-owned template 的 mapping validation。
    - 確認 PyChOpMarg/PyCOM reference config 是否正確 mapping 到目前 template。
    - 前處理 adapter 不放入 COM algorithm core。
+   - 建立雙向離線 preprocessing adapter：
+     - `adhoc_to_project_config()`：將 COM Ad Hoc Config 轉為 versioned Project Config，例如 `config_93A.xlsx` 或 `config_178A.xlsx`。
+     - `project_to_adhoc_config()`：將 Project Config 匯出為 COM Ad Hoc 對外溝通格式。
+   - 固定三層名稱與邊界：`Ad Hoc Config -> Project Config -> Runtime Config`；runtime `excel_to_config_*()` 只處理 Project Config，不直接解析或輸出 Ad Hoc Config。
+   - `Include PCB` mapping：`0` 對應所有 `partial_host.enable=False`；`1` 對應 Tx/Rx 兩端 enable；`2` 對應 Rx-only enable。各 path 的 host length 必須依 COM Ad Hoc `add_brd.m` 的 path-specific `z_bp` selection 映射。
 
 4. COM module cleanup
    - 先移出 Excel I/O。
    - 再移出 reference adapter。
    - 再移出 smoke test。
    - 最後才拆 config/status/formula。
+
+5. Project template update
+   - `templates/` 目前仍是舊版 config workbook 格式，暫標記為待更新。
+   - 更新前不可視為現行 `config_93A.xlsx` / `config_178A.xlsx` 的正式模板。
 
 ## COM / 93A Core
 
@@ -36,17 +50,17 @@
    - 建立獨立 template，不與 `debug_case_93a_style` 混用。
    - 驗證 package/filter/noise/jitter/search parameters 是否逐項對應 93A。
 
-5. FOM validation
+6. FOM validation
    - 檢查 93A.1.6 imp statistics。
    - 檢查 FOM formula 與 sign convention。
    - 建立 small sanity case。
 
-6. PMF validation
+7. PMF validation
    - 檢查 93A.1.7 PMF source：ISI、Gaussian、dual-Dirac jitter、XT。
    - 檢查 PMF convolution order 與 amplitude grid。
    - 檢查 final COM。
 
-7. COM 93A vs 178A comparison
+8. COM 93A vs 178A comparison
    - 先不實作。
    - 保留未來架構：`model_93a.py` / `model_178a.py` 或 method suffix `_93a` / `_178a`。
 
@@ -68,6 +82,11 @@
 10. 802.3ck floating DFE
    - 未來項目。
    - 需要釐清 floating bank、overlap removal、tail RSS constraint、tap indexing。
+
+10.1 Versioned floating-tap limiter boundary
+   - 93A：floating group 是 DFE feedback taps；limiter 屬於 `b` / DFE coefficient family。
+   - 178A：floating group 是 FFE feed-forward taps；limiter 屬於 `w` / FFE coefficient family。
+   - 不可共用 93A DFE floating limiter 與 178A FFE floating limiter；178A Project Config 需獨立描述 fixed-FFE 與 floating-FFE limiter。
 
 ## SparamPreProcess
 
@@ -142,7 +161,7 @@
 ## PMF Handler
 
 25. PMF cleanup
-   - 移除或實作殘留 public API：`fir_filtered_pmf()`、`Pmf1D.uniform()`。
+   - 移除或實作殘留 public API：`fir_filtered_pmf()`。
    - 確認 public methods 全部是 immutable style。
 
 26. PMF debug / plot tools
@@ -155,3 +174,14 @@
    - 檢查 `combine()` round-trip / mass conservation。
    - 檢查 `resample_dx()` mass conservation。
    - 檢查 `fir_filter()` tap pruning 與 93A threshold。
+
+
+## Deferred: development validation entry (2026-09-15)
+
+Keep the current production workflow (branch + case_id). Defer this design until after today's 178A full search; no workflow or runtime changes are authorized by this note.
+
+- Add a separate development-validation entry, sharing the production runner.
+- Allow selecting an existing Actions run/artifact to rerun finalize without recomputing partial results.
+- Allow explicit EXEC_POLICY overrides for single_run/search_sweep/search_final; save original, overrides and resolved settings with code version and input hashes.
+- Validate reuse against fixed config, channels, candidate grid, search_sweep policy and changes to the computation. Report-only changes can reuse partial results when compatible; equation changes may invalidate them.
+- Execution-stage selection is orchestration, not another RUN_MODE. Search ranges remain workbook-owned; fixed_config.policy remains the consistent model-treatment boundary.

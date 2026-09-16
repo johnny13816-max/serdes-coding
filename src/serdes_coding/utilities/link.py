@@ -1304,14 +1304,19 @@ class LinkSegment:
 
             ax.axvline(f_ghz, linestyle="--", color="tab:red", linewidth=1.0)
             ax.plot(f_ghz, mag_at_f, marker="o", color="tab:red", markersize=4)
+            x_min, x_max = ax.get_xlim()
+            x_mid = np.sqrt(x_min * x_max) if ax.get_xscale() == "log" and x_min > 0.0 else 0.5 * (x_min + x_max)
+            place_left = f_ghz >= x_mid
             ax.annotate(
-                f"({f_ghz:.3f} GHz, {gain_at_f:.1f} dB)",
+                f"Gain@{f_ghz:.3f} GHz = {gain_at_f:.1f} dB",
                 xy=(f_ghz, mag_at_f),
-                xytext=(6, 8),
+                xytext=(-8, 8) if place_left else (8, 8),
                 textcoords="offset points",
+                ha="right" if place_left else "left",
                 color="tab:red",
                 fontsize=9,
-                bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "tab:red", "alpha": 0.85},
+                bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "tab:red", "alpha": 0.9},
+                arrowprops={"arrowstyle": "->", "color": "tab:red", "linewidth": 0.8},
             )
 
         ax.set_ylim(y_min, y_max)

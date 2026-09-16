@@ -1137,7 +1137,8 @@ class COMStatus(com_93A.COMStatus):
                 raise ValueError(
                     "178A plot export requires the originating COMConfig."
                 )
-            from ..reporting.com_report_178A import COMReport178A
+            # Direct IPython %run has no package context for relative imports.
+            from serdes_coding.reporting.com_report_178A import COMReport178A
 
             plot_dir = out_dir / "plots"
             report = COMReport178A(cfg, self).plot_single_run(plot_dir)
@@ -3495,7 +3496,7 @@ if __name__ == "__main__":
     # User-facing controls for the manual entry point.
     PROJECT_ROOT = Path(__file__).resolve().parents[3]
     CASE_ID = "case_260915_report"
-    RUN_MODE = "search_run"  # "single_run" or "search_run"
+    RUN_MODE = "single_run"  # "single_run" or "search_run"
     EXEC_POLICY: dict[str, dict[str, object]] = {
         # Example override:
         # "single_run": {"pre_dte_pmf_method": "pmf_exact"},

@@ -26,6 +26,7 @@ subproject.
 - Prefer small modules with clear numerical conventions.
 - Document FFT, S-parameter, impedance, and COM equation conventions at the API boundary.
 - Keep private PDFs, work documents, raw spec excerpts, and long-form theory notes out of this public coding repository.
+- Keep workbook parsing model-neutral in `io/com_excel_common.py`; place 93A and 178A field mappings only in their versioned `com_excel_io_93A.py` and `com_excel_io_178A.py` adapters. Preserve `com_excel_io.py` as the public compatibility facade.
 
 ## Helper Placement
 
@@ -54,4 +55,4 @@ because the operation itself is not tied to one object instance.
 - Use `<project_root>/.venv`, `<project_root>/src`, and `<project_root>/cases`. Do not edit, install, or run from `tmp/.codex-merge-main` or another temporary checkout unless the user explicitly requests that location.
 - Temporary worktree changes must be integrated and verified at the canonical root before handoff. Never silently substitute a worktree for the project root or copy a venv across paths.
 - Channels are defined in each model config.xlsx channels sheet. S4P files stay in reference_data; generated results belong in cases/<case_id>/<model>/results/<run_name>/.
-- Manual 178A entry exposes single_run/search_run and EXEC_POLICY overrides; workbook search_config alone defines search ranges.
+- Manual 93A and 178A entries expose single_run/search_run; workbook search_config alone defines search ranges. The 178A entry supports EXEC_POLICY overrides. The 93A entry rejects non-empty EXEC_POLICY until native 93A execution profiles are defined.
