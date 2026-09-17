@@ -1814,7 +1814,10 @@ class COM_MMSE_DTE:
         
     def build_mmse_matrice(self) -> None:
         from scipy.linalg import toeplitz
-        self.H_all = toeplitz(self.h_dsamp, np.zeros(self.cfg.N_max))
+        self.H_all = toeplitz(
+            np.r_[self.h_dsamp, np.zeros(self.cfg.N_max - 1)],
+            np.r_[self.h_dsamp[0], np.zeros(self.cfg.N_max - 1)],
+        )
         self.Rnn_all = toeplitz(self.R_n, self.R_n)
 
     def _solve_pruned_tap_set(self, pruned_index: np.ndarray) -> COMDTEStatus:
