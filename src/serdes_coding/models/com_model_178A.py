@@ -616,6 +616,7 @@ class COMRunConfig(_PrettyDataclass):
     target: Literal["mse", "dfe", "mlsd", "full"] = "dfe"
     pre_dte_pmf_method: Literal["gaussian_approx", "pmf_exact"] = "gaussian_approx"
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
+    pmf_keep_mass: float = float(1 - 1e-5)
     floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pos_sweep_method: Literal["each_phase", "coarse_fine"] = "each_phase"
     pos_coarse_stride: int = 4
@@ -630,6 +631,9 @@ class COMRunConfig(_PrettyDataclass):
             )
         if self.pmf_grid_quality not in {"coarse", "fine"}:
             raise ValueError("COMRunConfig.pmf_grid_quality must be 'coarse' or 'fine'.")
+        self.pmf_keep_mass = float(self.pmf_keep_mass)
+        if not np.isfinite(self.pmf_keep_mass) or not 0.0 < self.pmf_keep_mass <= 1.0:
+            raise ValueError("COMRunConfig.pmf_keep_mass must be finite and in (0, 1].")
         if self.floating_mode not in {"heuristic", "simplified", "spec-defined"}:
             raise ValueError(
                 "COMRunConfig.floating_mode must be 'heuristic', 'simplified', or 'spec-defined'."
@@ -1095,6 +1099,8 @@ class COMDTEStatus(_PrettyDataclass):
 @dataclass(repr=False)
 class COMRunStatus(_PrettyDataclass):
     """Runtime records collected while one concrete 178A COM point is evaluated."""
+    pmf_grid_quality: Optional[str] = None
+    pmf_keep_mass: Optional[float] = None
     mse_by_pos: list[Optional[float]] = field(default_factory=list)
     main_cursor_error_by_pos: list[Optional[str]] = field(default_factory=list)
     coarse_pos: list[int] = field(default_factory=list)
@@ -2065,6 +2071,29 @@ class COM_MMSE_DTE:
 # ----------------------------
 # pmf
 # ----------------------------
+def _resolve_adc_input_pmf_config(
+    pmf_config: COMPMFConfig,
+    As: float,
+    run_cfg: COMRunConfig,
+) -> COMPMFRuntimeConfig:
+    """Resolve execution-policy PMF settings used before ADC quantization."""
+    return replace(
+        pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality),
+        keep_mass=run_cfg.pmf_keep_mass,
+    )
+
+
+def _resolve_final_com_pmf_config(
+    pmf_config: COMPMFConfig,
+    As: float,
+) -> COMPMFRuntimeConfig:
+    """Resolve accuracy-required PMF settings used to calculate final COM."""
+    return replace(
+        pmf_config.resolve(As, grid_quality="fine"),
+        keep_mass=1.0,
+    )
+
+
 def _build_pmf_pam_L(L: int, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
     # Base PAM4 signal pmf
     return Pmf1D.multi_dirac(
@@ -2586,6 +2615,8 @@ class COM(com_93A.COM):
         # pos sweeping
         # ===========================
         run_status = COMRunStatus(
+            pmf_grid_quality=run_cfg.pmf_grid_quality,
+            pmf_keep_mass=run_cfg.pmf_keep_mass,
             mse_by_pos=[None] * self.per_ui,
             main_cursor_error_by_pos=[None] * self.per_ui,
         )
@@ -2656,6 +2687,7 @@ class COM(com_93A.COM):
             dte_status=best_dte,
             imp_pre=best_imp_pre,
             h=victim.pulse.ir,
+            run_cfg=run_cfg,
         )
         self._merge_imp(imp_status)
         report("post_ffe_imp: done")
@@ -2880,8 +2912,10 @@ class COM(com_93A.COM):
                 "h_XTs_dsamp must be the list of one-dimensional sampled "
                 "crosstalk responses returned by calculate_pre_dte_imp_common()."
             )
-        pmf_cfg = self.cfg.pmf.resolve(
-            imp_cfg.R_LM / (L - 1), grid_quality=run_cfg.pmf_grid_quality
+        pmf_cfg = _resolve_adc_input_pmf_config(
+            self.cfg.pmf,
+            imp_cfg.R_LM / (L - 1),
+            run_cfg,
         )
         
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
@@ -3044,6 +3078,7 @@ class COM(com_93A.COM):
         dte_status: COMDTEStatus,
         imp_pre: COMImpairmentStatus,
         h: np.ndarray,
+        run_cfg: COMRunConfig,
     ) -> COMImpairmentStatus:
         """Finalize selected-phase equivalent responses and post-DTE diagnostics.
 
@@ -3124,8 +3159,12 @@ class COM(com_93A.COM):
 
         # Exact selected-phase ADC-input material remains in the pre-DTE
         # physical domain.  Its delta is then propagated through the FFE below.
-        pmf_cfg = self.cfg.pmf.resolve(As)
-        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg)
+        pmf_cfg_adc_input = _resolve_adc_input_pmf_config(
+            self.cfg.pmf,
+            As,
+            run_cfg,
+        )
+        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg_adc_input)
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
             adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
         else:
@@ -3138,7 +3177,7 @@ class COM(com_93A.COM):
                 sigma_gn=sigma_gn_adc,
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
-                pmf_cfg=pmf_cfg,
+                pmf_cfg=pmf_cfg_adc_input,
             )
 
         # 93A-aligned post-DTE component PSDs for reporting.  Every component
@@ -3287,23 +3326,30 @@ class COM(com_93A.COM):
             Selected 178A receiver DTE result.
         """
         imp_cfg = self.cfg.imp
-        pmf_cfg = self.cfg.pmf.resolve(imp_status.As)
+        pmf_cfg_for_com = _resolve_final_com_pmf_config(
+            self.cfg.pmf,
+            imp_status.As,
+        )
         As = imp_status.As
 
         # base pmf of PAM-L
-        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg)
+        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg_for_com)
 
         # pmf of ISI
-        p_ISI = _build_pmf_interference_93A(p_sig, imp_status.h_ISI.ir, pmf_cfg, name="ISI")
+        p_ISI = _build_pmf_interference_93A(
+            p_sig, imp_status.h_ISI.ir, pmf_cfg_for_com, name="ISI"
+        )
 
         # pmf of XT (all combined)
-        p_w_XT_all = _build_pmf_w_XT_all(p_sig, imp_status.h_XTs_w, pmf_cfg)
+        p_w_XT_all = _build_pmf_w_XT_all(
+            p_sig, imp_status.h_XTs_w, pmf_cfg_for_com
+        )
 
         # pmf of tx Dual-dirac jitter
         p_w_DD = _build_pmf_interference_93A(
             p_sig,
             imp_cfg.A_DD * imp_status.h_w_J.ir,
-            pmf_cfg,
+            pmf_cfg_for_com,
             name="Dual-Dirac",
         )
 
@@ -3313,13 +3359,19 @@ class COM(com_93A.COM):
             raise RuntimeError("calculate_COM_DFE requires post-FFE impairment status.")
         adc_input_pmf = imp_status.post_ffe.adc_input
         if adc_input_pmf is None or adc_input_pmf.method == "disabled":
-            p_qn = Pmf1D.multi_dirac(np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy, unit="volt", name="ADC_QN")
+            p_qn = Pmf1D.multi_dirac(
+                np.array([0.0]),
+                np.array([1.0]),
+                dx=pmf_cfg_for_com.dy,
+                unit="volt",
+                name="ADC_QN",
+            )
         else:
             if adc_input_pmf.method != "pmf_exact" or adc_input_pmf.delta is None:
                 raise RuntimeError(
                     "calculate_COM_DFE requires post-DTE ADC input material with method='pmf_exact'."
                 )
-            p_delta = Pmf1D.uniform(adc_input_pmf.delta, pmf_cfg)
+            p_delta = Pmf1D.uniform(adc_input_pmf.delta, pmf_cfg_for_com)
             w_lim = np.asarray(dte_status.w_lim, dtype=float)
             expected_shape = (int(self.cfg.dte.N_max),)
             if w_lim.shape != expected_shape:
@@ -3329,15 +3381,17 @@ class COM(com_93A.COM):
                 )
             p_qn = p_delta.fir_filter(
                 w_lim,
-                keep_mass = pmf_cfg.keep_mass,
-                dx_ref = pmf_cfg.dy,
-                tap_abs_th = pmf_cfg.tap_abs_th,
+                keep_mass = pmf_cfg_for_com.keep_mass,
+                dx_ref = pmf_cfg_for_com.dy,
+                tap_abs_th = pmf_cfg_for_com.tap_abs_th,
                 max_taps = None,
                 name = "ADC_QN"
             )
 
         # pmf of gaussian noise
-        p_G = _build_pmf_G(imp_status, dte_status, self.cfg.link, pmf_cfg)
+        p_G = _build_pmf_G(
+            imp_status, dte_status, self.cfg.link, pmf_cfg_for_com
+        )
 
         # combined pmf, A_ni
         p_combined = p_ISI.combine(p_w_XT_all).combine(p_w_DD).combine(p_qn).combine(p_G)
@@ -3347,8 +3401,8 @@ class COM(com_93A.COM):
         # COM
         COM = 20 * np.log10( As / A_ni )
         return COMPMFStatus(
-            dy=pmf_cfg.dy,
-            tap_abs_th=pmf_cfg.tap_abs_th,
+            dy=pmf_cfg_for_com.dy,
+            tap_abs_th=pmf_cfg_for_com.tap_abs_th,
             p_ISI=p_ISI,
             p_G=p_G,
             p_DD=p_w_DD,
@@ -3401,7 +3455,7 @@ class COM(com_93A.COM):
                 f"got COM_DFE={COM_DFE!r}, A_ni={A_ni!r}."
             )
 
-        pmf_cfg = self.cfg.pmf.resolve(imp_status.As)
+        pmf_cfg = _resolve_final_com_pmf_config(self.cfg.pmf, imp_status.As)
         added_noise = solve_g_an(
             self.cfg.mlsd.resolved_delta_com_an(),
             imp_status.post_ffe,
