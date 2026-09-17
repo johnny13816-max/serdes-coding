@@ -821,6 +821,20 @@ class COMPSDStatus(_PrettyDataclass):
 
 
 @dataclass(repr=False)
+class COMAddedNoiseIterationStatus(_PrettyDataclass):
+    """One scalar observation from the Annex 178A added-noise solver."""
+
+    iteration: int
+    phase: Literal["baseline", "bracket", "bisection"]
+    g_an: float
+    sigma_added: float
+    sigma_an: float
+    A_an: float
+    delta_com_an_temp: float
+    residual_dB: float
+
+
+@dataclass(repr=False)
 class COMAddedNoiseStatus(_PrettyDataclass):
     """178A.1.10.1 added-noise calibration result shared by MLSD stages."""
     g_an: float
@@ -831,12 +845,18 @@ class COMAddedNoiseStatus(_PrettyDataclass):
     target_delta_com_an: Optional[float] = None
     residual_dB: Optional[float] = None
     iterations: Optional[int] = None
+    sigma_added: Optional[float] = None
+    A_ref: Optional[float] = None
+    A_an: Optional[float] = None
+    iteration_history: list[COMAddedNoiseIterationStatus] = field(default_factory=list)
 
 
 @dataclass(repr=False)
 class COMMLSDStatus(_PrettyDataclass):
     """MLSD-only inputs and results, separate from physical impairment stages."""
     added_noise: COMAddedNoiseStatus
+    S_isi: Optional[SampledPSD] = None
+    sigma_isi: Optional[float] = None
     S_ni: Optional[SampledPSD] = None
     sigma_ni: Optional[float] = None
     R_ni: Optional[np.ndarray] = None
@@ -2256,7 +2276,8 @@ def evaluate_delta_com_an(
         fb=post_psd.S_rn.fb,
     )
     sigma_G = float(post_psd.sigma_G)
-    sigma_an = float(np.hypot(sigma_G, S_an.to_sigma()))
+    sigma_added = float(S_an.to_sigma())
+    sigma_an = float(np.hypot(sigma_G, sigma_added))
 
     p_G_an = Pmf1D.gaussian(
         mu=0.0,
@@ -2288,6 +2309,9 @@ def evaluate_delta_com_an(
         sigma_an=sigma_an,
         p_an=p_an,
         delta_com_an_temp=float(20.0 * np.log10(a_an / a_ref)),
+        sigma_added=sigma_added,
+        A_ref=a_ref,
+        A_an=a_an,
     )
 
 
@@ -2320,12 +2344,39 @@ def solve_g_an(
     if max_iter <= 0:
         raise ValueError("max_iter must be positive.")
 
+    history: list[COMAddedNoiseIterationStatus] = []
+
+    def record(
+        candidate: COMAddedNoiseStatus,
+        iteration: int,
+        phase: Literal["baseline", "bracket", "bisection"],
+    ) -> None:
+        if candidate.sigma_added is None or candidate.A_an is None or candidate.residual_dB is None:
+            raise RuntimeError("Added-noise solver observation is incomplete.")
+        history.append(
+            COMAddedNoiseIterationStatus(
+                iteration=int(iteration),
+                phase=phase,
+                g_an=float(candidate.g_an),
+                sigma_added=float(candidate.sigma_added),
+                sigma_an=float(candidate.sigma_an),
+                A_an=float(candidate.A_an),
+                delta_com_an_temp=float(candidate.delta_com_an_temp),
+                residual_dB=float(candidate.residual_dB),
+            )
+        )
+
+    def finish(candidate: COMAddedNoiseStatus) -> COMAddedNoiseStatus:
+        candidate.iteration_history = list(history)
+        return candidate
+
     low = evaluate_delta_com_an(0.0, post_ffe, pmf_dfe, pmf_cfg, der_0)
     low.target_delta_com_an = target_delta_com_an
     low.residual_dB = low.delta_com_an_temp - target_delta_com_an
     low.iterations = 0
+    record(low, 0, "baseline")
     if abs(low.residual_dB) <= cvg_th:
-        return low
+        return finish(low)
     if low.residual_dB > 0.0:
         raise COMError(
             "Non-negative g_an cannot reduce the baseline added-noise penalty: "
@@ -2340,6 +2391,7 @@ def solve_g_an(
         candidate.target_delta_com_an = target_delta_com_an
         candidate.residual_dB = candidate.delta_com_an_temp - target_delta_com_an
         candidate.iterations = iteration
+        record(candidate, iteration, "bracket")
         if candidate.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
             raise COMError(
                 "Added-noise penalty must be non-decreasing while bracketing "
@@ -2347,7 +2399,7 @@ def solve_g_an(
                 f"delta({high_g_an:.6g})={candidate.delta_com_an_temp:.6g} dB."
             )
         if abs(candidate.residual_dB) <= cvg_th:
-            return candidate
+            return finish(candidate)
         if candidate.residual_dB > 0.0:
             high = candidate
             break
@@ -2370,6 +2422,7 @@ def solve_g_an(
         mid.target_delta_com_an = target_delta_com_an
         mid.residual_dB = mid.delta_com_an_temp - target_delta_com_an
         mid.iterations = iteration
+        record(mid, iteration, "bisection")
         if mid.delta_com_an_temp + 1e-12 < low.delta_com_an_temp:
             raise COMError(
                 "Added-noise penalty decreased inside the bisection bracket: "
@@ -2379,7 +2432,7 @@ def solve_g_an(
         if abs(mid.residual_dB) < abs(best.residual_dB):
             best = mid
         if abs(mid.residual_dB) <= cvg_th:
-            return mid
+            return finish(mid)
         if mid.residual_dB < 0.0:
             low_g_an = mid_g_an
             low = mid
@@ -3309,6 +3362,8 @@ class COM(com_93A.COM):
 
         return COMMLSDStatus(
             added_noise=added_noise,
+            S_isi=S_isi,
+            sigma_isi=S_isi.to_sigma(),
             S_ni=S_ni,
             sigma_ni=S_ni.to_sigma(),
             R_ni=R_ni,
@@ -3520,6 +3575,7 @@ __all__ = [
     "COM",
     "COMAdcInputPMF",
     "COMAddedNoiseStatus",
+    "COMAddedNoiseIterationStatus",
     "COMChannelConfig",
     "COMConfig",
     "COMDTEConfig",
