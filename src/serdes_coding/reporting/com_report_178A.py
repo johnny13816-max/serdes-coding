@@ -1000,6 +1000,171 @@ class COMReport178A:
         return outputs
 
     # ------------------------------------------------------------------
+    # calculate_COM_MLSD: COMMLSDStatus
+    # ------------------------------------------------------------------
+    def plot_mlsd(self, save_path: str | Path = "") -> dict[str, str]:
+        """Plot the MLSD result, its inputs, and added-noise convergence."""
+        if self.status.mlsd is None:
+            raise ValueError("COMStatus.mlsd is not available.")
+        if self.status.pmf is None or self.status.pmf.COM is None:
+            raise ValueError("MLSD reporting requires the completed COM_DFE PMF status.")
+
+        mlsd = self.status.mlsd
+        added = mlsd.added_noise
+        directory = str(Path(save_path) / "mlsd") if save_path else ""
+        outputs: dict[str, str] = {}
+
+        # DFE baseline, raw MLSD result, and specification-floored result.
+        required_com = (mlsd.COM_MLSD_raw, mlsd.COM_MLSD, mlsd.delta_COM)
+        if all(value is not None for value in required_com):
+            com_dfe = float(self.status.pmf.COM)
+            com_raw = float(mlsd.COM_MLSD_raw)
+            com_selected = float(mlsd.COM_MLSD)
+            fig, ax, output = self._subplots(directory, "com_comparison.png", figsize=(7, 4))
+            labels = ["COM DFE", "COM MLSD raw", "COM MLSD selected"]
+            values = [com_dfe, com_raw, com_selected]
+            bars = ax.bar(labels, values, color=["tab:blue", "tab:orange", "tab:green"])
+            for bar, value in zip(bars, values):
+                ax.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.3f} dB", ha="center", va="bottom")
+            ax.axhline(com_dfe, color="tab:blue", linestyle="--", linewidth=0.8)
+            ax.set_ylabel("COM (dB)")
+            ax.grid(True, axis="y")
+            self._title(
+                ax,
+                "DFE and MLSD COM",
+                f"raw delta={float(mlsd.delta_COM):.3f} dB, applied gain={com_selected - com_dfe:.3f} dB",
+            )
+            self._finish(fig, output)
+            outputs["com_comparison"] = output
+
+        # Contribution by MLSD sequence length and its truncated cumulative DER.
+        if mlsd.der_by_j is not None:
+            der = np.asarray(mlsd.der_by_j, dtype=float)
+            if der.size:
+                j = np.arange(1, der.size + 1)
+                cumulative = np.cumsum(der)
+                fig, axes, output = self._subplots(
+                    directory, "mlsd_der_convergence.png", 2, 1, figsize=(7, 7), sharex=True
+                )
+                axes[0].bar(j, der, color="tab:blue")
+                axes[0].set_ylabel("DER contribution")
+                axes[0].grid(True, axis="y")
+                axes[1].plot(j, cumulative, marker="o", color="tab:orange")
+                axes[1].set_xlabel("Sequence length j")
+                axes[1].set_ylabel("Cumulative DER")
+                axes[1].grid(True)
+                if np.all(der > 0.0):
+                    axes[0].set_yscale("log")
+                    axes[1].set_yscale("log")
+                self._title(axes[0], "MLSD DER by sequence length")
+                self._title(
+                    axes[1],
+                    "Truncated MLSD DER convergence",
+                    f"DER_MLSD={float(mlsd.DER_MLSD):.3e}" if mlsd.DER_MLSD is not None else "",
+                )
+                self._finish(fig, output)
+                outputs["der_convergence"] = output
+
+        # Eq. 178A-54 noise composition on one post-FFE frequency grid.
+        post_ffe = None if self.status.imp is None else self.status.imp.post_ffe
+        post_psd = None if post_ffe is None else post_ffe.psd
+        if post_psd is not None and post_psd.S_rn is not None and mlsd.S_ni is not None:
+            fig, ax, output = self._subplots(directory, "mlsd_noise_psd.png", figsize=(7, 4))
+            post_psd.S_rn.plot(ax=ax, label="S_rn")
+            added.S_an.plot(ax=ax, label="S_an")
+            if mlsd.S_isi is not None:
+                mlsd.S_isi.plot(ax=ax, label="S_isi")
+            mlsd.S_ni.plot(ax=ax, label="S_ni")
+            sigma_added = "None" if added.sigma_added is None else f"{added.sigma_added:.3e} V"
+            sigma_isi = "None" if mlsd.sigma_isi is None else f"{mlsd.sigma_isi:.3e} V"
+            sigma_ni = "None" if mlsd.sigma_ni is None else f"{mlsd.sigma_ni:.3e} V"
+            self._title(
+                ax,
+                "MLSD noise PSD composition",
+                f"sigma_added={sigma_added}, sigma_isi={sigma_isi}, sigma_ni={sigma_ni}",
+            )
+            ax.grid(True)
+            ax.legend()
+            self._finish(fig, output)
+            outputs["noise_psd"] = output
+
+        # Baseline and added-noise distributions at their inverse-CDF amplitudes.
+        if self.status.pmf.p_combined is not None and added.p_an is not None:
+            baseline = self.status.pmf.p_combined
+            fig, axes, output = self._subplots(
+                directory, "added_noise_pmf_cdf.png", 2, 1, figsize=(7, 7), sharex=True
+            )
+            for pmf, label in ((baseline, "DFE baseline"), (added.p_an, "Added noise")):
+                pmf.plot(ax=axes[0], label=label)
+                pmf.plot(ax=axes[1], quantity="cdf", label=label)
+            markers = []
+            if added.A_ref is not None:
+                markers.append((-float(added.A_ref), float(self.cfg.DER_0), "A_ref", "tab:blue"))
+            if added.A_an is not None:
+                markers.append((-float(added.A_an), float(self.cfg.DER_0), "A_an", "tab:orange"))
+            if mlsd.A_MLSD is not None and mlsd.DER_MLSD is not None:
+                markers.append((-float(mlsd.A_MLSD), float(mlsd.DER_MLSD), "A_MLSD", "tab:green"))
+            for x_value, probability, label, color in markers:
+                axes[1].scatter([x_value], [probability], color=color, zorder=3)
+                axes[1].annotate(label, (x_value, probability), xytext=(5, 5), textcoords="offset points", color=color)
+            positive = np.concatenate((np.asarray(baseline.cdf), np.asarray(added.p_an.cdf)))
+            positive = positive[np.isfinite(positive) & (positive > 0.0)]
+            axes[1].set_yscale("log")
+            axes[1].set_ylim(max(1e-15, float(np.min(positive)) * 0.5) if positive.size else 1e-15, 1.0)
+            axes[0].set_title("DFE baseline and added-noise PMF")
+            axes[1].set_title("Inverse-CDF amplitudes")
+            axes[0].grid(True)
+            axes[1].grid(True)
+            axes[0].legend()
+            axes[1].legend()
+            self._finish(fig, output)
+            outputs["added_noise_pmf_cdf"] = output
+
+        # Scalar trace of the bracket and bisection evaluations in solve_g_an().
+        history = added.iteration_history
+        if history:
+            iterations = np.asarray([item.iteration for item in history], dtype=int)
+            delta = np.asarray([item.delta_com_an_temp for item in history], dtype=float)
+            residual = np.asarray([item.residual_dB for item in history], dtype=float)
+            g_an = np.asarray([item.g_an for item in history], dtype=float)
+            fig, axes, output = self._subplots(
+                directory, "added_noise_solver_trace.png", 3, 1, figsize=(7, 9), sharex=True
+            )
+            axes[0].plot(iterations, delta, marker="o", label="evaluated delta")
+            if added.target_delta_com_an is not None:
+                axes[0].axhline(float(added.target_delta_com_an), color="tab:red", linestyle="--", label="target")
+            axes[0].set_ylabel("Delta COM (dB)")
+            axes[0].legend()
+            axes[1].plot(iterations, residual, marker="o", color="tab:orange")
+            axes[1].axhline(0.0, color="0.3", linestyle="--", linewidth=0.8)
+            axes[1].set_ylabel("Residual (dB)")
+            axes[2].plot(iterations, g_an, marker="o", color="tab:green")
+            positive_g = g_an[g_an > 0.0]
+            if positive_g.size:
+                axes[2].set_yscale("symlog", linthresh=max(float(np.min(positive_g)) / 10.0, 1e-15))
+            axes[2].set_ylabel("g_an")
+            axes[2].set_xlabel("Solver iteration")
+            first_bisection = next(
+                (item.iteration for item in history if item.phase == "bisection"),
+                None,
+            )
+            for axis in axes:
+                axis.grid(True)
+                if first_bisection is not None:
+                    axis.axvline(first_bisection, color="0.5", linestyle=":", linewidth=0.8)
+            bracket_count = sum(item.phase == "bracket" for item in history)
+            bisection_count = sum(item.phase == "bisection" for item in history)
+            self._title(
+                axes[0],
+                "Added-noise solver convergence",
+                f"bracket evaluations={bracket_count}, bisection evaluations={bisection_count}",
+            )
+            self._finish(fig, output)
+            outputs["solver_trace"] = output
+
+        return outputs
+
+    # ------------------------------------------------------------------
     # Full single-run orchestration
     # ------------------------------------------------------------------
     def plot_single_run(self, save_path: str | Path = "", path_idx: int = 0) -> dict[str, Any]:
@@ -1013,6 +1178,8 @@ class COMReport178A:
             outputs["imp_post_ffe"] = self.plot_post_ffe_imp(save_path)
         if self.status.pmf is not None:
             outputs["pmf"] = self.plot_pmf(save_path)
+        if self.status.mlsd is not None:
+            outputs["mlsd"] = self.plot_mlsd(save_path)
         return outputs
 
 

@@ -32,7 +32,20 @@ PARTIAL_RESULT_FIELDS = (
     "search_index", "c_m2", "c_m1", "c_1", "g_1", "g_2",
     "status", "error", "mse", "mse_dB", "ts", "pos",
 )
-FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + ("final_status", "final_error", "COM_dB")
+FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + (
+    "final_status",
+    "final_error",
+    "COM_DFE_dB",
+    "COM_dB",
+    "post_ffe_As_V",
+    "post_ffe_sigma_ISI_V",
+    "post_ffe_sigma_tn_V",
+    "post_ffe_sigma_rn_V",
+    "post_ffe_sigma_xn_V",
+    "post_ffe_sigma_jn_V",
+    "post_ffe_sigma_qn_V",
+    "post_ffe_sigma_total_V",
+)
 PARTIAL_RESULT_REPORT_MULTIPLIER = 10
 
 
@@ -335,7 +348,7 @@ def finalize_search(
             final_rows_by_idx[row.idx] = _final_row(
                 row,
                 status="ok",
-                com_value=status.final_COM,
+                run_status=status,
                 signal_amplitude=signal_amplitude,
             )
         except Exception as exc:
@@ -534,16 +547,51 @@ def _final_row(
     row: COMSearchRow,
     *,
     status: Literal["", "ok", "error"],
-    com_value: Optional[float] = None,
+    run_status: Optional[Any] = None,
     error: str = "",
     signal_amplitude: float,
 ) -> dict[str, Any]:
     partial = _partial_row_dict(row, signal_amplitude=signal_amplitude)
+    metrics: dict[str, Any] = {
+        "COM_DFE_dB": "",
+        "COM_dB": "",
+        "post_ffe_As_V": "",
+        "post_ffe_sigma_ISI_V": "",
+        "post_ffe_sigma_tn_V": "",
+        "post_ffe_sigma_rn_V": "",
+        "post_ffe_sigma_xn_V": "",
+        "post_ffe_sigma_jn_V": "",
+        "post_ffe_sigma_qn_V": "",
+        "post_ffe_sigma_total_V": "",
+    }
+    if run_status is not None:
+        pmf = getattr(run_status, "pmf", None)
+        metrics["COM_DFE_dB"] = "" if pmf is None or pmf.COM is None else pmf.COM
+        final_com = getattr(run_status, "final_COM", None)
+        metrics["COM_dB"] = "" if final_com is None else final_com
+
+        imp = getattr(run_status, "imp", None)
+        post_ffe = None if imp is None else getattr(imp, "post_ffe", None)
+        psd = None if post_ffe is None else getattr(post_ffe, "psd", None)
+        if psd is not None:
+            for column, attribute in (
+                ("post_ffe_As_V", "As"),
+                ("post_ffe_sigma_ISI_V", "sigma_ISI"),
+                ("post_ffe_sigma_tn_V", "sigma_tn"),
+                ("post_ffe_sigma_rn_V", "sigma_rn"),
+                ("post_ffe_sigma_xn_V", "sigma_xn"),
+                ("post_ffe_sigma_jn_V", "sigma_jn"),
+                ("post_ffe_sigma_qn_V", "sigma_qn"),
+                ("post_ffe_sigma_total_V", "sigma_total"),
+            ):
+                value = getattr(psd, attribute, None)
+                metrics[column] = "" if value is None else value
+
     return {
         **partial,
         "final_status": status,
         "final_error": error,
-        "COM_dB": "" if com_value is None else com_value,
+        **metrics,
     }
 
 
