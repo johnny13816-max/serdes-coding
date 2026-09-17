@@ -1,0 +1,8 @@
+case_id: case_260915_full
+models: [178A]
+configs:
+  178A: 178A/config.xlsx
+results:
+  178A: 178A/results
+channel_authority: 178A/config.xlsx#channels
+expected_candidates: 232848

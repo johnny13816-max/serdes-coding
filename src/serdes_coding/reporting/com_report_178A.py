@@ -89,11 +89,22 @@ class COMReport178A:
         pmf = adc.p_s or adc.p_sn or adc.p_n or adc.p_ga
         if pmf is None:
             return
-        self._annotate_pmf_settings(ax, pmf)
+        keep_mass = (
+            self.status.run.pmf_keep_mass
+            if self.status.run is not None and self.status.run.pmf_keep_mass is not None
+            else 1 - 1e-5
+        )
+        self._annotate_pmf_settings(ax, pmf, keep_mass=keep_mass)
 
-    def _annotate_pmf_settings(self, ax: Any, pmf: Any) -> None:
+    def _annotate_pmf_settings(
+        self,
+        ax: Any,
+        pmf: Any,
+        *,
+        keep_mass: float = 1.0,
+    ) -> None:
         """Annotate a PMF plot with its resolved amplitude-grid settings."""
-        keep_mass = float(self.cfg.pmf.keep_mass)
+        keep_mass = float(keep_mass)
         missing_mass = max(0.0, 1.0 - keep_mass)
         if missing_mass > 0.0:
             exponent = int(round(np.log10(missing_mass)))
@@ -211,11 +222,11 @@ class COMReport178A:
             lines.append(f"P_qc={imp.P_qc:.3e}")
         ax.text(
             0.01,
-            0.01,
+            0.99,
             "\n".join(lines),
             transform=ax.transAxes,
             ha="left",
-            va="bottom",
+            va="top",
             fontsize=8,
             bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85},
         )
@@ -721,16 +732,22 @@ class COMReport178A:
                 value = getattr(stage.psd, name, None)
                 if value is not None:
                     contributions.append((label, float(value)))
-        elif not pre_dte:
-            if stage.psd is not None and stage.psd.sigma_ISI is not None:
-                contributions.append(("ISI", float(stage.psd.sigma_ISI)))
-            adc = stage.adc_input
-            if adc is not None:
-                for name, label in (("p_XT", "crosstalk"), ("p_DD", "DDJ"), ("p_ga", "Gaussian noise")):
-                    pmf = getattr(adc, name, None)
-                    if pmf is not None:
-                        _, std = self._pmf_moments(pmf)
-                        contributions.append((label, std))
+        elif not pre_dte and stage.psd is not None:
+            # Post-FFE reporting follows the six impairment components stored
+            # on the common post-FFE PSD grid.  Do not regroup them through the
+            # ADC-input PMFs, which would combine RX/TX/RJ noise and separate
+            # DDJ from the reported TX-jitter PSD.
+            for name, label in (
+                ("sigma_ISI", "ISI"),
+                ("sigma_rn", "RX noise"),
+                ("sigma_xn", "crosstalk"),
+                ("sigma_tn", "TX noise"),
+                ("sigma_jn", "TX jitter"),
+                ("sigma_qn", "ADC quantization"),
+            ):
+                value = getattr(stage.psd, name, None)
+                if value is not None:
+                    contributions.append((label, float(value)))
 
         contributions = [(label, sigma) for label, sigma in contributions if np.isfinite(sigma) and sigma >= 0.0]
         if not contributions or not any(sigma > 0.0 for _, sigma in contributions):

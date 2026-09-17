@@ -63,7 +63,7 @@ class COMSearchStatus(_PrettyDataclass):
 
     @property
     def COM(self) -> Optional[float]:
-        return None if self.best.pmf is None else self.best.pmf.COM
+        return self.best.final_COM
 
     def plot_mse_trace(self, save_path: str = "") -> Any:
         """Plot the minimum DTE MSE of each retained search candidate."""
@@ -305,7 +305,14 @@ def finalize_search(
         for row in report_rows
     }
     finalized: list[tuple[COMSearchRow, Any]] = []
-    for row in full_com_rows:
+    final_started = time.perf_counter()
+    total_final = len(full_com_rows)
+    print(f"178A search_final: start, {total_final} candidates, include_plots={include_plots}", flush=True)
+    for final_index, row in enumerate(full_com_rows, start=1):
+        candidate_started = time.perf_counter()
+        label = f"178A search_final {final_index}/{total_final} candidate={row.idx}"
+        stage = "calculation"
+        print(f"{label}: calculation start", flush=True)
         candidate_cfg = _config_with_candidate(cfg, row.candidate)
         try:
             from ..models.com_model_178A import COM
@@ -313,6 +320,9 @@ def finalize_search(
             status = COM(candidate_cfg)._run_once(
                 run_cfg=candidate_cfg.execution.search_final,
             )
+            print(f"{label}: calculation done in {time.perf_counter() - candidate_started:.1f}s", flush=True)
+            stage = "report export"
+            print(f"{label}: report export start, include_plots={include_plots}", flush=True)
             # 178A plotting is owned by COMReport178A, which needs the
             # originating runtime/project config in addition to COMStatus.
             status._config_for_report = candidate_cfg
@@ -320,14 +330,16 @@ def finalize_search(
                 str(artifacts.top_k_dir / f"{row.idx:06d}"),
                 include_plots=include_plots,
             )
+            print(f"{label}: report export done", flush=True)
             finalized.append((row, status))
             final_rows_by_idx[row.idx] = _final_row(
                 row,
                 status="ok",
-                com_value=status.pmf.COM if status.pmf else None,
+                com_value=status.final_COM,
                 signal_amplitude=signal_amplitude,
             )
         except Exception as exc:
+            print(f"{label}: ERROR during {stage}: {type(exc).__name__}: {exc}", flush=True)
             # Finalization is an aggregation stage: preserve one candidate's
             # failure and continue so the remaining top-K candidates can be
             # evaluated and reported.
@@ -340,13 +352,27 @@ def finalize_search(
                 )
             )
 
-    final_rows = [final_rows_by_idx[row.idx] for row in report_rows]
-    _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
-    if not finalized:
-        raise RuntimeError(
-            "All top-K final candidates failed; see full_search_results.csv for details."
+        elapsed = time.perf_counter() - final_started
+        eta = elapsed / final_index * (total_final - final_index)
+        print(
+            f"{label}: {final_rows_by_idx[row.idx]['final_status']}, "
+            f"candidate_elapsed={time.perf_counter() - candidate_started:.1f}s, "
+            f"elapsed={elapsed:.1f}s, eta={eta:.1f}s", flush=True,
         )
 
+    print("178A search_final: writing full_search_results.csv", flush=True)
+    final_rows = [final_rows_by_idx[row.idx] for row in report_rows]
+    _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
+    if len(finalized) != total_final:
+        raise RuntimeError(
+            f"{total_final - len(finalized)}/{total_final} final candidates failed; "
+            "see full_search_results.csv. Partial outputs have been preserved."
+        )
+
+    print(
+        f"178A search_final: complete, success={len(finalized)}/{total_final}, "
+        f"elapsed={time.perf_counter() - final_started:.1f}s", flush=True,
+    )
     best_row, best_status = min(finalized, key=lambda item: item[0].mse)
     retained = _select_rows(partial_rows, search)
     return COMSearchStatus(

@@ -1,91 +1,47 @@
-name: Run 178A full search
+name: Run 178A workbook search
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       case_id:
-        description: "Case directory under cases/"
+        description: "Case under cases/; its 178A/config.xlsx defines the entire search"
         required: true
-        default: "c2m_8023dj_4p13p0_50mm"
-      group_size:
-        description: "Candidates per matrix runner"
-        required: true
-        default: "1000"
-      mode:
-        description: "Use dry-run first; full executes the complete search space"
-        required: true
-        type: choice
-        options:
-          - dry-run
-          - scaled
-          - full
-        default: dry-run
-      candidate_limit:
-        description: "Maximum candidates; use 10000 for the first limited full run"
-        required: true
-        default: "10000"
-      target_candidates:
-        description: "Target size for scaled mode"
-        required: true
-        default: "10000"
-      phase_sweep:
-        description: "Sampling-phase policy for search_sweep"
-        required: true
-        type: choice
-        options:
-          - coarse_fine
-          - each_phase
-        default: coarse_fine
+        default: case_260915_ci_small
 
 permissions:
   contents: read
+
+env:
+  CASE_ID: ${{ inputs.case_id || 'case_260915_ci_small' }}
+  MPLBACKEND: Agg
+  PYTHONUNBUFFERED: '1'
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      group_ids: ${{ steps.plan.outputs.group_ids }}
+      worker_ids: ${{ steps.plan.outputs.worker_ids }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install project
-        run: python -m pip install --upgrade pip && python -m pip install -e .
-
-      - name: Create search plan
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - name: Create workbook search plan
         id: plan
-        env:
-          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
-          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
-          MODE: ${{ inputs.mode || 'dry-run' }}
-          CANDIDATE_LIMIT: ${{ inputs.candidate_limit || '10000' }}
-          TARGET_CANDIDATES: ${{ inputs.target_candidates || '10000' }}
-          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
         run: >-
           python scripts/run_full_search_178A.py prepare
-          --case-root "cases/${CASE_ID}"
-          --output-root artifacts/partial_search
-          --group-size "${GROUP_SIZE}"
-          --mode "${MODE}"
-          --candidate-limit "${CANDIDATE_LIMIT}"
-          --target-candidates "${TARGET_CANDIDATES}"
-          --phase-sweep "${PHASE_SWEEP}"
+          --case-root "cases/${CASE_ID}/178A"
+          --output-root "cases/${CASE_ID}/178A/results/actions"
           --matrix-output "$GITHUB_OUTPUT"
-
-      - name: Upload search plan
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: full-search-plan
-          path: artifacts/partial_search
+          path: cases/${{ env.CASE_ID }}/178A/results/actions
+          if-no-files-found: error
 
   partial_search:
     needs: prepare
@@ -95,88 +51,76 @@ jobs:
       fail-fast: false
       max-parallel: 20
       matrix:
-        group_id: ${{ fromJSON(needs.prepare.outputs.group_ids) }}
+        worker_id: ${{ fromJSON(needs.prepare.outputs.worker_ids) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install project
-        run: python -m pip install --upgrade pip && python -m pip install -e .
-
-      - name: Download search plan
-        uses: actions/download-artifact@v4
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
         with:
           name: full-search-plan
-          path: artifacts/partial_search
-
-      - name: Run partial group
-        env:
-          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
-          GROUP_SIZE: ${{ inputs.group_size || '1000' }}
-          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
+          path: cases/${{ env.CASE_ID }}/178A/results/actions
+      - name: Run partial groups
         run: >-
           python scripts/run_full_search_178A.py partial
-          --case-root "cases/${CASE_ID}"
-          --output-root artifacts/partial_search
-          --group-size "${GROUP_SIZE}"
-          --phase-sweep "${PHASE_SWEEP}"
-          --group-id "${{ matrix.group_id }}"
-
-      - name: Upload partial result
-        uses: actions/upload-artifact@v4
+          --case-root "cases/${CASE_ID}/178A"
+          --output-root "cases/${CASE_ID}/178A/results/actions"
+          --worker-id "${{ matrix.worker_id }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: full-search-group-${{ matrix.group_id }}
-          path: artifacts/partial_search/group_results/*.csv
+          name: full-search-group-${{ matrix.worker_id }}
+          path: cases/${{ env.CASE_ID }}/178A/results/actions/group_results/*.csv
+          if-no-files-found: error
 
   finalize:
     needs: partial_search
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Install project
-        run: python -m pip install --upgrade pip && python -m pip install -e .
-
-      - name: Download search plan
-        uses: actions/download-artifact@v4
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
         with:
           name: full-search-plan
-          path: artifacts/partial_search
-
-      - name: Download partial results
-        uses: actions/download-artifact@v4
+          path: cases/${{ env.CASE_ID }}/178A/results/actions
+      - uses: actions/download-artifact@v4
         with:
           pattern: full-search-group-*
-          path: artifacts/partial_search/group_results
+          path: cases/${{ env.CASE_ID }}/178A/results/actions/group_results
           merge-multiple: true
-
-      - name: Merge and finalize
-        env:
-          CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
-          MODE: ${{ inputs.mode || 'dry-run' }}
-          PHASE_SWEEP: ${{ inputs.phase_sweep || 'coarse_fine' }}
+      - name: Merge, finalize and verify every plot
         run: >-
           python scripts/run_full_search_178A.py finalize
-          --case-root "cases/${CASE_ID}"
-          --output-root artifacts/partial_search
-          --mode "${MODE}"
-          --phase-sweep "${PHASE_SWEEP}"
-
-      - name: Upload final results
+          --case-root "cases/${CASE_ID}/178A"
+          --output-root "cases/${CASE_ID}/178A/results/actions"
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
-          name: full-search-final-${{ inputs.case_id }}
-          path: artifacts/partial_search
+          name: full-search-final-${{ env.CASE_ID }}
+          path: cases/${{ env.CASE_ID }}/178A/results/actions
+          if-no-files-found: error
+
+  verify_artifact:
+    needs: finalize
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e .
+      - uses: actions/download-artifact@v4
+        with:
+          name: full-search-final-${{ env.CASE_ID }}
+          path: cases/${{ env.CASE_ID }}/178A/results/downloaded
+      - name: Verify downloaded PNG hashes and final status
+        run: >-
+          python scripts/run_full_search_178A.py verify
+          --output-root "cases/${CASE_ID}/178A/results/downloaded"
