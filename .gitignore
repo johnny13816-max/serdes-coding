@@ -197,3 +197,6 @@ cases/**/.run/
 /tmp/
 cases/**/results/
 *.xlsx.inspect.ndjson
+
+# Exact Python 3.7.3 compatibility validation environment.
+.venv-py373/
