@@ -619,16 +619,26 @@ class COMChannelConfig(_PrettyDataclass):
     freqs and s4p are populated after Touchstone loading. Excel can directly
     provide the path fields first.
     """
+    R0: float                                               # unit: ohm, single-ended reference resistance
+    R_d_tx: float                                           # unit: ohm, TX die termination resistance
+    R_d_rx: float                                           # unit: ohm, RX die termination resistance
     victim_s4p_path: Optional[str] = None                   # unit: filesystem path
     next_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
     fext_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
     port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # unit: zero-based S4P port order
-    R0: float = 50.0                                        # unit: ohm, single-ended reference resistance
-    gamma_src: complex | np.ndarray = 0.0                   # unit: dimensionless source reflection coefficient
-    gamma_load: complex | np.ndarray = 0.0                  # unit: dimensionless load reflection coefficient
+    gamma_src: complex = field(init=False)                  # unit: dimensionless, derived from R_d_tx and R0
+    gamma_load: complex = field(init=False)                 # unit: dimensionless, derived from R_d_rx and R0
     missing_dc_policy: Literal["error", "hold", "skrf"] = "error"
 
     def __post_init__(self) -> None:
+        for name in ("R0", "R_d_tx", "R_d_rx"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive.")
+            setattr(self, name, value)
+
+        self.gamma_src = complex((self.R_d_tx - self.R0) / (self.R_d_tx + self.R0))
+        self.gamma_load = complex((self.R_d_rx - self.R0) / (self.R_d_rx + self.R0))
         if self.missing_dc_policy not in {"error", "hold", "skrf"}:
             raise ValueError("missing_dc_policy must be error, hold, or skrf.")
 
