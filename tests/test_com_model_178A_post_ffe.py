@@ -37,7 +37,8 @@ class TestPostFFEImpairment178A(unittest.TestCase):
 
     def test_mse_and_post_grid_contract(self) -> None:
         status = self.status
-        self.assertAlmostEqual(status.dte.mse, 0.00620479434110295, places=14)
+        # Golden value after measured Sdd renormalization (178A-4).
+        self.assertAlmostEqual(status.dte.mse, 0.006203013107434269, places=14)
         post = status.imp.post_ffe.psd
         for name in ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total"):
             value = getattr(post, name)

@@ -377,8 +377,12 @@ class SparamModel:
         - None with mode="sdd": preserve network.z0
         - None with mode="s4p": derive differential z0 from the single-ended
           port pairs after applying port_order
-        - explicit value: use it as the internal Sdd differential reference
-          impedance
+        - explicit value with mode="sdd": assign the internal Sdd reference
+          impedance (the supplied array already owns its normalization)
+        - explicit value with mode="s4p": first convert at the measured
+          differential impedance, then renormalize the Sdd two-port to this
+          differential impedance (178A.1.3, Eq. 178A-4). The source Network
+          remains unchanged; common-mode ports are not renormalized.
         """
 
         if mode not in {"auto", "sdd", "s4p"}:
@@ -396,8 +400,14 @@ class SparamModel:
             z0_sdd = network.z0 if z0 is None else z0
             return cls.from_sdd_array(network.f, network.s, z0=z0_sdd)
 
-        z0_sdd = _differential_z0_from_s4p_z0(network.z0, port_order) if z0 is None else z0
-        return cls.from_s4p_array(network.f, network.s, port_order=port_order, z0=z0_sdd)
+        z0_measured = _differential_z0_from_s4p_z0(network.z0, port_order)
+        model = cls.from_s4p_array(
+            network.f, network.s, port_order=port_order, z0=z0_measured,
+        )
+        if z0 is not None:
+            model.network.renormalize(cast(Any, z0))
+            model.network = model.validate_network(model.network)
+        return model
 
     @classmethod
     def from_touchstone(
