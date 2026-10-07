@@ -3184,27 +3184,7 @@ def _build_rxpkg_93A(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMSpara
         Package config with C_d/C_b/C_p in F, L_s in H, z_p/z_p2 in mm,
         and R0/Z_c/Z_c2 in ohm.
     """
-    freqs = LinkConfig.validate_freqs(freqs)
-    C_d = rxpkg_cfg.C_d
-    L_s = rxpkg_cfg.L_s
-    C_b = rxpkg_cfg.C_b
-    C_p = rxpkg_cfg.C_p
-
-    S_p = IEEECOMSparam.shunt_capacitance_93A(freqs, C_p, rxpkg_cfg.R0)
-    if (rxpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMSparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p2, Zc=rxpkg_cfg.Z_c2)
-    S_l = IEEECOMSparam.pkg_trans_line_93A(freqs, rxpkg_cfg.R0, rxpkg_cfg.z_p, Zc=rxpkg_cfg.Z_c)
-    S_b = IEEECOMSparam.shunt_capacitance_93A(freqs, C_b, rxpkg_cfg.R0)
-    S_s = IEEECOMSparam.series_inductance_93A(freqs, L_s, rxpkg_cfg.R0)
-    S_d = IEEECOMSparam.shunt_capacitance_93A(freqs, C_d, rxpkg_cfg.R0)
-    
-    # cascade
-    S_rd = (S_b.cascade_com_93A(S_s)).cascade_com_93A(S_d)
-    if (rxpkg_cfg.z_p2 is not None):
-        S_rp = ((S_p.cascade_com_93A(S_l2)).cascade_com_93A(S_l)).cascade_com_93A(S_rd)
-    else:
-        S_rp = (S_p.cascade_com_93A(S_l)).cascade_com_93A(S_rd)
-    return S_rp
+    return _build_txpkg_93A(freqs, rxpkg_cfg).reverse_ports()
 
 def _build_H_ffe_93A(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
     """

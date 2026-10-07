@@ -1229,8 +1229,8 @@ def _build_rxpkg(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMSparam:
     """
     Build the 178A RX package S-parameter model.
 
-    The current 178A package contract is:
-        partial host channel -> device package -> device termination
+    Build in die-to-channel order, then exchange the completed two-port's
+    ports so the returned model is oriented channel-to-die.
     """
     freqs = LinkConfig.validate_freqs(freqs)
     S_rh = IEEECOMSparam.partial_host_channel(
@@ -1248,7 +1248,8 @@ def _build_rxpkg(freqs: np.ndarray, rxpkg_cfg: COMPkgConfig) -> IEEECOMSparam:
         R0=rxpkg_cfg.R0,
         dt_cfg=rxpkg_cfg.device_term,
     )
-    return S_rh.cascade_com_93A(S_rp).cascade_com_93A(S_rd)
+    S_rx_die_to_channel = S_rd.cascade_com_93A(S_rp).cascade_com_93A(S_rh)
+    return S_rx_die_to_channel.reverse_ports()
 
 def _build_H_ffe(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter:
     """Build the 178A victim/FEXT TX FFE filter."""

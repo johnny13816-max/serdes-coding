@@ -1167,6 +1167,19 @@ class SparamModel:
         cascaded_network = self.network ** other.network
         return type(self).from_network(cascaded_network, mode="sdd", z0=cascaded_network.z0)
 
+    def reverse_ports(self) -> 'SparamModel':
+        """Return a copy with differential ports 1 and 2 exchanged.
+
+        For a two-port network this applies ``S' = P S P``: S11 and S22
+        exchange places, as do S12 and S21.  Per-port reference impedances
+        follow their physical ports.
+        """
+        return type(self).from_sdd_array(
+            self.freqs,
+            self.sdd[:, ::-1, ::-1],
+            z0=self.network.z0[:, ::-1],
+        )
+
     def write_touchstone_s2p(
         self,
         path: str | Path,
