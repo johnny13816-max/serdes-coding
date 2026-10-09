@@ -335,7 +335,8 @@ class IEEECOMFilter(LinkSegment):
         f = cfg.freqs
         H_ffe = np.zeros_like(f, dtype=complex)
         for idx, c_i in enumerate(txfir):
-            H_ffe += c_i * np.exp(-1j * 2 * np.pi * idx * f / cfg.fb)
+            n = idx - num_pre  # Eq. 93A-21 / 178A-13: main cursor is n = 0.
+            H_ffe += c_i * np.exp(-1j * 2 * np.pi * n * f / cfg.fb)
 
         return cls.from_tf(f_meas=f, H_meas=H_ffe, cfg=cfg)
 
