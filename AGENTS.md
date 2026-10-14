@@ -69,6 +69,26 @@ or Core Model Change Contract approval.
 - Keep the requested stage in scope. Finish and report it before expanding into
   another major investigation.
 
+### Stage Gate Before Search Or Advancing The Model Flow
+
+Before starting a search run or moving to the next COM stage, audit every open
+error, contract, and reference-method difference in the stages that feed the
+requested execution target.
+
+- State the search objective and final execution target explicitly, then trace
+  which model stages can affect candidate ranking and the reported result.
+- Block advancement when an unresolved confirmed error or an unimplemented
+  selected method can change any upstream input, ranking objective, or final
+  reported quantity. Present the required Core Model Change Contract when the
+  blocker belongs to protected model code.
+- An open item outside the selected execution path does not block the run, but
+  report its exclusion and the reason before proceeding. For example, a search
+  with `search_sweep.target="mse"` and `search_final.target="dfe"` does not
+  execute or depend on the MLSD stage.
+- Do not reopen a completed stage from a speculative note. Distinguish a
+  verified implementation gap from an unverified research candidate, and state
+  the evidence needed to promote a candidate into a project task.
+
 
 ## Mandatory project structure and execution location
 
