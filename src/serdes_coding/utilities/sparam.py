@@ -253,6 +253,7 @@ class SparamModel:
     - renormalized()
     - resampled()
     - extrapolated_to_dc()
+    - limited_to_frequency()
 
     There is no public in-place transformation API. Methods that wrap in-place
     scikit-rf operations apply them to copied Networks before returning a new
@@ -359,6 +360,9 @@ class SparamModel:
         mode: str = "auto",
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
         z0: Union[float, np.ndarray, None] = None,
+        *,
+        renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first",
+        frequency_limit_Hz: float | None = None,
     ) -> 'SparamModel':
         """
         Build from an existing scikit-rf Network.
@@ -383,8 +387,16 @@ class SparamModel:
           differential impedance, then renormalize the Sdd two-port to this
           differential impedance (178A.1.3, Eq. 178A-4). The source Network
           remains unchanged; common-mode ports are not renormalized.
+
+        renormalization_order:
+        - "sdd_first": existing two-port Sdd renormalization (default).
+        - "s4p_first": renormalize a copy of the complete single-ended S4P
+          to z0/2, then extract Sdd. Requires a scalar positive real target
+          z0 and one common positive real measured impedance at all four ports.
         """
 
+        if renormalization_order not in {"sdd_first", "s4p_first"}:
+            raise ValueError("renormalization_order must be sdd_first or s4p_first.")
         if mode not in {"auto", "sdd", "s4p"}:
             raise ValueError('mode must be "auto", "sdd", or "s4p".')
 
@@ -397,9 +409,36 @@ class SparamModel:
                 raise ValueError("Only 2-port Sdd and 4-port single-ended networks are supported.")
 
         if mode == "sdd":
+            if renormalization_order == "s4p_first":
+                raise ValueError("s4p_first requires a single-ended four-port network.")
+            if frequency_limit_Hz is not None:
+                network = cls._limited_network(network, frequency_limit_Hz)
             z0_sdd = network.z0 if z0 is None else z0
             return cls.from_sdd_array(network.f, network.s, z0=z0_sdd)
 
+        if renormalization_order == "s4p_first":
+            if z0 is None or np.asarray(z0).ndim != 0:
+                raise ValueError("s4p_first requires a scalar target differential z0.")
+            target = complex(z0)
+            if not np.isfinite(target) or target.imag != 0 or target.real <= 0:
+                raise ValueError("s4p_first target differential z0 must be positive and real.")
+            measured_z0 = np.asarray(network.z0)
+            if (measured_z0.shape != (len(network.f), 4)
+                    or not np.all(np.isfinite(measured_z0))
+                    or np.any(np.abs(measured_z0.imag) > 1e-12)
+                    or np.any(measured_z0.real <= 0)
+                    or not np.allclose(measured_z0.real, measured_z0.real[0, 0], rtol=0, atol=1e-12)):
+                raise ValueError("s4p_first requires one common positive real measured port impedance.")
+            source_copy = network.copy()
+            source_copy.renormalize(target.real / 2.0)
+            if frequency_limit_Hz is not None:
+                source_copy = cls._limited_network(source_copy, frequency_limit_Hz)
+            return cls.from_s4p_array(
+                source_copy.f, source_copy.s, port_order=port_order, z0=target.real,
+            )
+
+        if frequency_limit_Hz is not None:
+            network = cls._limited_network(network, frequency_limit_Hz)
         z0_measured = _differential_z0_from_s4p_z0(network.z0, port_order)
         model = cls.from_s4p_array(
             network.f, network.s, port_order=port_order, z0=z0_measured,
@@ -416,13 +455,39 @@ class SparamModel:
         mode: str = "auto",
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
         z0: Union[float, np.ndarray, None] = None,
+        *,
+        renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first",
+        frequency_limit_Hz: float | None = None,
     ) -> 'SparamModel':
         ntwk = rf.Network(path)
-        return cls.from_network(ntwk, mode=mode, port_order=port_order, z0=z0)
+        return cls.from_network(
+            ntwk, mode=mode, port_order=port_order, z0=z0,
+            renormalization_order=renormalization_order,
+            frequency_limit_Hz=frequency_limit_Hz,
+        )
 
     # --------------------
     # validation methods
     # --------------------
+    @staticmethod
+    def _limited_network(network: 'rf.Network', frequency_limit_Hz: float) -> 'rf.Network':
+        """Return a network limited with COM reference ``flim`` endpoint semantics."""
+        limit = float(frequency_limit_Hz)
+        if not np.isfinite(limit) or limit <= 0.0:
+            raise ValueError("frequency_limit_Hz must be finite and positive.")
+        freqs = np.asarray(network.f, dtype=float)
+        indices = np.flatnonzero(freqs >= limit)
+        end = len(freqs) if len(indices) == 0 else int(indices[0]) + 1
+        if end < 2:
+            raise ValueError(
+                "frequency_limit_Hz must retain at least two measured frequency points."
+            )
+        return rf.Network(
+            frequency=rf.Frequency.from_f(freqs[:end], unit="Hz"),
+            s=np.asarray(network.s)[:end],
+            z0=np.asarray(network.z0)[:end],
+        )
+
     @staticmethod
     def validate_sdd(sdd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
         sdd = np.asarray(sdd, dtype=complex)
@@ -1190,6 +1255,41 @@ class SparamModel:
             z0=self.network.z0[:, ::-1],
         )
 
+    def limited_to_frequency(self, frequency_limit_Hz: float) -> 'SparamModel':
+        """Return the measured record through the first point at or above a limit.
+
+        This matches the COM reference ``flim`` boundary: when the measured
+        record reaches the requested limit, retain the first frequency sample
+        whose value is greater than or equal to the limit and discard later
+        samples.  When the file ends below the requested limit, preserve the
+        complete record.  No interpolation or high-frequency extrapolation is
+        performed here.
+        """
+        limit = float(frequency_limit_Hz)
+        if not np.isfinite(limit) or limit <= 0.0:
+            raise ValueError("frequency_limit_Hz must be finite and positive.")
+
+        indices = np.flatnonzero(self.freqs >= limit)
+        if len(indices) == 0:
+            end = len(self.freqs)
+        else:
+            end = int(indices[0]) + 1
+        if end < 2:
+            raise ValueError(
+                "frequency_limit_Hz must retain at least two measured frequency points."
+            )
+
+        network = self._network_from_smatrix(
+            self.freqs[:end],
+            self.sdd[:end],
+            z0=self.network.z0[:end],
+        )
+        return type(self)(
+            network,
+            source_type=self.source_type,
+            port_order=self.port_order,
+        )
+
     def write_touchstone_s2p(
         self,
         path: str | Path,
@@ -1421,6 +1521,8 @@ class SparamModel:
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
         dc: Literal['error', 'hold', 'skrf'] = 'error',
+        *,
+        out_of_measured: Literal['cosine_decay', 'zero_padding'] = 'cosine_decay',
     ) -> 'LinkSegment':
         """
         Build a scalar LinkSegment from the terminated voltage transfer H21(f).
@@ -1429,8 +1531,8 @@ class SparamModel:
         - self remains in its current S-parameter domain grid, normally the
           aligned measured-domain grid used by COM path construction.
         - H21(f) is computed on that S-parameter grid first.
-        - LinkSegment.from_tf() then owns scalar transfer-function resampling
-          and high-frequency extension to cfg.f_nyq.
+        - LinkSegment.from_tf() owns scalar transfer-function resampling and
+          the selected out-of-measured-band extension to cfg.f_nyq.
 
         Flow:
         1. compute H21(f) with impedance mismatch using Eq. 93A-18 on self.freqs
@@ -1442,6 +1544,12 @@ class SparamModel:
             raise ValueError('dc must be error, hold, or skrf.')
         model = self.extrapolated_to_dc() if dc == 'skrf' and not np.isclose(self.freqs[0], 0.0) else self
         H21 = model.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
-        return LinkSegment.from_tf(model.freqs, H21, cfg, dc='hold' if dc == 'hold' else 'error')
+        return LinkSegment.from_tf(
+            model.freqs,
+            H21,
+            cfg,
+            dc='hold' if dc == 'hold' else 'error',
+            out_of_measured=out_of_measured,
+        )
 
 __all__ = ["SparamModel", "SparamProcessor"]

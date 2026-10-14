@@ -10,12 +10,12 @@ from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
 from ..models.com_model_93A import (
     COM,
     COMConfig,
-    COMReport,
     COMSearchCandidate,
     COMSearchConfig,
     COMSearchRow,
     COMSearchStatus,
 )
+from ..reporting.com_report_93A import COMReport
 
 if TYPE_CHECKING:
     from ..models.com_model_93A import COMStatus
@@ -184,10 +184,10 @@ def finalize_search(
     )
 
     cfg.export(str(artifacts.root))
-    status.export(str(artifacts.root), include_plots=False)
+    status.export(str(artifacts.root))
     best_status.export_report_summary(str(artifacts.root / "best"))
     if include_plots:
-        COMReport(cfg, status).plot_search_run(str(artifacts.root / "plots"))
+        COMReport(cfg, status).export_search_run(artifacts.root)
 
     final_rows = []
     for row in successful[:search.keep_top_n]:

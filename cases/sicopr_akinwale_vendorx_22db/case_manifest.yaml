@@ -1,0 +1,27 @@
+case_id: sicopr_akinwale_vendorx_22db
+purpose: 178A project-config conversion of the SiCoPR public Akinwale VendorX COM example; with-crosstalk benchmark condition.
+models:
+  - 178A
+configs:
+  178A: 178A/config.xlsx
+channel_authority:
+  178A: 178A/config.xlsx#channels
+results:
+  178A: 178A/results
+reference_data:
+  channel_set: reference_data/COM_channel_data/CR/akinwale_3dj_02_2311
+  reference_results: reference_data/COM_channel_data/CR/akinwale_3dj_02_2311/reference_results/sicopr
+  example_id: akinwale_CR_22dB_VendorX
+  benchmark_condition: with_crosstalk
+  expected_COM_dB:
+    SiCoPR: 2.8958986848732575
+    COM_Octave: 2.8958986848732593
+config_validation:
+  178A: valid_with_manual_unverified_endpoint_gammas
+adhoc_config:
+  source_id: sicopr
+  format_id: ieee8023dj_com_adhoc/d3p2/200g_cakr_178/v1
+  source_batch: sicopr_f58a1e9_2026-10-04
+  match_status: exact
+  workbook: reference_data/COM_adhoc_config/sicopr/config_com_dj_200G_CAKR_178_PKGA_06_2_2025__Case1.xlsx
+  repository_commit: f58a1e913c6b74b1b069d6c3759acd8992b7aede

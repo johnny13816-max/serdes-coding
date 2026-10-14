@@ -1,3 +1,5 @@
+> **Status: planning.** Items here are proposals or deferred work, not implemented behavior.
+
 # SerDes Coding Todo / Future Ideas
 
 ## 目的
@@ -24,6 +26,7 @@
    - 需要包含 config snapshot、paths、DFE、imp、PMF、COM、debug plots。
 
 3. Excel input contract
+   - 進行中：已建立 labelled Ad Hoc parser registry、178A D3p2 CAKR source snapshot、conversion draft 與人工覆寫 GUI。
    - 完成 project-owned template 的 mapping validation。
    - 確認 PyChOpMarg/PyCOM reference config 是否正確 mapping 到目前 template。
    - 前處理 adapter 不放入 COM algorithm core。
@@ -39,9 +42,9 @@
    - 再移出 smoke test。
    - 最後才拆 config/status/formula。
 
-5. Project template update
-   - `templates/` 目前仍是舊版 config workbook 格式，暫標記為待更新。
-   - 更新前不可視為現行 `config_93A.xlsx` / `config_178A.xlsx` 的正式模板。
+5. Project template creation
+   - 未來通過現行 loader 與 schema 檢查的模板放在 `cases/_templates/<model>/config.xlsx`。
+   - 正式模板建立前不保留舊版、不可執行或空的 placeholder workbook。
 
 ## COM / 93A Core
 
@@ -185,3 +188,18 @@ Keep the current production workflow (branch + case_id). Defer this design until
 - Allow explicit EXEC_POLICY overrides for single_run/search_sweep/search_final; save original, overrides and resolved settings with code version and input hashes.
 - Validate reuse against fixed config, channels, candidate grid, search_sweep policy and changes to the computation. Report-only changes can reuse partial results when compatible; equation changes may invalidate them.
 - Execution-stage selection is orchestration, not another RUN_MODE. Search ranges remain workbook-owned; fixed_config.policy remains the consistent model-treatment boundary.
+
+## Deferred: immutable runtime configuration
+
+Keep runtime configuration mutability consistent with the current project while
+the Hansel/SiCoPR reference alignment is in progress. Do not freeze individual
+config dataclasses as an incidental part of another config or model correction.
+
+- Audit every post-construction config mutation, including manual-entry
+  execution-policy overrides and derived-value initialization.
+- Define whether immutability applies to the top-level `COMConfig`, every nested
+  config object, and mutable array fields.
+- Replace intentional mutations with construction-time normalization or
+  `dataclasses.replace()` that returns a new complete runtime config.
+- Introduce the change for 93A and 178A together under a dedicated contract,
+  with single-run and search-run compatibility tests.

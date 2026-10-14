@@ -1,0 +1,36 @@
+{
+  "source_id": "sicopr",
+  "format_id": "ieee8023dj_com_adhoc/d3p2/200g_cakr_178/v1",
+  "display_name": "IEEE 802.3dj D3p2 200G CAKR 178 workbook",
+  "parser_revision": 1,
+  "parser_selection": "automatic",
+  "detection_status": "exact",
+  "source_path": "C:\\Users\\johnn\\Documents\\Serdes-learn\\serdes-coding\\reference_data\\COM_adhoc_config\\sicopr\\config_com_dj_200G_CAKR_178_PKGA_06_2_2025__Case1.xlsx",
+  "source_sha256": "47d3fafde9bfbc585372fe13ec3b39b9ae3eb8ea211ab603159cff77dacd38e0",
+  "target_version": "178A",
+  "base_project_path": "C:\\Users\\johnn\\Documents\\Serdes-learn\\serdes-coding\\cases\\_templates\\178A\\config.xlsx",
+  "output_path": "C:\\Users\\johnn\\Documents\\Serdes-learn\\serdes-coding\\cases\\sicopr_akinwale_vendorx_22db\\178A\\config.xlsx",
+  "status_counts": {
+    "override": 23,
+    "exact": 50,
+    "converted": 72,
+    "fallback": 33,
+    "derived": 10,
+    "empty": 1
+  },
+  "package_selection": 1,
+  "tx_profile": "PKG_LowR_CLASSA",
+  "rx_profile": "PKG_LowR_CLASSA",
+  "source_issues": [],
+  "last_project_edit": {
+    "operation": "tc007_rx_ffe_tap_layout_mapping",
+    "target_version": "178A",
+    "changed_fields": {
+      "d_w": 6,
+      "N_fix": 15,
+      "N_max": 87
+    },
+    "source_contract": "TC-007",
+    "scope": "fixed_config only"
+  }
+}

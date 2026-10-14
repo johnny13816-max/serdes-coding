@@ -16,6 +16,26 @@ from ..models.com_model_178A import (
 )
 from ..utilities.pmf import Pmf1D
 from ..utilities.link import SampledResponse
+from .com_report_common import (
+    ReportFigureTools,
+    plot_ct_pulse_and_samples,
+    plot_combined_pmf_cdf,
+    plot_discrete_sequence,
+    plot_equalizer_coefficients,
+    plot_impairment_bars,
+    plot_link_ir,
+    plot_link_sr,
+    plot_link_tf,
+    plot_path_h21_overview,
+    plot_path_il_overview,
+    plot_path_pulse_overview,
+    plot_path_sbr_overview,
+    plot_pmf_component,
+    plot_pmf_components,
+    plot_sparam_il,
+    plot_sparam_sdd,
+    write_plot_manifest,
+)
 
 
 class COMReport178A:
@@ -29,24 +49,20 @@ class COMReport178A:
 
     def __init__(self, cfg: COMConfig, status: COMStatus):
         self.cfg = cfg
-        self.status = status
+        is_search = all(hasattr(status, name) for name in ("best", "best_row", "rows"))
+        self.search_status = status if is_search else None
+        self.status = status.best if is_search else status
 
     # ------------------------------------------------------------------
     # Shared plot helpers
     # ------------------------------------------------------------------
     @staticmethod
     def _plt() -> Any:
-        import matplotlib.pyplot as plt
-
-        return plt
+        return ReportFigureTools.pyplot()
 
     @staticmethod
     def _save_path(directory: str | Path, filename: str) -> str:
-        if not directory:
-            return ""
-        path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path / filename)
+        return ReportFigureTools.output_path(directory, filename)
 
     def _subplots(
         self,
@@ -56,26 +72,10 @@ class COMReport178A:
         **kwargs: Any,
     ) -> tuple[Any, Any, str]:
         """Create a report figure without changing the caller's pyplot backend."""
-        output_path = self._save_path(directory, filename)
-        if output_path:
-            from matplotlib.backends.backend_agg import FigureCanvasAgg
-            from matplotlib.figure import Figure
-
-            figsize = kwargs.pop("figsize", None)
-            fig = Figure(figsize=figsize)
-            FigureCanvasAgg(fig)
-            axes = fig.subplots(*args, **kwargs)
-            return fig, axes, output_path
-        fig, axes = self._plt().subplots(*args, **kwargs)
-        return fig, axes, output_path
+        return ReportFigureTools.subplots_in(directory, filename, *args, **kwargs)
 
     def _finish(self, fig: Any, output_path: str) -> None:
-        fig.tight_layout()
-        if output_path:
-            fig.savefig(output_path, bbox_inches="tight")
-        else:
-            fig.canvas.draw_idle()
-            self._plt().show()
+        ReportFigureTools.finish(fig, output_path)
 
     def _config_note(self) -> str:
         return (
@@ -89,12 +89,14 @@ class COMReport178A:
         pmf = adc.p_s or adc.p_sn or adc.p_n or adc.p_ga
         if pmf is None:
             return
-        keep_mass = (
+        self._annotate_pmf_settings(ax, pmf, keep_mass=self._pmf_keep_mass())
+
+    def _pmf_keep_mass(self) -> float:
+        return float(
             self.status.run.pmf_keep_mass
             if self.status.run is not None and self.status.run.pmf_keep_mass is not None
             else 1 - 1e-5
         )
-        self._annotate_pmf_settings(ax, pmf, keep_mass=keep_mass)
 
     def _annotate_pmf_settings(
         self,
@@ -104,39 +106,16 @@ class COMReport178A:
         keep_mass: float = 1.0,
     ) -> None:
         """Annotate a PMF plot with its resolved amplitude-grid settings."""
-        keep_mass = float(keep_mass)
-        missing_mass = max(0.0, 1.0 - keep_mass)
-        if missing_mass > 0.0:
-            exponent = int(round(np.log10(missing_mass)))
-            keep_text = f"1-1e{exponent}"
-        else:
-            keep_text = "1"
-        ax.text(
-            0.01,
-            0.02,
-            f"dy={pmf.dx:.3e} V, keep_mass={keep_text}",
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=8,
-            bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.6", "pad": 2.0},
-        )
+        ReportFigureTools.annotate_pmf_settings(ax, pmf, keep_mass)
 
     @staticmethod
     def _pmf_moments(pmf: Any) -> tuple[float, float]:
-        x = np.asarray(pmf.x, dtype=float)
-        mass = np.asarray(pmf.pmf, dtype=float)
-        mu = float(np.sum(x * mass))
-        variance = float(np.sum((x - mu) ** 2 * mass))
-        return mu, float(np.sqrt(max(0.0, variance)))
+        return ReportFigureTools.pmf_moments(pmf)
 
     @staticmethod
     def _relative_gain_db(segment: Any, frequency_hz: float) -> Optional[float]:
         """Return transfer-function gain relative to DC, or None if unavailable."""
-        if frequency_hz < float(segment.freqs[0]) or frequency_hz > float(segment.freqs[-1]):
-            return None
-        magnitude_db = 20.0 * np.log10(np.maximum(np.abs(segment.tf), np.finfo(float).tiny))
-        return float(np.interp(frequency_hz, segment.freqs, magnitude_db - magnitude_db[0]))
+        return ReportFigureTools.relative_gain_db(segment, frequency_hz)
 
     def _il_at_f_nyq(self, model: Any) -> Optional[float]:
         frequency_hz = self.cfg.link.fb / 2.0
@@ -151,114 +130,21 @@ class COMReport178A:
             return "IL @ f_nyq = outside measured band"
         return f"IL @ f_nyq = {value:.2f} dB"
 
-    def _annotate_step_transition(self, ax: Any, segment: Any) -> None:
-        """Mark the measured 20%-80% transition interval on a step plot."""
-        sr = np.asarray(segment.sr, dtype=float)
-        main_index = int(np.argmax(np.abs(segment.ir)))
-        x_ui = (np.asarray(segment.times) - segment.times[main_index]) * self.cfg.link.fb
-        y0 = float(np.nanmin(sr))
-        y1 = float(np.nanmax(sr))
-        span = y1 - y0
-        if not np.isfinite(span) or span <= 0.0:
-            return
-
-        def crossing(level: float) -> Optional[float]:
-            indices = np.flatnonzero(sr >= level)
-            if indices.size == 0:
-                return None
-            index = int(indices[0])
-            if index == 0:
-                return float(x_ui[0])
-            x0, x1 = float(x_ui[index - 1]), float(x_ui[index])
-            v0, v1 = float(sr[index - 1]), float(sr[index])
-            if np.isclose(v0, v1):
-                return x1
-            return x0 + (level - v0) * (x1 - x0) / (v1 - v0)
-
-        y20 = y0 + 0.2 * span
-        y80 = y0 + 0.8 * span
-        x20 = crossing(y20)
-        x80 = crossing(y80)
-        if x20 is None or x80 is None:
-            return
-        ax.axhline(y20, linestyle=":", color="tab:gray", linewidth=1.0)
-        ax.axhline(y80, linestyle=":", color="tab:gray", linewidth=1.0)
-        ax.axvline(x20, linestyle="--", color="tab:red", linewidth=1.0)
-        ax.axvline(x80, linestyle="--", color="tab:red", linewidth=1.0)
-        ax.annotate(
-            f"20%-80% = {x80 - x20:.3g} UI",
-            xy=((x20 + x80) / 2.0, y80),
-            xytext=(8, 8),
-            textcoords="offset points",
-            color="tab:red",
-            fontsize=9,
-        )
-
     def _annotate_config(self, ax: Any) -> None:
-        ax.text(
-            0.01,
-            0.01,
-            self._config_note(),
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=8,
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.8},
-        )
+        ReportFigureTools.annotate_config(ax, self.cfg)
 
     def _annotate_imp_config(self, ax: Any) -> None:
         """Annotate impairment plots with the physical impairment inputs."""
-        imp = self.cfg.imp
-        lines = [
-            f"R_LM={imp.R_LM:.4g}",
-            f"SNR_TX={imp.SNR_TX:.3g} dB",
-            f"sigma_RJ={imp.sigma_RJ:.3e} UI",
-            f"A_DD={imp.A_DD:.3e} UI",
-            f"eta_0={imp.eta_0:.3e} V^2/Hz",
-        ]
-        if imp.N_qb is not None:
-            lines.append(f"N_qb={imp.N_qb}")
-        if imp.P_qc is not None:
-            lines.append(f"P_qc={imp.P_qc:.3e}")
-        ax.text(
-            0.01,
-            0.99,
-            "\n".join(lines),
-            transform=ax.transAxes,
-            ha="left",
-            va="top",
-            fontsize=8,
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85},
-        )
+        ReportFigureTools.annotate_impairment(ax, self.cfg)
 
     def _title(self, ax: Any, title: str, subtitle: str = "") -> None:
-        ax.set_title(title, fontsize=14, pad=20 if subtitle else 8)
-        if subtitle:
-            ax.text(
-                0.5,
-                1.01,
-                subtitle,
-                transform=ax.transAxes,
-                ha="center",
-                va="bottom",
-                fontsize=9,
-                color="0.3",
-            )
+        ReportFigureTools.title(ax, title, subtitle)
 
     def _path_directory(self, root: str | Path, path_idx: int) -> str:
-        if not root:
-            return ""
-        path = self.status.paths[path_idx]
-        name = "path_victim" if path_idx == 0 and path.kind == "victim" else f"path_{path_idx:02d}_{path.kind}"
-        return str(Path(root) / name)
+        return ReportFigureTools.path_directory(root, path_idx, self.status.paths[path_idx])
 
     def _frequency_xlim(self, freqs: np.ndarray) -> tuple[float, float]:
-        positive = np.asarray(freqs, dtype=float)
-        positive = positive[positive > 0.0]
-        if positive.size == 0:
-            raise ValueError("Frequency axis must contain a positive bin for log-scale plots.")
-        hi = min(float(freqs[-1]), 1.1 * float(self.cfg.link.fb))
-        return (float(positive[0]), hi)
+        return ReportFigureTools.frequency_xlim(freqs, self.cfg.link.fb)
 
     @staticmethod
     def _available(stage: Optional[COMImpStageStatus]) -> bool:
@@ -267,6 +153,23 @@ class COMReport178A:
     # ------------------------------------------------------------------
     # build_all_paths: COMPath
     # ------------------------------------------------------------------
+    def plot_overview(self, save_path: str | Path = "") -> dict[str, str]:
+        """Plot the version-neutral path overview shared with the 93A report."""
+        outputs: dict[str, str] = {}
+        _, outputs["path_pulses"] = plot_path_pulse_overview(
+            self.cfg, self.status.paths, save_path
+        )
+        _, outputs["path_sbr"] = plot_path_sbr_overview(
+            self.cfg, self.status.paths, save_path
+        )
+        _, outputs["path_S_all_IL"] = plot_path_il_overview(
+            self.cfg, self.status.paths, save_path
+        )
+        _, outputs["path_H21_tf"] = plot_path_h21_overview(
+            self.cfg, self.status.paths, save_path
+        )
+        return outputs
+
     def plot_path(self, path_idx: int = 0, save_path: str | Path = "") -> dict[str, str]:
         """Plot S-parameter, continuous-time response, and pulse fields of one COMPath."""
         if path_idx < 0 or path_idx >= len(self.status.paths):
@@ -283,30 +186,26 @@ class COMReport178A:
             ("S_rx", path.S_rx, "RX package Sdd"),
             ("S_all", path.S_all, "Cascaded Sdd path"),
         ):
-            fig, ax, output = self._subplots(out_dir, f"{field_name}_sdd.png")
-            model.plot_sdd(ax=ax, logx=True, xlim=self._frequency_xlim(model.freqs))
-            self._title(ax, f"{label} {field_name}", subtitle)
-            self._annotate_config(ax)
-            self._finish(fig, output)
+            _, output = plot_sparam_sdd(
+                self.cfg,
+                model,
+                out_dir,
+                filename=f"{field_name}_sdd.png",
+                title=f"{label} {field_name}",
+                subtitle=subtitle,
+                annotate_nyq=field_name in {"S_ch", "S_all"},
+            )
             outputs[field_name] = output
 
         for field_name, model in (("S_ch", path.S_ch), ("S_all", path.S_all)):
-            fig, ax, output = self._subplots(out_dir, f"{field_name}_IL.png")
-            f_nyq = self.cfg.link.fb / 2.0
-            model.plot_IL(
-                ax=ax,
-                logx=True,
-                xlim=self._frequency_xlim(model.freqs),
+            _, output = plot_sparam_il(
+                self.cfg,
+                model,
+                out_dir,
+                filename=f"{field_name}_IL.png",
+                title=f"{label} {field_name} IL",
+                subtitle=f"Sdd21 insertion loss; {self._il_f_nyq_subtitle(model)}",
             )
-            if model.freqs[0] <= f_nyq <= model.freqs[-1]:
-                model.annotate_IL(ax, f_nyq, label="IL")
-            self._title(
-                ax,
-                f"{label} {field_name} IL",
-                f"Sdd21 insertion loss; {self._il_f_nyq_subtitle(model)}",
-            )
-            self._annotate_config(ax)
-            self._finish(fig, output)
             outputs[f"{field_name}_IL"] = output
 
         g_1 = self.cfg.filter.g_1
@@ -343,17 +242,6 @@ class COMReport178A:
             ("H_ctf", path.H_ctf),
             ("H_all", path.H_all),
         ):
-            fig, ax, output = self._subplots(out_dir, f"{field_name}_tf.png")
-            xlim = self._frequency_xlim(segment.freqs)
-            segment.plot_tf(
-                ax=ax,
-                x_scale="log",
-                xlim=xlim,
-            )
-            if field_name == "H_r":
-                f_r = self.cfg.filter.fr
-                if f_r is not None and segment.freqs[0] <= f_r <= segment.freqs[-1]:
-                    segment.annotate_f(ax, f_r)
             if field_name == "H_all":
                 il_nyq = self._relative_gain_db(segment, self.cfg.link.fb / 2.0)
                 filter_subtitles[field_name] = (
@@ -364,14 +252,17 @@ class COMReport178A:
                         else "IL @ f_nyq = outside measured band"
                     )
                 )
-            if field_name in {"H_21", "H_all"}:
-                f_nyq = self.cfg.link.fb / 2.0
-                if segment.freqs[0] <= f_nyq <= segment.freqs[-1]:
-                    segment.annotate_f(ax, f_nyq)
-            self._title(ax, f"{label} {field_name}", filter_subtitles[field_name])
-            if field_name != "H_ctf":
-                self._annotate_config(ax)
-            self._finish(fig, output)
+            _, output = plot_link_tf(
+                self.cfg,
+                segment,
+                out_dir,
+                filename=f"{field_name}_tf.png",
+                title=f"{label} {field_name}",
+                subtitle=filter_subtitles[field_name],
+                annotate_3db=field_name == "H_r",
+                annotate_nyq=field_name in {"H_t", "H_21", "H_r", "H_all"},
+                annotate_config=True,
+            )
             outputs[field_name] = output
 
         for field_name, segment, xlim in (
@@ -379,17 +270,27 @@ class COMReport178A:
             ("H_21_ir", path.H_21, (-5.0, 20.0)),
             ("pulse_ir", path.pulse, (-5.0, 20.0)),
         ):
-            fig, ax, output = self._subplots(out_dir, f"{field_name}.png")
             if field_name == "H_t_sr":
-                segment.plot_sr(ax=ax, x_unit="ui", x_origin="max", xlim_ui=xlim)
-                self._annotate_step_transition(ax, segment)
                 subtitle = f"Tr={self.cfg.filter.Tr * 1e12:.4g} ps (20%-80%)"
+                _, output = plot_link_sr(
+                    self.cfg,
+                    segment,
+                    out_dir,
+                    filename=f"{field_name}.png",
+                    title=f"{label} {field_name}",
+                    subtitle=subtitle,
+                    xlim_ui=xlim,
+                    annotate_20_80=True,
+                )
             else:
-                segment.plot_ir(ax=ax, x_unit="ui", x_origin="max", xlim_ui=xlim)
-                subtitle = ""
-            self._title(ax, f"{label} {field_name}", subtitle)
-            self._annotate_config(ax)
-            self._finish(fig, output)
+                _, output = plot_link_ir(
+                    self.cfg,
+                    segment,
+                    out_dir,
+                    filename=f"{field_name}.png",
+                    title=f"{label} {field_name}",
+                    xlim_ui=xlim,
+                )
             outputs[field_name] = output
 
         return outputs
@@ -402,7 +303,7 @@ class COMReport178A:
         if self.status.dte is None or self.status.run is None:
             raise ValueError("COMStatus.run and COMStatus.dte are required for DTE reporting.")
         dte = self.status.dte
-        out_dir = str(Path(save_path) / "phase_dte") if save_path else ""
+        out_dir = str(Path(save_path) / "equalization") if save_path else ""
         outputs: dict[str, str] = {}
 
         fig, ax, output = self._subplots(out_dir, "mse_by_pos.png")
@@ -471,6 +372,16 @@ class COMReport178A:
                     reference_index=int(dte.d) - int(self.cfg.dte.d_w),
                 )
 
+        if eq_ch is not None and eq_ch.h_ISI is not None:
+            outputs["h_ISI"] = self._plot_sequence(
+                eq_ch.h_ISI.ir if isinstance(eq_ch.h_ISI, SampledResponse) else eq_ch.h_ISI,
+                out_dir,
+                "h_ISI.png",
+                "Residual ISI Samples",
+                "h_ISI (V)",
+                reference_index=int(dte.d),
+            )
+
         outputs["coefficients"] = self._plot_dte_coefficients(dte, out_dir)
         outputs["mmse_matrices"] = self._plot_dte_matrices(dte, out_dir)
         return outputs
@@ -483,43 +394,16 @@ class COMReport178A:
         directory: str,
     ) -> str:
         """Overlay the CT pulse and selected DT samples on one time frame."""
-        pulse_ir = np.asarray(pulse_ir, dtype=float)
-        h_dsamp = np.asarray(h_dsamp, dtype=float)
-        per_ui = int(self.cfg.link.per_ui)
-        pulse_index = np.arange(len(pulse_ir), dtype=float)
-        dt_index = np.arange(len(h_dsamp), dtype=float) * per_ui + float(dte.pos)
-        x_pulse = (pulse_index - float(dte.ts)) / per_ui
-        x_dsamp = (dt_index - float(dte.ts)) / per_ui
-
-        fig, ax, output = self._subplots(directory, "h_dsamp.png")
-        ax.plot(x_pulse, pulse_ir, color="0.35", linewidth=1.0, label="pulse.ir (CT)")
-        markerline, stemlines, baseline = ax.stem(
-            x_dsamp,
+        _, output = plot_ct_pulse_and_samples(
+            self.cfg,
+            pulse_ir,
             h_dsamp,
-            linefmt="C0-",
-            markerfmt="C0o",
-            basefmt=" ",
-            label="h_dsamp (DT)",
+            selected_pos=dte.pos,
+            selected_ts=dte.ts,
+            root=directory,
+            subtitle="DT samples are selected at the swept phase positions",
+            shade_phase_interval=True,
         )
-        stemlines.set_alpha(0.8)
-
-        phase_offsets = (np.arange(per_ui, dtype=float) - float(dte.pos)) / per_ui
-        ax.axvspan(
-            float(np.min(phase_offsets)),
-            float(np.max(phase_offsets)),
-            color="tab:orange",
-            alpha=0.12,
-            label="candidate pos main-cursor interval",
-        )
-        ax.axvline(0.0, color="tab:green", linestyle="--", linewidth=1.0, label=f"selected pos={dte.pos}")
-        ax.set_xlabel("Time (UI, selected ts = 0)")
-        ax.set_ylabel("Amplitude (V)")
-        ax.set_xlim(-5.0, 20.0)
-        ax.grid(True)
-        ax.legend()
-        self._title(ax, "CT Pulse and Selected DT Response", "DT samples are selected at the swept phase positions")
-        self._annotate_config(ax)
-        self._finish(fig, output)
         return output
 
     def _plot_dte_coefficients(self, dte: COMDTEStatus, directory: str) -> dict[str, str]:
@@ -537,18 +421,16 @@ class COMReport178A:
 
         # DFE feedback is subtracted from the sampled response. Plot -b so both
         # families use the equalized-pulse sign convention.
-        fig, ax, output = self._subplots(directory, "dte_coefficients.png", figsize=(9, 4))
-        ax.stem(w_index, w_lim, linefmt="C0-", markerfmt="C0o", basefmt=" ", label="FFE w_lim")
+        series = [("FFE w_lim", w_index, w_lim)]
         if len(dte.b_lim):
-            ax.stem(b_index, -dte.b_lim, linefmt="C1-", markerfmt="C1s", basefmt=" ", label="DFE -b_lim")
-        ax.axvline(0.0, color="tab:green", linestyle="--", linewidth=0.8, label="FFE main")
-        ax.set_xlabel("Tap index relative to FFE main cursor")
-        ax.set_ylabel("Coefficient")
-        ax.grid(True)
-        ax.legend()
-        self._title(ax, "Limited FFE and DFE Coefficients", "DFE is shown with feedback subtraction sign")
-        self._annotate_config(ax)
-        self._finish(fig, output)
+            series.append(("DFE -b_lim", b_index, -np.asarray(dte.b_lim, dtype=float)))
+        _, output = plot_equalizer_coefficients(
+            self.cfg,
+            series,
+            directory,
+            title="178A Equalizer Coefficients",
+            subtitle="Limited FFE and DFE; DFE uses feedback subtraction sign",
+        )
         outputs["combined"] = output
 
         fig, ax, output = self._subplots(directory, "unlimited_dte_coefficients.png", figsize=(9, 4))
@@ -650,13 +532,23 @@ class COMReport178A:
         """Plot all available pre-DTE PSD, equivalent-channel, and ADC-PMF fields."""
         if self.status.imp is None or self.status.imp.pre_dte is None:
             raise ValueError("COMStatus.imp.pre_dte is not available.")
-        return self._plot_imp_stage(self.status.imp.pre_dte, "imp_pre_dte", save_path, pre_dte=True)
+        return self._plot_imp_stage(
+            self.status.imp.pre_dte,
+            "impairment/pre_dte",
+            save_path,
+            pre_dte=True,
+        )
 
     def plot_post_ffe_imp(self, save_path: str | Path = "") -> dict[str, str]:
         """Plot all available post-FFE PSD, equivalent-channel, and ADC-PMF fields."""
         if self.status.imp is None or self.status.imp.post_ffe is None:
             raise ValueError("COMStatus.imp.post_ffe is not available.")
-        return self._plot_imp_stage(self.status.imp.post_ffe, "imp_post_ffe", save_path, pre_dte=False)
+        return self._plot_imp_stage(
+            self.status.imp.post_ffe,
+            "impairment/final",
+            save_path,
+            pre_dte=False,
+        )
 
     def _plot_imp_stage(
         self,
@@ -668,18 +560,31 @@ class COMReport178A:
     ) -> dict[str, str]:
         directory = str(Path(root) / directory_name) if root else ""
         outputs: dict[str, str] = {}
+        stage_title = "178A Pre-DTE" if pre_dte else "178A Final"
 
         if stage.psd is not None:
             names = ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total")
             psd_values = [(name, getattr(stage.psd, name)) for name in names if getattr(stage.psd, name) is not None]
             if psd_values:
-                outputs["psd"] = self._plot_psd_group(psd_values, directory, "psd_components.png", f"{directory_name} PSD")
+                outputs["psd"] = self._plot_psd_group(
+                    psd_values,
+                    directory,
+                    "psd_components.png",
+                    f"{stage_title} PSD",
+                )
 
-        outputs["imp_proportion"] = self._plot_imp_proportion(stage, directory, directory_name, pre_dte=pre_dte)
+        outputs.update(
+            self._plot_imp_proportion(
+                stage,
+                directory,
+                stage_title,
+                pre_dte=pre_dte,
+            )
+        )
 
         eq = self.status.imp.eq_ch if self.status.imp is not None else None
         if eq is not None:
-            primary = [("h_dsamp", eq.h_dsamp), ("h_tn", eq.h_tn), ("h_J", eq.h_J)] if pre_dte else [("h_w", eq.h_w), ("h_ISI", eq.h_ISI), ("h_w_J", eq.h_w_J)]
+            primary = [("h_dsamp", eq.h_dsamp), ("h_tn", eq.h_tn), ("h_J", eq.h_J)] if pre_dte else [("h_w", eq.h_w), ("h_w_J", eq.h_w_J)]
             reference_index = (
                 int(self.status.dte.d) - int(self.cfg.dte.d_w)
                 if pre_dte and self.status.dte is not None
@@ -718,8 +623,8 @@ class COMReport178A:
         stage_name: str,
         *,
         pre_dte: bool,
-    ) -> str:
-        """Plot impairment variance contributions for one processing stage."""
+    ) -> dict[str, str]:
+        """Plot impairment RMS and variance contributions for one processing stage."""
         contributions: list[tuple[str, float]] = []
         if pre_dte and stage.psd is not None:
             for name, label in (
@@ -750,30 +655,18 @@ class COMReport178A:
                     contributions.append((label, float(value)))
 
         contributions = [(label, sigma) for label, sigma in contributions if np.isfinite(sigma) and sigma >= 0.0]
-        if not contributions or not any(sigma > 0.0 for _, sigma in contributions):
-            return ""
+        if not contributions:
+            return {}
 
         labels = [label for label, _ in contributions]
-        variance = np.asarray([sigma**2 for _, sigma in contributions], dtype=float)
-        percentages = 100.0 * variance / np.sum(variance)
-        fig, ax, output = self._subplots(directory, "imp_proportion.png", figsize=(7, 4))
-        bars = ax.bar(labels, percentages, color="tab:blue")
-        for bar, percentage in zip(bars, percentages):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                bar.get_height(),
-                f"{percentage:.1f}%",
-                ha="center",
-                va="bottom",
-                fontsize=9,
-            )
-        ax.set_ylabel("Variance contribution (%)")
-        ax.set_ylim(0.0, max(100.0, float(np.max(percentages)) * 1.18))
-        ax.grid(axis="y", alpha=0.35)
-        self._title(ax, f"{stage_name} Impairment Proportion", "Percentage of total impairment variance")
-        self._annotate_imp_config(ax)
-        self._finish(fig, output)
-        return output
+        sigma = [sigma for _, sigma in contributions]
+        return plot_impairment_bars(
+            self.cfg,
+            labels,
+            sigma,
+            directory,
+            title_prefix=stage_name,
+        )
 
     def _plot_psd_group(self, psds: list[tuple[str, Any]], directory: str, filename: str, title: str) -> str:
         fig, ax, output = self._subplots(directory, filename)
@@ -805,19 +698,15 @@ class COMReport178A:
         *,
         reference_index: Optional[int] = None,
     ) -> str:
-        values = np.asarray(values, dtype=float)
-        reference = int(np.argmax(np.abs(values))) if reference_index is None else int(reference_index)
-        x = (np.arange(len(values)) - reference).astype(float)
-        fig, ax, output = self._subplots(directory, filename)
-        ax.stem(x, values, basefmt=" ")
-        ax.axvline(0.0, color="tab:green", linestyle="--", linewidth=0.8)
-        ax.set_xlabel("Discrete time (UI, selected victim cursor = 0)")
-        ax.set_ylabel(ylabel)
-        ax.set_xlim(-5.0, 20.0)
-        ax.grid(True)
-        self._title(ax, title)
-        self._annotate_config(ax)
-        self._finish(fig, output)
+        _, output = plot_discrete_sequence(
+            self.cfg,
+            values,
+            directory,
+            filename=filename,
+            title=title,
+            ylabel=ylabel,
+            reference_index=reference_index,
+        )
         return output
 
     def _plot_sequence_group(
@@ -925,77 +814,34 @@ class COMReport178A:
         ]
 
         for name, pmf in components:
-            fig, ax, output = self._subplots(directory, f"{name}.png")
-            pmf.plot(ax=ax, label=name)
-            mu, std = self._pmf_moments(pmf)
-            self._title(ax, name, f"mu={mu:.3e} V, std={std:.3e} V")
-            self._annotate_pmf_settings(ax, pmf)
-            self._finish(fig, output)
+            _, output = plot_pmf_component(
+                pmf,
+                name,
+                directory,
+                keep_mass=self._pmf_keep_mass(),
+            )
             outputs[name] = output
 
-        fig, ax, output = self._subplots(directory, "pmf_components.png")
-        for name, pmf in components:
-            pmf.plot(ax=ax, label=name)
-        self._title(ax, "Final PMF Components")
-        if components:
-            self._annotate_pmf_settings(ax, components[0][1])
-        self._finish(fig, output)
+        _, output = plot_pmf_components(
+            components,
+            directory,
+            keep_mass=self._pmf_keep_mass(),
+        )
         outputs["components"] = output
 
         if pmf_status.p_combined is not None:
             total = pmf_status.p_combined
-            fig, axes, output = self._subplots(directory, "combined_cdf.png", 2, 1, figsize=(7, 7), sharex=True)
-            pdf_ax, cdf_ax = axes
-            total.plot(ax=pdf_ax, label="p_total")
-            total.plot(ax=cdf_ax, quantity="cdf", label="CDF(p_total)")
-
-            der0 = float(self.cfg.DER_0)
-            y0 = float(total.quantile(der0))
-            p_total_y0 = float(np.interp(y0, total.x, total.pmf))
-            for axis in axes:
-                axis.axvline(y0, color="tab:red", linestyle="--", linewidth=1.0)
-
-            pdf_ax.scatter([y0], [p_total_y0], color="tab:red", zorder=3)
-            pdf_ax.annotate(
-                f"A_ni={abs(y0):.3e} V",
-                xy=(y0, p_total_y0),
-                xytext=(8, 8),
-                textcoords="offset points",
-                color="tab:red",
-                fontsize=8,
+            if pmf_status.y0 is None or pmf_status.A_ni is None:
+                raise ValueError("Combined PMF reporting requires stored y0 and A_ni.")
+            _, output = plot_combined_pmf_cdf(
+                total,
+                directory,
+                der0=self.cfg.DER_0,
+                y0=pmf_status.y0,
+                a_ni=pmf_status.A_ni,
+                com_value=pmf_status.COM,
+                keep_mass=self._pmf_keep_mass(),
             )
-            cdf_ax.scatter([y0], [der0], color="tab:red", zorder=3)
-            cdf_ax.annotate(
-                f"DER_0={der0:.3e}\nA_ni={abs(y0):.3e} V",
-                xy=(y0, der0),
-                xytext=(8, 8),
-                textcoords="offset points",
-                color="tab:red",
-                fontsize=8,
-            )
-            if pmf_status.y0 is not None:
-                cdf_ax.axhline(der0, color="tab:red", linestyle=":", linewidth=0.8)
-            cdf_values = np.asarray(total.cdf, dtype=float)
-            positive_cdf = cdf_values[np.isfinite(cdf_values) & (cdf_values > 0.0)]
-            cdf_ax.set_yscale("log")
-            cdf_lower = max(
-                1.0e-12,
-                float(np.min(positive_cdf)) * 0.5 if positive_cdf.size else 1.0e-12,
-            )
-            cdf_ax.set_ylim(cdf_lower, 1.0)
-            com_text = (
-                f"COM={pmf_status.COM:.3f} dB"
-                if pmf_status.COM is not None
-                else "COM=None"
-            )
-            self._title(
-                pdf_ax,
-                "Total PMF PDF",
-                f"{com_text}, DER_0={der0:.3e}, A_ni={abs(y0):.3e} V",
-            )
-            self._title(cdf_ax, "Total PMF CDF", f"{com_text}, DER_0 threshold")
-            self._annotate_pmf_settings(cdf_ax, total)
-            self._finish(fig, output)
             outputs["combined_cdf"] = output
         return outputs
 
@@ -1169,7 +1015,10 @@ class COMReport178A:
     # ------------------------------------------------------------------
     def plot_single_run(self, save_path: str | Path = "", path_idx: int = 0) -> dict[str, Any]:
         """Export the first-pass 178A single-run report grouped by pipeline stage."""
-        outputs: dict[str, Any] = {"path": self.plot_path(path_idx, save_path)}
+        outputs: dict[str, Any] = {
+            "overview": self.plot_overview(save_path),
+            "path": self.plot_path(path_idx, save_path),
+        }
         if self.status.run is not None and self.status.dte is not None:
             outputs["phase_dte"] = self.plot_phase_dte(save_path)
         if self.status.imp is not None and self.status.imp.pre_dte is not None:
@@ -1181,6 +1030,64 @@ class COMReport178A:
         if self.status.mlsd is not None:
             outputs["mlsd"] = self.plot_mlsd(save_path)
         return outputs
+
+    def export_single_run(self, artifact_root: str | Path, path_idx: int = 0) -> dict[str, str]:
+        """Write detailed 178A plots and the shared validated plot manifest."""
+        root = Path(artifact_root)
+        plot_dir = ReportFigureTools.prepare_plot_directory(root / "plots")
+        report = self.plot_single_run(plot_dir, path_idx=path_idx)
+        manifest = write_plot_manifest(report, root)
+        return {"plots": str(plot_dir), "plot_manifest": manifest}
+
+    def plot_search_run(self, save_path: str | Path = "") -> dict[str, Any]:
+        """Plot 178A MSE search summaries and the selected candidate report."""
+        if self.search_status is None:
+            raise ValueError("COMReport178A was not initialized with a search status.")
+        directory = Path(save_path) if save_path else Path()
+        output_trace = ReportFigureTools.output_path(save_path, "search_mse_trace.png")
+        fig, ax = ReportFigureTools.subplots(output_trace)
+        ok = [row for row in self.search_status.rows if row.status == "ok"]
+        if ok:
+            ax.plot([row.idx for row in ok], [row.mse for row in ok], marker="o", linestyle="none")
+        failed = [row for row in self.search_status.rows if row.status != "ok"]
+        if failed:
+            ax.scatter([row.idx for row in failed], np.zeros(len(failed)), marker="x", color="tab:red", label="error")
+        ax.set_title("Search MSE Trace")
+        ax.set_xlabel("Candidate index")
+        ax.set_ylabel("MSE (V^2)")
+        ax.grid(True)
+        ReportFigureTools.finish(fig, output_trace)
+
+        rows = sorted(ok, key=lambda row: row.mse)[:10]
+        if not rows:
+            raise ValueError("COMSearchStatus.rows contains no successful rows.")
+        labels = [f"{row.idx}\n({row.candidate.g_DC:.1f},{row.candidate.g_DC2:.1f})" for row in rows]
+        output_top = ReportFigureTools.output_path(save_path, "search_top_candidates.png")
+        fig, ax = ReportFigureTools.subplots(output_top, figsize=(max(7, 0.7 * len(rows)), 4))
+        ax.bar(np.arange(len(rows)), [row.mse for row in rows])
+        ax.set_xticks(np.arange(len(rows)))
+        ax.set_xticklabels(labels)
+        ax.set_title("Lowest-MSE Search Candidates")
+        ax.set_xlabel("Candidate idx\n(g_1, g_2)")
+        ax.set_ylabel("MSE (V^2)")
+        ax.grid(True, axis="y")
+        ReportFigureTools.finish(fig, output_top)
+
+        best_dir = "" if not save_path else str(directory / "best")
+        best = COMReport178A(self.cfg, self.search_status.best).plot_single_run(best_dir)
+        return {
+            "search_mse_trace": output_trace,
+            "search_top_candidates": output_top,
+            "best": best,
+        }
+
+    def export_search_run(self, artifact_root: str | Path) -> dict[str, str]:
+        """Write 178A search plots and the shared validated plot manifest."""
+        root = Path(artifact_root)
+        plot_dir = ReportFigureTools.prepare_plot_directory(root / "plots")
+        report = self.plot_search_run(plot_dir)
+        manifest = write_plot_manifest(report, root)
+        return {"plots": str(plot_dir), "plot_manifest": manifest}
 
 
 __all__ = ["COMReport178A"]

@@ -87,6 +87,27 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             for name, value in saved.items():
                 setattr(post, name, value)
 
+    def test_final_adc_reference_policy_is_isolated_from_selected_mmse(self) -> None:
+        status = self.status
+        original_mse = status.dte.mse
+        original_delta = status.imp.post_ffe.adc_input.delta
+        reference_cfg = replace(
+            self.cfg,
+            policy=replace(
+                self.cfg.policy,
+                final_adc_quantization_convention="matlab_4_17_reference_only",
+            ),
+        )
+        # The reference branch is tested here for stage isolation; a coarse
+        # final grid keeps this generic integration fixture inexpensive.
+        run_cfg = replace(reference_cfg.execution.search_final, pmf_dy_override=1e-3)
+        annex = self.model.calculate_COM_DFE(status.imp, status.dte, run_cfg)
+        alternate = COM(reference_cfg).calculate_COM_DFE(status.imp, status.dte, run_cfg)
+        self.assertTrue(np.isfinite(alternate.COM))
+        self.assertNotAlmostEqual(alternate.COM, annex.COM, places=4)
+        self.assertEqual(status.dte.mse, original_mse)
+        self.assertEqual(status.imp.post_ffe.adc_input.delta, original_delta)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,8 @@ from ..models.com_model_93A import COMChannelConfig
 def _excel_sheet_names(excel_path: Path) -> set[str]:
     import pandas as pd
 
-    return set(pd.ExcelFile(excel_path).sheet_names)
+    with pd.ExcelFile(excel_path) as workbook:
+        return set(workbook.sheet_names)
 
 
 def _read_project_fixed_config(excel_path: Path) -> dict[str, object]:
@@ -40,7 +41,7 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
     import pandas as pd
 
     df = pd.read_excel(excel_path, sheet_name="channels", header=2)
-    required_cols = {"Kind", "S4P Path", "Port Order", "R0 Ohm", "Gamma Source", "Gamma Load", "Use"}
+    required_cols = {"Kind", "S4P Path", "Port Order", "Use"}
     if not required_cols.issubset(df.columns):
         raise ValueError("channels sheet is missing required columns.")
 
@@ -58,32 +59,18 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
     next_paths: list[str] = []
     fext_paths: list[str] = []
     common_port_order: Optional[tuple[int, int, int, int]] = None
-    common_R0: Optional[float] = None
-    common_gamma_src: Optional[complex] = None
-    common_gamma_load: Optional[complex] = None
 
     for row in rows:
         kind = str(row["Kind"]).strip().lower()
         path_str = _resolve_channel_path(excel_path, str(row["S4P Path"]).strip())
         port_order = _parse_port_order(row["Port Order"])
-        R0 = float(row["R0 Ohm"])
-        gamma_src = complex(row["Gamma Source"])
-        gamma_load = complex(row["Gamma Load"])
 
         if common_port_order is None:
             common_port_order = port_order
-            common_R0 = R0
-            common_gamma_src = gamma_src
-            common_gamma_load = gamma_load
-        elif (
-            port_order != common_port_order
-            or not np.isclose(R0, common_R0)
-            or gamma_src != common_gamma_src
-            or gamma_load != common_gamma_load
-        ):
+        elif port_order != common_port_order:
             raise ValueError(
-                "COMChannelConfig currently supports one common port_order/R0/"
-                "gamma_src/gamma_load across all enabled channel rows."
+                "COMChannelConfig currently supports one common port_order "
+                "across all enabled channel rows."
             )
 
         if kind == "victim":
@@ -97,21 +84,49 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
 
     if len(victim_paths) != 1:
         raise ValueError(f"channels sheet must contain exactly one enabled victim row, got {len(victim_paths)}.")
-    if common_port_order is None or common_R0 is None or common_gamma_src is None or common_gamma_load is None:
+    if common_port_order is None:
         raise ValueError("channels sheet has no enabled channel rows.")
 
     fixed = _read_project_fixed_config(excel_path)
+    def required_positive(name: str) -> float:
+        value = fixed.get(name)
+        if _is_blank(value):
+            raise KeyError(f"fixed_config is missing required parameter: {name}")
+        result = float(value)
+        if not np.isfinite(result) or result <= 0.0:
+            raise ValueError(f"fixed_config.{name} must be finite and positive.")
+        return result
+
     missing_dc_policy = str(fixed.get("missing_dc_policy", "error")).strip().lower()
+    limit_GHz = fixed.get("sparam_frequency_limit_GHz")
+    sparam_frequency_limit_Hz = (
+        None if _is_blank(limit_GHz) else float(limit_GHz) * 1e9
+    )
     return COMChannelConfig(
+        R0=required_positive("R_0"),
+        R_d_tx=required_positive("R_d_tx"),
+        R_d_rx=required_positive("R_d_rx"),
         victim_s4p_path=victim_paths[0],
         next_s4p_paths=tuple(next_paths),
         fext_s4p_paths=tuple(fext_paths),
         port_order=common_port_order,
-        R0=common_R0,
-        gamma_src=common_gamma_src,
-        gamma_load=common_gamma_load,
         missing_dc_policy=missing_dc_policy,
+        sparam_frequency_limit_Hz=sparam_frequency_limit_Hz,
     )
+
+
+def _validate_channel_package_R0(channel: COMChannelConfig, *packages: object) -> None:
+    """Require every runtime package model to use the channel's COM R_0."""
+    mismatches = [
+        (index, float(getattr(package, "R0")))
+        for index, package in enumerate(packages)
+        if not np.isclose(float(getattr(package, "R0")), channel.R0)
+    ]
+    if mismatches:
+        details = ", ".join(f"package[{index}].R0={value:g}" for index, value in mismatches)
+        raise ValueError(
+            f"All package R0 values must equal channel R_0={channel.R0:g}; {details}."
+        )
 
 
 def _read_project_search_config(excel_path: Path) -> tuple[dict[str, Optional[np.ndarray]], dict[str, object]]:
@@ -340,4 +355,5 @@ __all__ = [
     "_read_project_channels", "_read_project_fixed_config",
     "_read_project_search_config", "_resolve_channel_path", "_run_str",
     "_run_value", "_scalar_setting", "_sequence_setting", "_vector_setting",
+    "_validate_channel_package_R0",
 ]

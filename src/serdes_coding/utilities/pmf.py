@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
-from typing import Optional
+from typing import Literal, Optional
 from math import erf, sqrt
 
 
@@ -396,11 +396,38 @@ class Pmf1D:
 
         return st_idx, out
 
+    @staticmethod
+    def nearest_grid(x: np.ndarray, mass: np.ndarray, dx: float) -> tuple[int, np.ndarray]:
+        """Deposit each atom at one bin, with half-grid ties away from zero."""
+        dx = Pmf1D._validate_dx(dx)
+        x = np.asarray(x, dtype=float)
+        mass = np.asarray(mass, dtype=float)
+        if x.ndim != 1 or mass.ndim != 1 or x.shape != mass.shape or x.size == 0:
+            raise ValueError("x and mass must be nonempty matching 1D arrays.")
+        if not np.all(np.isfinite(x)):
+            raise ValueError("x contains non-finite values.")
+        mass = Pmf1D._validate_mass(mass)
+        positions = x / dx
+        truncated = np.trunc(positions)
+        indices = np.where(
+            np.abs(positions - truncated) == 0.5,
+            truncated + np.copysign(1.0, positions),
+            np.round(positions),
+        ).astype(int)
+        st_idx = int(indices.min())
+        out = np.zeros(int(indices.max()) - st_idx + 1, dtype=float)
+        np.add.at(out, indices - st_idx, mass)
+        return st_idx, out
+
     # --------------------------------
     # constructors
     # --------------------------------
     @classmethod
-    def uniform(cls, delta: float, pmf_cfg: object, *, unit: str = "volt", name: str = "") -> 'Pmf1D':
+    def uniform(
+        cls, delta: float, pmf_cfg: object, *, unit: str = "volt", name: str = "",
+        method: Literal["bin_integral", "nearest_centers"] = "bin_integral",
+        support: Optional['Pmf1D'] = None,
+    ) -> 'Pmf1D':
         """
         Build a zero-mean uniform PMF over [-delta/2, delta/2).
 
@@ -428,6 +455,35 @@ class Pmf1D:
         if not hasattr(pmf_cfg, "dy"):
             raise TypeError("pmf_cfg must provide a dy attribute.")
         dx = cls._validate_dx(getattr(pmf_cfg, "dy"))
+
+        if method == "nearest_centers":
+            # Reference uniform PDF includes every grid center between the
+            # nearest centers to -delta/2 and +delta/2, endpoints inclusive.
+            if support is not None:
+                if not np.isclose(support.dx, dx, rtol=1e-12, atol=1e-15):
+                    raise ValueError("uniform support and pmf_cfg must share dx.")
+                left = int(np.argmin(np.abs(support.x + delta / 2.0)))
+                right = int(np.argmin(np.abs(support.x - delta / 2.0)))
+                if right < left:
+                    raise ValueError("uniform support cannot represent the requested interval.")
+                pmf = np.zeros(len(support.pmf), dtype=float)
+                pmf[left:right + 1] = 1.0 / (right - left + 1)
+                return cls(
+                    dx=dx, st_idx=support.st_idx, pmf=pmf,
+                    unit=unit, name=name or "uniform",
+                )
+            half = delta / 2.0
+            span = int(np.ceil(half / dx)) + 2
+            candidates = np.arange(-span, span + 1)
+            left = int(candidates[np.argmin(np.abs(candidates * dx + half))])
+            right = int(candidates[np.argmin(np.abs(candidates * dx - half))])
+            idx = np.arange(left, right + 1)
+            pmf = np.full(idx.size, 1.0 / idx.size)
+            return cls(dx=dx, st_idx=int(idx[0]), pmf=pmf, unit=unit, name=name or "uniform")
+        if method != "bin_integral":
+            raise ValueError("uniform method must be bin_integral or nearest_centers.")
+        if support is not None:
+            raise ValueError("uniform support is used only with nearest_centers.")
 
         half = 0.5 * delta
         st_idx = int(np.floor((-half - 0.5 * dx) / dx))
@@ -464,6 +520,7 @@ class Pmf1D:
         n_sigma: float = 8.0,
         unit: str = "",
         name: str = "",
+        method: Literal["bin_integral", "reference_sample"] = "bin_integral",
     ) -> 'Pmf1D':
         """
         Build a Gaussian PMF using bin-integrated probability mass.
@@ -483,6 +540,12 @@ class Pmf1D:
         name:
             Optional PMF name for debug / plotting.
         """
+        if method == "reference_sample":
+            return cls.gaussian_from_reference_sample(
+                mu=mu, sigma=sigma, dx=dx, n_sigma=n_sigma, unit=unit, name=name,
+            )
+        if method != "bin_integral":
+            raise ValueError("gaussian method must be bin_integral or reference_sample.")
         return cls.gaussian_from_bin_integral(
             mu=mu,
             sigma=sigma,
@@ -491,6 +554,28 @@ class Pmf1D:
             unit=unit,
             name=name,
         )
+
+    @classmethod
+    def gaussian_from_reference_sample(
+        cls, mu: float, sigma: float, dx: float, *, n_sigma: float = 8.0,
+        unit: str = "", name: str = "",
+    ) -> 'Pmf1D':
+        """Sample the reference normal_dist grid and normalize its ordinates."""
+        mu = float(mu)
+        sigma = float(sigma)
+        n_sigma = float(n_sigma)
+        dx = cls._validate_dx(dx)
+        if not np.isfinite(mu) or not np.isfinite(sigma) or sigma <= 0.0:
+            raise ValueError("mu must be finite and sigma must be finite and positive.")
+        if not np.isfinite(n_sigma) or n_sigma <= 0.0:
+            raise ValueError("n_sigma must be finite and positive.")
+        extent = int(np.floor(2.0 * n_sigma * sigma / dx + 0.5))
+        center = int(np.floor(mu / dx + 0.5)) if mu >= 0 else -int(np.floor(-mu / dx + 0.5))
+        indices = np.arange(center - extent, center + extent + 1)
+        x = indices * dx
+        pmf = np.exp(-((x - mu) ** 2) / (2.0 * sigma**2 + np.finfo(float).eps))
+        pmf /= np.sum(pmf)
+        return cls(dx=dx, st_idx=int(indices[0]), pmf=pmf, unit=unit, name=name)
 
     @classmethod
     def gaussian_from_pdf_sample(
@@ -598,6 +683,7 @@ class Pmf1D:
         dx: float,
         unit: str = "",
         name: str = "",
+        placement: Literal["linear", "nearest"] = "linear",
     ) -> 'Pmf1D':
         """
         Build a PMF from multiple Dirac masses.
@@ -634,7 +720,12 @@ class Pmf1D:
             if len(probs) != len(values):
                 raise ValueError("probs must have the same length as values.")
 
-        st_idx, pmf = cls.snap_to_grid(values, probs, dx)
+        if placement == "nearest":
+            st_idx, pmf = cls.nearest_grid(values, probs, dx)
+        elif placement == "linear":
+            st_idx, pmf = cls.snap_to_grid(values, probs, dx)
+        else:
+            raise ValueError("placement must be linear or nearest.")
         pmf = pmf / np.sum(pmf)
         return cls(dx=dx, st_idx=st_idx, pmf=pmf, unit=unit, name=name)
 
@@ -732,6 +823,7 @@ class Pmf1D:
         *,
         keep_dx: bool = False,
         dx_ref: Optional[float] = None,
+        method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
     ) -> 'Pmf1D':
         """
         Return a copy with the x axis scaled.
@@ -767,7 +859,34 @@ class Pmf1D:
                     name=self.name,
                 )
 
-            st_idx, pmf = self.snap_to_grid(scale * self.x, self.pmf, dx_ref)
+            if method == "interpolate_ordinates":
+                if scale <= 0.0:
+                    raise ValueError("interpolate_ordinates requires a positive scale.")
+                # Reference scalePDF uses the scaled minimum index and a
+                # symmetric output grid, then interpolates PDF ordinates.
+                st_pos = self.st_idx * scale * self.dx / dx_ref
+                nearest_integer = np.rint(st_pos)
+                if np.isclose(st_pos, nearest_integer, rtol=0.0, atol=1e-12):
+                    st_pos = nearest_integer
+                st_idx = int(np.floor(st_pos))
+                if st_idx >= 0:
+                    raise ValueError("interpolate_ordinates requires negative grid support.")
+                indices = np.arange(st_idx, -st_idx + 1)
+                x_out = indices * dx_ref
+                pmf = np.interp(
+                    x_out, self.x * scale, self.pmf, left=np.nan, right=np.nan
+                )
+                if pmf.size < 3:
+                    raise ValueError("interpolate_ordinates requires at least three grid bins.")
+                pmf[0] = pmf[1]
+                pmf[-1] = pmf[-2]
+                if not np.all(np.isfinite(pmf)):
+                    raise ValueError("interpolate_ordinates left unsupported interior bins.")
+                pmf = self._validate_pmf(pmf / np.sum(pmf))
+            elif method == "mass_deposit":
+                st_idx, pmf = self.snap_to_grid(scale * self.x, self.pmf, dx_ref)
+            else:
+                raise ValueError("scale_x method must be mass_deposit or interpolate_ordinates.")
             return Pmf1D(
                 dx=dx_ref,
                 st_idx=st_idx,
@@ -836,6 +955,8 @@ class Pmf1D:
         tap_abs_th: float = 0.0,
         max_taps: Optional[int] = None,
         name: Optional[str] = None,
+        scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
+        initial_bin_range: Optional[tuple[int, int]] = None,
     ) -> 'Pmf1D':
         """
         Return the FIR-filtered PMF.
@@ -862,26 +983,51 @@ class Pmf1D:
             Maximum number of strongest taps to keep.
         name:
             Optional name override after filtering.
+        scaling_method:
+            Project scaled probability masses or interpolate gridded ordinates.
+        initial_bin_range:
+            Optional inclusive support of the unit-mass seed on ``dx_ref``.
+            Only the zero bin has mass; other bins retain the supplied support
+            during subsequent convolutions.
         """
         coeff = _prune_fir_coeff(fir, tap_abs_th=tap_abs_th, max_taps=max_taps)
         dx_ref = self.dx if dx_ref is None else self._validate_dx(dx_ref)
 
         if len(coeff) == 0:
+            if initial_bin_range is None:
+                first, last = 0, 0
+            else:
+                first, last = (int(value) for value in initial_bin_range)
+                if first > 0 or last < 0 or last < first:
+                    raise ValueError("initial_bin_range must contain zero.")
+            unit_mass = np.zeros(last - first + 1, dtype=float)
+            unit_mass[-first] = 1.0
             filtered = Pmf1D(
                 dx=dx_ref,
-                st_idx=0,
-                pmf=np.array([1.0], dtype=float),
+                st_idx=first,
+                pmf=unit_mass,
                 unit=self.unit,
                 name=self.name if name is None else name,
             )
         else:
             base = self.copy()
 
-            out_st_idx = 0
-            out_pmf = np.array([1.0], dtype=float)
+            if initial_bin_range is None:
+                out_st_idx = 0
+                out_pmf = np.array([1.0], dtype=float)
+            else:
+                first, last = (int(value) for value in initial_bin_range)
+                if first > 0 or last < 0 or last < first:
+                    raise ValueError("initial_bin_range must contain zero.")
+                out_st_idx = first
+                out_pmf = np.zeros(last - first + 1, dtype=float)
+                out_pmf[-first] = 1.0
 
             for c in coeff:
-                term = base.copy().scale_x(c, keep_dx=True, dx_ref=dx_ref)
+                term = base.copy().scale_x(
+                    abs(c) if scaling_method == "interpolate_ordinates" else c,
+                    keep_dx=True, dx_ref=dx_ref, method=scaling_method,
+                )
                 out_pmf = _convolve_probability_mass(out_pmf, term.pmf)
                 out_st_idx += term.st_idx
 
@@ -900,6 +1046,33 @@ class Pmf1D:
             )
 
         return filtered
+
+    @classmethod
+    def fir_filter_atoms(
+        cls, values: np.ndarray, probs: np.ndarray, fir: np.ndarray, *, dx: float,
+        keep_mass: float = float(1 - 1e-5), tap_abs_th: float = 0.0,
+        max_taps: Optional[int] = None, unit: str = "", name: str = "",
+    ) -> 'Pmf1D':
+        """Convolve FIR terms formed directly from unquantized source atoms.
+
+        Every ``fir[i] * values`` term is placed on the target grid once.
+        This preserves the source amplitudes until after tap multiplication.
+        """
+        coeff = _prune_fir_coeff(fir, tap_abs_th=tap_abs_th, max_taps=max_taps)
+        dx = cls._validate_dx(dx)
+        out = cls.multi_dirac(
+            np.array([0.0]), np.array([1.0]), dx=dx, unit=unit,
+            name=name, placement="nearest",
+        )
+        for c in coeff:
+            term = cls.multi_dirac(
+                c * np.asarray(values, dtype=float), probs, dx=dx,
+                unit=unit, placement="nearest",
+            )
+            out = out.combine(term, name=name)
+            if keep_mass < 1.0:
+                out = _truncate_keep_mass(out, keep_mass=keep_mass)
+        return out
 
     def combine(self, other: 'Pmf1D', *, name: Optional[str]=None) -> 'Pmf1D':
         """

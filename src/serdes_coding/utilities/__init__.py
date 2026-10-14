@@ -1,12 +1,13 @@
 """Reusable signal-processing utilities shared by COM models."""
 
-from .link import LinkConfig, LinkSegment, SampledResponse
+from .link import GridOverflowError, LinkConfig, LinkSegment, SampledResponse
 from .pmf import Pmf1D
 from .psd import ContinuousPSD, OneSidePSD, SampledPSD
 from .sparam import SparamModel, SparamProcessor
 
 __all__ = [
     "ContinuousPSD",
+    "GridOverflowError",
     "LinkConfig",
     "LinkSegment",
     "OneSidePSD",

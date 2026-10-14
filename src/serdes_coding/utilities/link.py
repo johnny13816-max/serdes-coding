@@ -12,6 +12,51 @@ if TYPE_CHECKING:
 
 SdefT = Literal["power", "pseudo", "traveling"]
 
+
+class GridOverflowError(ValueError):
+    """A linear convolution has too much response outside its fixed grid."""
+
+    def __init__(self, grid_length: int, full_length: int, peak_ratio: float,
+                 energy_ratio: float, *, exact_support_exceeded: bool = False,
+                 context: str = ""):
+        self.grid_length = grid_length
+        self.full_length = full_length
+        self.peak_ratio = peak_ratio
+        self.energy_ratio = energy_ratio
+        self.exact_support_exceeded = exact_support_exceeded
+        self.context = context
+        super().__init__(
+            f"fixed grid overflow{f' at {context}' if context else ''}: "
+            f"grid={grid_length}, full={full_length}, "
+            f"exact_support_exceeded={exact_support_exceeded}, "
+            f"tail_peak_ratio={peak_ratio:.6g} (limit 0.002), "
+            f"tail_energy_ratio={energy_ratio:.6g} (limit 1e-6)"
+        )
+
+    def with_context(self, context: str) -> 'GridOverflowError':
+        return type(self)(
+            self.grid_length, self.full_length, self.peak_ratio, self.energy_ratio,
+            exact_support_exceeded=self.exact_support_exceeded, context=context,
+        )
+
+
+def _check_fixed_grid_overflow(ir: np.ndarray, grid_length: int, *, exact_support: bool = False) -> None:
+    """Check the measured convolution tail before placing it on a fixed grid.
+
+    These are numerical quality limits, not IEEE COM equations. An overflow
+    above either limit must not silently become a circular convolution.
+    """
+    if len(ir) <= grid_length:
+        return
+    peak = float(np.max(np.abs(ir)))
+    energy = float(np.sum(np.square(ir)))
+    tail = ir[grid_length:]
+    peak_ratio = float(np.max(np.abs(tail)) / peak) if peak else 0.0
+    energy_ratio = float(np.sum(np.square(tail)) / energy) if energy else 0.0
+    if exact_support or peak_ratio > 2e-3 or energy_ratio > 1e-6:
+        raise GridOverflowError(grid_length, len(ir), peak_ratio, energy_ratio,
+                                exact_support_exceeded=exact_support)
+
 # =========================
 # helper
 # =========================
@@ -30,14 +75,15 @@ def resample_tf(
     freqs_new: np.ndarray,
     taper_ratio: float = 0.25,
     min_tail_points: int = 5,
+    *,
+    out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay",
 ) -> np.ndarray:
     """
     Resample a measured transfer function onto the target rfft frequency grid.
 
     In band => linear interpolate.
-    Out band:
-        extends phase using estimated group delay (constant group delay), 
-        and smoothly tapers magnitude to zero.
+    Out band: extend phase and taper magnitude for ``cosine_decay``, or
+    set the complex response to zero for ``zero_padding``.
     """
     def normalize_and_validate_inputs() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         H = np.asarray(H_meas, dtype=complex)
@@ -106,6 +152,8 @@ def resample_tf(
         mag_new[zero_region] = 0.0
 
     H_meas, freqs_meas, freqs_new = normalize_and_validate_inputs()
+    if out_of_measured not in {"cosine_decay", "zero_padding"}:
+        raise ValueError("out_of_measured must be cosine_decay or zero_padding.")
     f_stop = freqs_meas[-1]
     f_nyq = freqs_new[-1]
 
@@ -126,6 +174,13 @@ def resample_tf(
         return H_new
 
     # Case B: measurement does not cover target Nyquist.
+    if out_of_measured == "zero_padding":
+        H_new = mag_new * np.exp(1j * phase_new)
+        H_new[freqs_new > f_stop] = 0.0
+        H_new[0] = H_new[0].real + 0j
+        H_new[-1] = H_new[-1].real + 0j
+        return H_new
+
     extend_phase_with_group_delay()
     extend_mag_with_taper()
 
@@ -519,6 +574,7 @@ class SampledResponse:
     tf: np.ndarray                   # unit: response gain, H(e^jtheta)
     ir: np.ndarray                   # unit: discrete-time impulse response h[n]
     fb: float                        # unit: Hz, sampling rate / baud rate
+    cfg: Optional[LinkConfig] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.theta = self.validate_rfft_theta(self.theta)
@@ -533,6 +589,9 @@ class SampledResponse:
         self.fb = float(self.fb)
         if not np.isfinite(self.fb) or self.fb <= 0.0:
             raise ValueError("fb must be finite and positive.")
+        if self.cfg is not None:
+            if not np.isclose(self.fb, self.cfg.fb) or not np.array_equal(self.theta, self.cfg.theta):
+                raise ValueError("SampledResponse grid must match its LinkConfig.")
 
     @staticmethod
     def validate_rfft_theta(theta: np.ndarray) -> np.ndarray:
@@ -608,6 +667,7 @@ class SampledResponse:
         tf: np.ndarray,
         fb: float,
         nfft: Optional[int] = None,
+        cfg: Optional[LinkConfig] = None,
     ) -> 'SampledResponse':
         """
         Build SampledResponse from H(e^jtheta).
@@ -640,7 +700,7 @@ class SampledResponse:
         if len(tf) != nfft // 2 + 1:
             raise ValueError("len(tf) must equal nfft//2 + 1.")
         ir = np.fft.irfft(tf, n=nfft)
-        return cls(theta=theta, tf=tf, ir=ir, fb=fb)
+        return cls(theta=theta, tf=tf, ir=ir, fb=fb, cfg=cfg)
 
     @classmethod
     def from_ir(
@@ -675,7 +735,16 @@ class SampledResponse:
         ir_padded = np.zeros(nfft, dtype=float)
         ir_padded[:len(ir)] = ir
         tf = np.fft.rfft(ir_padded, n=nfft)
-        return cls(theta=cfg.theta, tf=tf, ir=ir_padded, fb=cfg.fb)
+        return cls(theta=cfg.theta, tf=tf, ir=ir_padded, fb=cfg.fb, cfg=cfg)
+
+    @classmethod
+    def from_linear_ir(cls, ir: np.ndarray, cfg: LinkConfig) -> 'SampledResponse':
+        """Project a linear result onto cfg only after checking its overflow."""
+        ir = np.asarray(ir, dtype=float)
+        if ir.ndim != 1 or ir.size == 0 or not np.all(np.isfinite(ir)):
+            raise ValueError("ir must be a nonempty finite one-dimensional array.")
+        _check_fixed_grid_overflow(ir, cfg.sampled_nfft)
+        return cls.from_ir(ir[:cfg.sampled_nfft], cfg)
 
     @property
     def freqs(self) -> np.ndarray:
@@ -710,30 +779,46 @@ class SampledResponse:
             raise ValueError("SampledResponse fb values must match.")
         if not np.allclose(self.theta, other.theta, rtol=1e-12, atol=1e-15):
             raise ValueError("SampledResponse theta grids must match.")
-        return type(self).from_tf(self.theta, self.tf * other.tf, self.fb)
+        if self.cfg is not other.cfg:
+            raise ValueError("SampledResponse cascades require the same LinkConfig reference.")
+        return type(self).from_tf(self.theta, self.tf * other.tf, self.fb, cfg=self.cfg)
 
-    def cascade_ir(self, other: 'SampledResponse', *, per_ui: int) -> 'SampledResponse':
-        """Cascade finite sampled-time responses by full linear convolution.
+    def cascade_ir(
+        self, other: 'SampledResponse', *, per_ui: Optional[int] = None,
+        force_grid: bool = True,
+    ) -> 'SampledResponse':
+        """Cascade sampled-time responses by checked linear convolution.
 
         The stored ``ir`` arrays are normally zero-padded for their own FFT
-        grids.  Trailing zero padding is removed before convolution, then a
-        new sampled-domain grid is created for the complete linear result.
-        No continuous-time ``dt`` factor is applied to this discrete-time
-        cascade.
+        grids. Trailing exact zero padding is removed before convolution.
+        ``force_grid=True`` keeps the original cfg after checking the discarded
+        tail; ``False`` returns a new grid with the full linear result for
+        diagnosis. No continuous-time ``dt`` factor is applied.
         """
         if not np.isclose(self.fb, other.fb):
             raise ValueError("SampledResponse fb values must match.")
+        if self.cfg is not other.cfg:
+            raise ValueError("SampledResponse cascades require the same LinkConfig reference.")
 
         def _finite_support(ir: np.ndarray) -> np.ndarray:
             ir = np.asarray(ir, dtype=float)
             nonzero = np.flatnonzero(ir != 0.0)
             return ir[: int(nonzero[-1]) + 1] if len(nonzero) else ir[:1]
 
-        ir_total = np.convolve(_finite_support(self.ir), _finite_support(other.ir))
+        a = _finite_support(self.ir)
+        b = _finite_support(other.ir)
+        ir_total = np.convolve(a, b)
+        if force_grid:
+            if self.cfg is None:
+                raise ValueError("force_grid=True requires responses bound to a LinkConfig.")
+            if len(a) < self.cfg.sampled_nfft and len(b) < self.cfg.sampled_nfft:
+                _check_fixed_grid_overflow(ir_total, self.cfg.sampled_nfft,
+                                           exact_support=len(ir_total) > self.cfg.sampled_nfft)
+            return type(self).from_linear_ir(ir_total, self.cfg)
         if len(ir_total) % 2 != 0:
             ir_total = np.r_[ir_total, 0.0]
 
-        per_ui = int(per_ui)
+        per_ui = int(self.cfg.per_ui if per_ui is None and self.cfg is not None else per_ui)
         if per_ui <= 0:
             raise ValueError("per_ui must be positive.")
         # SampledResponse does not retain per_ui, so the caller supplies it
@@ -957,6 +1042,8 @@ class LinkSegment:
         H_meas: np.ndarray,
         cfg: 'LinkConfig',
         dc: Literal["error", "hold"] = "error",
+        *,
+        out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay",
     ) -> 'LinkSegment':
         """
         Build a LinkSegment from scalar transfer-function samples.
@@ -975,10 +1062,14 @@ class LinkSegment:
             Missing-DC policy. "error" keeps the strict LinkSegment contract.
             "hold" prepends H(0)=H(f_min) before resampling.
         """
+        if out_of_measured not in {"cosine_decay", "zero_padding"}:
+            raise ValueError("out_of_measured must be cosine_decay or zero_padding.")
         f_meas, H_meas = cls._prepare_tf_dc(f_meas, H_meas, dc)
 
         if not(isFreqsEqual(f_meas, cfg.freqs)):
-            H_meas = resample_tf(H_meas, f_meas, cfg.freqs)
+            H_meas = resample_tf(
+                H_meas, f_meas, cfg.freqs, out_of_measured=out_of_measured
+            )
 
         seg = cls(cfg)
         H_meas = seg._force_real_rfft_edges(H_meas)
@@ -1619,25 +1710,41 @@ class LinkSegment:
         cascade must be handled before constructing a scalar LinkSegment tf.
         """
         self.validate_compatible_segment(other)
+        if self.cfg is not other.cfg:
+            raise ValueError("LinkSegment cascades require the same LinkConfig reference.")
 
         seg = LinkSegment(self.cfg)
         seg._tf = self.validate_tf(self.tf * other.tf)
         return seg
 
-    def cascade_ir(self, other: 'LinkSegment') -> 'LinkSegment':
-        """
-        Cascade two scalar impulse responses using full linear convolution.
+    def cascade_ir(self, other: 'LinkSegment', *, force_grid: bool = True) -> 'LinkSegment':
+        """Cascade scalar impulse responses by checked linear convolution.
 
         The continuous-time convolution integral is approximated by:
             h_total[n] = sum_k h1[k] * h2[n-k] * cfg.dt
 
-        The full linear-convolution length is preserved. If the result length is
-        odd, one trailing zero is appended so the returned LinkConfig keeps an
-        even Nfft and therefore an explicit rfft Nyquist bin.
+        ``force_grid=True`` returns on the original cfg after overflow checking.
+        ``False`` preserves the full result on a new diagnostic grid; an odd
+        full length receives one trailing zero to retain an rfft Nyquist bin.
         """
         self.validate_compatible_segment(other)
 
-        ir_total = np.convolve(self.ir, other.ir) * self.cfg.dt
+        if self.cfg is not other.cfg:
+            raise ValueError("LinkSegment cascades require the same LinkConfig reference.")
+        from scipy.signal import convolve
+
+        ir_total = convolve(self.ir, other.ir, mode="full", method="auto") * self.cfg.dt
+        if force_grid:
+            support_a = np.flatnonzero(self.ir != 0.0)
+            support_b = np.flatnonzero(other.ir != 0.0)
+            exact_support = (
+                len(support_a) > 0 and len(support_b) > 0
+                and support_a[-1] < self.cfg.Nfft - 1
+                and support_b[-1] < self.cfg.Nfft - 1
+                and support_a[-1] + support_b[-1] + 1 > self.cfg.Nfft
+            )
+            _check_fixed_grid_overflow(ir_total, self.cfg.Nfft, exact_support=exact_support)
+            return LinkSegment.from_ir(ir_total[:self.cfg.Nfft], self.cfg)
         if len(ir_total) % 2 != 0:
             ir_total = np.r_[ir_total, 0.0]
 
@@ -2283,6 +2390,7 @@ class LinkSegment:
             tf=H_sampled,
             fb=self.cfg.fb,
             nfft=N_d,
+            cfg=self.cfg,
         )
 
     def ir2sr(self, ir: np.ndarray) -> np.ndarray:

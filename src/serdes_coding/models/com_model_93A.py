@@ -599,6 +599,10 @@ class COMPkgConfig(_PrettyDataclass):
     Z_c: float = 78.2                # unit: ohm, differential TL characteristic impedance
     z_p2: Optional[float] = None     # unit: mm, optional package TL segment 2 length
     Z_c2: float = 78.2               # unit: ohm, optional segment 2 differential impedance
+    gamma_0: float = 0.0             # unit: 1/mm
+    a1: float = 1.734e-3             # unit: 1/(mm sqrt(GHz))
+    a2: float = 1.455e-4             # unit: 1/(mm GHz)
+    tau: float = 6.141e-3            # unit: ns/mm; shared by both TL segments
 
     def __post_init__(self) -> None:
         if self.C_d < 0.0 or self.L_s < 0.0 or self.C_b < 0.0 or self.C_p < 0.0:
@@ -611,6 +615,9 @@ class COMPkgConfig(_PrettyDataclass):
             raise ValueError("z_p2 must be non-negative when provided.")
         if self.Z_c2 <= 0.0:
             raise ValueError("Z_c2 must be positive.")
+        for name in ("gamma_0", "a1", "a2", "tau"):
+            if not np.isfinite(getattr(self, name)):
+                raise ValueError(f"Package TL {name} must be finite.")
 
 @dataclass(repr=False)
 class COMChannelConfig(_PrettyDataclass):
@@ -630,6 +637,7 @@ class COMChannelConfig(_PrettyDataclass):
     gamma_src: complex = field(init=False)                  # unit: dimensionless, derived from R_d_tx and R0
     gamma_load: complex = field(init=False)                 # unit: dimensionless, derived from R_d_rx and R0
     missing_dc_policy: Literal["error", "hold", "skrf"] = "error"
+    sparam_frequency_limit_Hz: Optional[float] = None       # unit: Hz; measured-record boundary
 
     def __post_init__(self) -> None:
         for name in ("R0", "R_d_tx", "R_d_rx"):
@@ -642,6 +650,11 @@ class COMChannelConfig(_PrettyDataclass):
         self.gamma_load = complex((self.R_d_rx - self.R0) / (self.R_d_rx + self.R0))
         if self.missing_dc_policy not in {"error", "hold", "skrf"}:
             raise ValueError("missing_dc_policy must be error, hold, or skrf.")
+        if self.sparam_frequency_limit_Hz is not None:
+            value = float(self.sparam_frequency_limit_Hz)
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError("sparam_frequency_limit_Hz must be finite and positive.")
+            self.sparam_frequency_limit_Hz = value
 
     def align_grid(self, channels: list[SparamModel]) -> np.ndarray:
         """
@@ -701,6 +714,12 @@ class COMChannelConfig(_PrettyDataclass):
                     port_order=self.port_order,
                     z0=2.0 * self.R0,
                 )
+                raw_f_max = float(channel.freqs[-1])
+                channel = (
+                    channel
+                    if self.sparam_frequency_limit_Hz is None
+                    else channel.limited_to_frequency(self.sparam_frequency_limit_Hz)
+                )
                 freqs = channel.freqs
                 delta_f = float(freqs[1] - freqs[0]) if len(freqs) > 1 else float("nan")
                 summary.append({
@@ -709,6 +728,9 @@ class COMChannelConfig(_PrettyDataclass):
                     "n": len(freqs),
                     "f_min": float(freqs[0]),
                     "f_max": float(freqs[-1]),
+                    "raw_f_max": raw_f_max,
+                    "requested_frequency_limit_Hz": self.sparam_frequency_limit_Hz,
+                    "effective_f_max": float(freqs[-1]),
                     "delta_f": delta_f,
                 })
             except Exception as exc:
@@ -736,6 +758,7 @@ class COMChannelConfig(_PrettyDataclass):
                     mode="s4p",
                     port_order=self.port_order,
                     z0=2.0 * self.R0,
+                    frequency_limit_Hz=self.sparam_frequency_limit_Hz,
                 )
                 for path in [
                     self.victim_s4p_path,
@@ -1350,307 +1373,13 @@ class COMStatus(_PrettyDataclass):
             "cdf": cls._array_meta(arrays, f"{name}.cdf", pmf.cdf),
         }
 
-    def plot_path_pulses(
-        self,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-    ) -> Any:
-        """
-        Plot all path pulse impulse responses on one aligned UI axis.
 
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``path_pulses.png``.
-        xlim_ui:
-            Optional x-axis limits in UI after each path main cursor is shifted
-            to 0 UI.
-        """
-        output_file = COMReport._plot_save_path(save_path, "path_pulses.png")
-        fig, ax = COMReport._subplots(output_file)
-        for idx, path in enumerate(self.paths):
-            ir = path.pulse.ir
-            x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(ir)))]
-            ax.plot(x, ir, label=COMReport._path_display_label(idx, path))
 
-        ax.set_title("Path Pulse Responses")
-        ax.set_xlabel("Time (UI)")
-        ax.set_ylabel("h(t)")
-        if xlim_ui is not None:
-            ax.set_xlim(*xlim_ui)
-        ax.grid(True)
-        ax.legend()
-        COMReport._finish_figure(fig, output_file)
-        return ax
 
-    def plot_path_sbr(
-        self,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-        normalize_main_cursor: bool = True,
-    ) -> Any:
-        """
-        Plot all path single-bit responses on one aligned UI axis.
 
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``path_sbr.png``.
-        xlim_ui:
-            Optional x-axis limits in UI after each SBR main cursor is shifted
-            to 0 UI.
-        normalize_main_cursor:
-            If True, normalize each SBR by its own main cursor magnitude.
-        """
-        output_file = COMReport._plot_save_path(save_path, "path_sbr.png")
-        fig, ax = COMReport._subplots(output_file)
-        for idx, path in enumerate(self.paths):
-            sbr = path.pulse.sbr.copy()
-            main = float(np.max(np.abs(sbr)))
-            if normalize_main_cursor and main > 0:
-                sbr = sbr / main
-            x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(sbr)))]
-            ax.plot(x, sbr, label=COMReport._path_display_label(idx, path))
 
-        ax.set_title("Path Single-Bit Responses")
-        ax.set_xlabel("Time (UI)")
-        ax.set_ylabel("SBR / main" if normalize_main_cursor else "SBR")
-        if xlim_ui is not None:
-            ax.set_xlim(*xlim_ui)
-        ax.grid(True)
-        ax.legend()
-        COMReport._finish_figure(fig, output_file)
-        return ax
 
-    def plot_path_S_all_IL(
-        self,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-    ) -> Any:
-        """
-        Plot augmented signal-path insertion loss for all paths.
 
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``path_S_all_IL.png``.
-        xlim:
-            Optional frequency limits in Hz.
-        """
-        output_file = COMReport._plot_save_path(save_path, "path_S_all_IL.png")
-        fig, ax = COMReport._subplots(output_file)
-        if xlim is None:
-            xlim = (0.0, float(self.victim.pulse.cfg.fb))
-        for idx, path in enumerate(self.paths):
-            path.S_all.plot_IL(
-                ax=ax,
-                xlim=xlim,
-                label=COMReport._path_display_label(idx, path),
-                auto_ylim=False,
-            )
-
-        ax.set_title("Augmented Signal Path IL, S_all")
-        COMReport._apply_auto_ylim_from_lines(ax, xlim)
-        COMReport._finish_figure(fig, output_file)
-        return ax
-
-    def plot_path_H21_tf(
-        self,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-        ylim: Optional[tuple[float, float]] = None,
-    ) -> Any:
-        """
-        Plot terminated voltage transfer function H21 for all paths.
-
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``path_H21_tf.png``.
-        xlim:
-            Optional frequency limits in Hz. If None, LinkSegment uses 0 to fb.
-        ylim:
-            Optional y-axis limits in dB. If None, LinkSegment chooses y-limits
-            from the plotted in-band samples and ignores numerical floor values.
-        """
-        output_file = COMReport._plot_save_path(save_path, "path_H21_tf.png")
-        fig, ax = COMReport._subplots(output_file)
-        if xlim is None:
-            xlim = (0.0, float(self.victim.pulse.cfg.fb))
-        for idx, path in enumerate(self.paths):
-            path.H_21.plot_tf(
-                ax=ax,
-                xlim=xlim,
-                ylim=ylim,
-                auto_ylim=False,
-                label=COMReport._path_display_label(idx, path),
-            )
-
-        ax.set_title("Voltage Transfer Function H21")
-        if ylim is None:
-            COMReport._apply_auto_ylim_from_lines(ax, xlim)
-        COMReport._finish_figure(fig, output_file)
-        return ax
-
-    def plot_dfe_summary(
-        self,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-    ) -> Any:
-        """
-        Plot DFE coefficients and residual ISI samples.
-
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``dfe_summary.png``.
-        xlim_ui:
-            Optional residual-ISI x-axis limits in UI, with the main cursor at 0.
-        """
-        if self.dfe is None:
-            raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
-
-        output_file = COMReport._plot_save_path(save_path, "dfe_summary.png")
-        fig, axes = COMReport._subplots(output_file, 2, 1, figsize=(7, 6))
-        tap_idx = np.arange(1, len(self.dfe.dfe_coeff) + 1)
-        axes[0].bar(tap_idx, self.dfe.dfe_coeff)
-        axes[0].set_title("DFE Coefficients")
-        axes[0].set_xlabel("Tap index")
-        axes[0].set_ylabel("Coefficient")
-        axes[0].set_xlim(0.5, max(1.5, len(self.dfe.dfe_coeff) + 0.5))
-        axes[0].grid(True)
-
-        per_ui = self.victim.pulse.cfg.per_ui
-        num_pre = (self.dfe.ts - self.dfe.pos) // per_ui
-        h_isi = self.imp.h_ISI if self.imp is not None else self.dfe.h_ISI
-        isi_ui = np.arange(len(h_isi), dtype=float) - float(num_pre)
-        axes[1].bar(isi_ui, h_isi, width=0.8)
-        axes[1].set_title("Residual ISI Samples")
-        axes[1].set_xlabel("Discrete time (UI, main cursor = 0)")
-        axes[1].set_ylabel("Amplitude (V)")
-        if xlim_ui is not None:
-            axes[1].set_xlim(*xlim_ui)
-        axes[1].grid(True)
-
-        COMReport._finish_figure(fig, output_file)
-        return axes
-
-    def plot_imp_summary(self, save_path: str = "") -> Any:
-        """
-        Plot imp RMS components as a bar chart.
-
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``imp_summary.png``.
-        """
-        if self.imp is None:
-            raise ValueError("COMStatus.imp is None; run imp calculation first.")
-
-        labels = ["TX", "ISI", "J", "XT", "N"]
-        values = [
-            self.imp.sigma_TX,
-            self.imp.sigma_ISI,
-            self.imp.sigma_J,
-            self.imp.sigma_XT,
-            self.imp.sigma_N,
-        ]
-
-        output_file = COMReport._plot_save_path(save_path, "imp_summary.png")
-        fig, ax = COMReport._subplots(output_file)
-        ax.bar(labels, values)
-        ax.set_title("Imp RMS Breakdown")
-        ax.set_ylabel("RMS amplitude (V)")
-        ax.grid(True, axis="y")
-        text = f"As={self.imp.As:.4e} V"
-        if self.FOM is not None:
-            text += f"\nFOM={self.FOM:.2f} dB"
-        ax.text(0.98, 0.95, text, ha="right", va="top", transform=ax.transAxes)
-
-        COMReport._finish_figure(fig, output_file)
-        return ax
-
-    def plot_pmf_summary(self, save_path: str = "") -> Any:
-        """
-        Plot PMF components and the final combined CDF.
-
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``pmf_summary.png``.
-        """
-        if self.pmf is None:
-            raise ValueError("COMStatus.pmf is None; run PMF calculation first.")
-
-        components = [
-            ("ISI", self.pmf.p_ISI),
-            ("G", self.pmf.p_G),
-            ("DD", self.pmf.p_DD),
-            ("XT", self.pmf.p_XT),
-            ("combined", self.pmf.p_combined),
-        ]
-
-        output_file = COMReport._plot_save_path(save_path, "pmf_summary.png")
-        fig, axes = COMReport._subplots(output_file, 2, 1, figsize=(7, 6))
-        for label, p in components:
-            if p is not None:
-                axes[0].plot(p.x, p.pmf, label=label)
-        axes[0].set_title("PMF Components")
-        axes[0].set_xlabel("Amplitude (V)")
-        axes[0].set_ylabel("Probability mass")
-        axes[0].grid(True)
-        axes[0].legend()
-
-        if self.pmf.p_combined is not None:
-            p = self.pmf.p_combined
-            axes[1].plot(p.x, p.cdf, label="combined CDF")
-            if self.pmf.y0 is not None:
-                axes[1].axvline(self.pmf.y0, linestyle="--", color="tab:red", label=f"y0={self.pmf.y0:.3e} V")
-            axes[1].legend()
-        axes[1].set_title("Combined CDF")
-        axes[1].set_xlabel("Amplitude (V)")
-        axes[1].set_ylabel("CDF")
-        axes[1].grid(True)
-
-        title = []
-        if self.pmf.COM is not None:
-            title.append(f"COM={self.pmf.COM:.2f} dB")
-        if self.pmf.A_ni is not None:
-            title.append(f"A_ni={self.pmf.A_ni:.3e} V")
-        if title:
-            fig.suptitle(", ".join(title))
-
-        COMReport._finish_figure(fig, output_file)
-        return axes
-
-    def plot_summary(self, save_path: str = "") -> dict[str, Any]:
-        """
-        Plot the standard COM single-run report set.
-
-        Parameters
-        ----------
-        save_path:
-            Optional output directory. If empty, figures are shown interactively.
-            If provided, fixed filenames are written under this directory.
-        """
-        outputs: dict[str, Any] = {}
-        outputs["path_pulses"] = self.plot_path_pulses(save_path)
-        outputs["path_S_all_IL"] = self.plot_path_S_all_IL(save_path)
-        outputs["path_H21_tf"] = self.plot_path_H21_tf(save_path)
-        if self.dfe is not None:
-            outputs["dfe_summary"] = self.plot_dfe_summary(save_path)
-        if self.imp is not None:
-            outputs["imp_summary"] = self.plot_imp_summary(save_path)
-        if self.pmf is not None:
-            outputs["pmf_summary"] = self.plot_pmf_summary(save_path)
-        return outputs
 
     def to_report_summary_text(self) -> str:
         """Return a concise human-readable single-run summary."""
@@ -1719,7 +1448,7 @@ class COMStatus(_PrettyDataclass):
         path.write_text(self.to_report_summary_text(), encoding="utf-8")
         return {"report_summary_txt": str(path)}
 
-    def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
+    def export(self, save_path: str) -> dict[str, str]:
         """
         Export this single-run COMStatus numeric arrays.
 
@@ -1728,10 +1457,6 @@ class COMStatus(_PrettyDataclass):
         save_path:
             Output directory. The method writes ``arrays.npz`` under this
             directory.
-        include_plots:
-            Backward-compatible compact plot option. New single-run report
-            figures should use COMReport so all plots share one folder tree.
-
         Returns
         -------
         dict
@@ -1812,14 +1537,7 @@ class COMStatus(_PrettyDataclass):
         arrays_path = out_dir / "arrays.npz"
         np.savez_compressed(arrays_path, **arrays)
 
-        outputs = {
-            "arrays": str(arrays_path),
-        }
-        if include_plots:
-            plot_dir = out_dir / "plots"
-            self.plot_summary(str(plot_dir))
-            outputs["plots"] = str(plot_dir)
-        return outputs
+        return {"arrays": str(arrays_path)}
 
 @dataclass(repr=False)
 class COMSearchRow(_PrettyDataclass):
@@ -1857,86 +1575,10 @@ class COMSearchStatus(_PrettyDataclass):
     def COM(self) -> Optional[float]:
         return None if self.best.pmf is None else self.best.pmf.COM
 
-    def plot_fom_trace(self, save_path: str = "") -> Any:
-        """
-        Plot FOM versus retained candidate index.
 
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``search_fom_trace.png``.
-        """
-        ok_rows = [row for row in self.rows if row.status == "ok"]
-        if len(ok_rows) == 0:
-            raise ValueError("COMSearchStatus.rows contains no successful rows to plot.")
 
-        output_file = COMReport._plot_save_path(save_path, "search_fom_trace.png")
-        fig, ax = COMReport._subplots(output_file)
-        ax.plot([row.idx for row in ok_rows], [row.FOM for row in ok_rows], marker="o", linewidth=1.0)
-        ax.axhline(self.best_row.FOM, linestyle="--", color="tab:red", label=f"best FOM={self.best_row.FOM:.2f} dB")
-        ax.set_title("Search FOM Trace")
-        ax.set_xlabel("Candidate index")
-        ax.set_ylabel("FOM (dB)")
-        ax.grid(True)
-        ax.legend()
-        COMReport._finish_figure(fig, output_file)
-        return ax
 
-    def plot_top_candidates(self, save_path: str = "", top_n: int = 10) -> Any:
-        """
-        Plot top-N retained candidates sorted by FOM.
-
-        Parameters
-        ----------
-        save_path:
-            Optional file path or directory. Directory mode writes
-            ``search_top_candidates.png``.
-        top_n:
-            Number of successful candidates to show.
-        """
-        ok_rows = [row for row in self.rows if row.status == "ok"]
-        if len(ok_rows) == 0:
-            raise ValueError("COMSearchStatus.rows contains no successful rows to plot.")
-
-        top_n = int(top_n)
-        if top_n <= 0:
-            raise ValueError("top_n must be positive.")
-
-        rows = sorted(ok_rows, key=lambda row: row.FOM, reverse=True)[:top_n]
-        labels = [f"{row.idx}\n({row.candidate.g_DC:.1f},{row.candidate.g_DC2:.1f})" for row in rows]
-        values = [row.FOM for row in rows]
-
-        output_file = COMReport._plot_save_path(save_path, "search_top_candidates.png")
-        fig, ax = COMReport._subplots(output_file, figsize=(max(7, 0.7 * len(rows)), 4))
-        ax.bar(np.arange(len(rows)), values)
-        ax.set_xticks(np.arange(len(rows)))
-        ax.set_xticklabels(labels)
-        ax.set_title("Top Search Candidates")
-        ax.set_xlabel("Candidate idx\n(g_DC, g_DC2)")
-        ax.set_ylabel("FOM (dB)")
-        ax.grid(True, axis="y")
-        COMReport._finish_figure(fig, output_file)
-        return ax
-
-    def plot_summary(self, save_path: str = "") -> dict[str, Any]:
-        """
-        Plot the standard COM search report set.
-
-        Parameters
-        ----------
-        save_path:
-            Optional output directory. If empty, figures are shown interactively.
-            If provided, fixed filenames are written under this directory.
-        """
-        outputs: dict[str, Any] = {}
-        outputs["search_fom_trace"] = self.plot_fom_trace(save_path)
-        outputs["search_top_candidates"] = self.plot_top_candidates(save_path)
-        best_path = "" if not save_path else str(Path(save_path) / "best")
-        outputs["best"] = self.best.plot_summary(best_path)
-        return outputs
-
-    def export(self, save_path: str, *, include_plots: bool = True) -> dict[str, str]:
+    def export(self, save_path: str) -> dict[str, str]:
         """
         Export search summary plus the full best-candidate COMStatus.
 
@@ -1945,8 +1587,6 @@ class COMSearchStatus(_PrettyDataclass):
         save_path:
             Output directory. The method writes search_summary.json and exports
             the best full status under ``best/``.
-        include_plots:
-            If True, also write search plots and best-candidate plots.
         """
         out_dir = Path(save_path)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1988,1140 +1628,16 @@ class COMSearchStatus(_PrettyDataclass):
         summary_path = out_dir / "search_summary.json"
         self._write_json(summary_path, summary)
 
-        best_outputs = self.best.export(str(out_dir / "best"), include_plots=include_plots)
-        outputs = {
+        best_outputs = self.best.export(str(out_dir / "best"))
+        return {
             "search_summary": str(summary_path),
             "best_arrays": best_outputs["arrays"],
         }
-        if include_plots:
-            self.plot_summary(str(out_dir / "plots"))
-            outputs["plots"] = str(out_dir / "plots")
-        return outputs
 
 # =========================================
 # COM Report Organization
-#==========================================
-class COMReport:
-    """
-    Plot/report orchestration for COM run results.
-
-    Class boundary
-    --------------
-    COMReport owns presentation behavior that needs both COMConfig and
-    COMStatus. COM and the 93A helper functions should stay focused on
-    spec-defined computation; COMStatus remains the data container.
-    """
-
-    def __init__(self, cfg: COMConfig, status: COMStatus | COMSearchStatus):
-        self.cfg = cfg
-        self.search_status = status if isinstance(status, COMSearchStatus) else None
-        self.status = status.best if isinstance(status, COMSearchStatus) else status
-
-    @staticmethod
-    def _plt() -> Any:
-        """Import pyplot without changing the active Matplotlib backend."""
-        import matplotlib.pyplot as plt
-
-        return plt
-
-    @staticmethod
-    def _plot_save_path(save_path: str, filename: str) -> str:
-        if not save_path:
-            return ""
-
-        path = Path(save_path)
-        if path.suffix:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            return str(path)
-
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path / filename)
-
-    @staticmethod
-    def _subplots(save_path: str, *args: Any, **kwargs: Any) -> tuple[Any, Any]:
-        """
-        Create a figure without changing Matplotlib's global backend.
-
-        If save_path is provided, use a local Agg canvas so batch export does
-        not require a GUI backend and does not pollute an interactive debug
-        session.
-        """
-        if save_path:
-            from matplotlib.backends.backend_agg import FigureCanvasAgg
-            from matplotlib.figure import Figure
-
-            figsize = kwargs.pop("figsize", None)
-            fig = Figure(figsize=figsize)
-            FigureCanvasAgg(fig)
-            ax = fig.subplots(*args, **kwargs)
-            return fig, ax
-
-        plt = COMReport._plt()
-        return plt.subplots(*args, **kwargs)
-
-    @staticmethod
-    def _finish_figure(fig: Any, save_path: str) -> None:
-        fig.tight_layout()
-        if save_path:
-            fig.savefig(save_path, bbox_inches="tight")
-        else:
-            plt = COMReport._plt()
-            fig.canvas.draw_idle()
-            plt.show()
-
-    @staticmethod
-    def _path_display_label(idx: int, path: COMPath) -> str:
-        return f"{idx}:{path.kind}"
-
-    def _config_note(self) -> str:
-        return (
-            f"f_nyq={self.cfg.link.fb / 2e9:.3f} GHz, "
-            f"OSR={self.cfg.link.per_ui}, "
-            f"df={self.cfg.link.df / 1e6:.3f} MHz"
-        )
-
-    @staticmethod
-    def _format_txfir(txfir: np.ndarray) -> str:
-        values = [f"{float(x):.3g}" for x in np.asarray(txfir, dtype=float)]
-        return "[" + ", ".join(values) + "]"
-
-    @staticmethod
-    def _format_freq_ghz(value: Optional[float]) -> str:
-        return "None" if value is None else f"{float(value) / 1e9:.3g} GHz"
-
-    @property
-    def _f_nyq(self) -> float:
-        return float(self.cfg.link.fb) / 2.0
-
-    @staticmethod
-    def _pmf_moments(pmf: Pmf1D) -> tuple[float, float]:
-        x = np.asarray(pmf.x, dtype=float)
-        mass = np.asarray(pmf.pmf, dtype=float)
-        mu = float(np.sum(x * mass))
-        variance = float(np.sum((x - mu) ** 2 * mass))
-        return mu, float(np.sqrt(max(0.0, variance)))
-
-    @staticmethod
-    def _relative_gain_db(segment: LinkSegment, frequency_hz: float) -> Optional[float]:
-        if frequency_hz < float(segment.freqs[0]) or frequency_hz > float(segment.freqs[-1]):
-            return None
-        magnitude_db = 20.0 * np.log10(np.maximum(np.abs(segment.tf), np.finfo(float).tiny))
-        return float(np.interp(frequency_hz, segment.freqs, magnitude_db - magnitude_db[0]))
-
-    def _il_f_nyq_subtitle(self, model: SparamModel) -> str:
-        if self._f_nyq < float(model.freqs[0]) or self._f_nyq > float(model.freqs[-1]):
-            return "IL @ f_nyq = outside measured band"
-        il_db = 20.0 * np.log10(np.maximum(np.abs(model.sdd21), np.finfo(float).tiny))
-        value = float(np.interp(self._f_nyq, model.freqs, il_db))
-        return f"IL @ f_nyq = {value:.2f} dB"
-
-    def _annotate_pmf_settings(self, ax: Any, pmf: Pmf1D) -> None:
-        missing_mass = max(0.0, 1.0 - float(self.cfg.pmf.keep_mass))
-        keep_text = "1" if missing_mass == 0.0 else f"1-1e{int(round(np.log10(missing_mass)))}"
-        ax.text(
-            0.01, 0.02,
-            f"dy={pmf.dx:.3e} V, keep_mass={keep_text}",
-            transform=ax.transAxes,
-            ha="left",
-            va="bottom",
-            fontsize=8,
-            bbox={"facecolor": "white", "alpha": 0.85, "edgecolor": "0.6", "pad": 2.0},
-        )
-
-    def _set_plot_title(self, ax: Any, title: str, subtitle: str = "") -> None:
-        if subtitle:
-            ax.set_title(title, fontsize=15, pad=22)
-        else:
-            ax.set_title(title, fontsize=15)
-        if subtitle:
-            ax.text(
-                0.5,
-                1.01,
-                subtitle,
-                ha="center",
-                va="bottom",
-                transform=ax.transAxes,
-                fontsize=10,
-                color="0.25",
-            )
-
-    def _annotate_config(self, ax: Any) -> None:
-        ax.text(
-            0.01,
-            0.01,
-            self._config_note(),
-            ha="left",
-            va="bottom",
-            transform=ax.transAxes,
-            fontsize=8,
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.75, "edgecolor": "0.7"},
-        )
-
-    def _annotate_imp_config(self, ax: Any) -> None:
-        imp = self.cfg.imp
-        ax.text(
-            0.01,
-            0.01,
-            "\n".join(
-                (
-                    f"R_LM={imp.R_LM:.4g}",
-                    f"SNR_TX={imp.SNR_TX:.3g} dB",
-                    f"sigma_RJ={imp.sigma_RJ:.3e} UI",
-                    f"A_DD={imp.A_DD:.3e} UI",
-                    f"eta_0={imp.eta_0:.3e} V^2/Hz",
-                )
-            ),
-            ha="left",
-            va="bottom",
-            transform=ax.transAxes,
-            fontsize=8,
-            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85, "edgecolor": "0.7"},
-        )
-
-    def _path_label(self, path_idx: int) -> str:
-        path = self.status.paths[path_idx]
-        return f"{path_idx:02d}_{path.kind}"
-
-    def _path_dir(self, save_path: str, path_idx: int) -> str:
-        if not save_path:
-            return ""
-        if path_idx == 0 and self.status.paths[path_idx].kind == "victim":
-            dirname = "path_victim"
-        else:
-            dirname = f"path_{self._path_label(path_idx)}"
-        path = Path(save_path) / dirname
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path)
-
-    def _default_freq_xlim(self, freqs: np.ndarray) -> tuple[float, float]:
-        freqs = np.asarray(freqs, dtype=float)
-        if freqs.ndim != 1 or len(freqs) == 0:
-            raise ValueError("Frequency grid must be a non-empty 1D array.")
-        hi = min(float(freqs[-1]), 1.1 * float(self.cfg.link.fb))
-        # LinkSegment.plot_tf() uses a logarithmic frequency axis by default;
-        # omit the DC bin from the default display range.
-        lo = float(freqs[1]) if len(freqs) > 1 and freqs[1] > 0.0 else float(np.finfo(float).tiny)
-        return (lo, hi)
-
-    @staticmethod
-    def _apply_auto_ylim_from_lines(
-        ax: Any,
-        xlim_hz: tuple[float, float],
-        *,
-        x_scale: float = 1e-9,
-        floor_db: float = -300.0,
-        pad_ratio: float = 0.05,
-    ) -> None:
-        lo_x = float(xlim_hz[0]) * x_scale
-        hi_x = float(xlim_hz[1]) * x_scale
-        values: list[np.ndarray] = []
-        for line in ax.lines:
-            x = np.asarray(line.get_xdata(), dtype=float)
-            y = np.asarray(line.get_ydata(), dtype=float)
-            if x.shape != y.shape:
-                continue
-            mask = (x >= lo_x) & (x <= hi_x)
-            if np.any(mask):
-                values.append(y[mask])
-        if not values:
-            return
-        visible = np.concatenate(values)
-        visible = visible[np.isfinite(visible)]
-        above_floor = visible[visible > float(floor_db)]
-        if above_floor.size > 0:
-            visible = above_floor
-        if visible.size == 0:
-            return
-        y_min = float(np.min(visible))
-        y_max = float(np.max(visible))
-        if np.isclose(y_min, y_max):
-            pad = max(1.0, abs(y_min) * float(pad_ratio))
-        else:
-            pad = (y_max - y_min) * float(pad_ratio)
-        ax.set_ylim(y_min - pad, y_max + pad)
-
-    def _plot_sparam_sdd(
-        self,
-        model: SparamModel,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-        subtitle: str = "",
-        annotate_3db: bool = False,
-        annotate_nyq: bool = False,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        if xlim is None:
-            xlim = self._default_freq_xlim(model.freqs)
-        model.plot_sdd(ax=ax, logx=True, xlim=xlim)
-        if annotate_nyq and model.freqs[0] <= self._f_nyq <= model.freqs[-1]:
-            model.annotate_IL(ax, self._f_nyq, label="IL")
-        elif annotate_nyq:
-            ax.text(
-                0.99, 0.08, "f_nyq outside S-param measured band",
-                ha="right", va="bottom", transform=ax.transAxes, fontsize=8, color="tab:red",
-            )
-        if annotate_3db:
-            f_3db = model.frequency_at_sdd21_gain(-3.0)
-            if f_3db is not None and f_3db <= xlim[1]:
-                model.annotate_f(ax, f_3db, label="Sdd21 -3dB")
-        self._set_plot_title(ax, title, subtitle)
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_sparam_il(
-        self,
-        model: SparamModel,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-        subtitle: str = "",
-        annotate_3db: bool = False,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        if xlim is None:
-            xlim = self._default_freq_xlim(model.freqs)
-        annotate_f = self._f_nyq if model.freqs[0] <= self._f_nyq <= model.freqs[-1] else None
-        model.plot_IL(
-            ax=ax,
-            logx=True,
-            xlim=xlim,
-            annotate_f=annotate_f,
-            annotate_label="IL",
-        )
-        if annotate_f is None:
-            ax.text(
-                0.99, 0.08, "f_nyq outside S-param measured band",
-                ha="right", va="bottom", transform=ax.transAxes, fontsize=8, color="tab:red",
-            )
-        if annotate_3db:
-            f_3db = model.frequency_at_sdd21_gain(-3.0)
-            if f_3db is not None and f_3db <= xlim[1]:
-                model.annotate_f(ax, f_3db, label="Sdd21 -3dB")
-        self._set_plot_title(ax, title, subtitle)
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_link_tf(
-        self,
-        segment: LinkSegment,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-        ylim: Optional[tuple[float, float]] = None,
-        subtitle: str = "",
-        annotate_3db: bool = False,
-        annotate_nyq: bool = False,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        if xlim is None:
-            xlim = self._default_freq_xlim(segment.freqs)
-        segment.plot_tf(ax=ax, x_scale="log", xlim=xlim, ylim=ylim)
-        if annotate_nyq and segment.freqs[0] <= self._f_nyq <= segment.freqs[-1]:
-            segment.annotate_f(ax, self._f_nyq)
-        if annotate_3db:
-            f_3db = segment.frequency_at_gain(-3.0)
-            if f_3db is not None and f_3db <= xlim[1]:
-                segment.annotate_f(ax, f_3db)
-        self._set_plot_title(ax, title, subtitle)
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_link_ir(
-        self,
-        segment: LinkSegment,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        segment.plot_ir(ax=ax, x_origin="max", x_unit="ui", xlim_ui=xlim_ui)
-        ax.set_title(title)
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_pmf(
-        self,
-        pmf: Optional[Pmf1D],
-        title: str,
-        filename: str,
-        save_path: str = "",
-    ) -> Any:
-        if pmf is None:
-            raise ValueError(f"{title} PMF is not available.")
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        pmf.plot(ax=ax, label=title)
-        mu, std = self._pmf_moments(pmf)
-        self._set_plot_title(ax, title, f"mu={mu:.3e} V, std={std:.3e} V")
-        self._annotate_pmf_settings(ax, pmf)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_discrete_time_response(
-        self,
-        x_ui: np.ndarray,
-        y: np.ndarray,
-        title: str,
-        ylabel: str,
-        ax: Any = None,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-        label: Optional[str] = None,
-        filename: str = "discrete_response.png",
-    ) -> Any:
-        x_ui = np.asarray(x_ui, dtype=float)
-        y = np.asarray(y, dtype=float)
-        if x_ui.shape != y.shape:
-            raise ValueError("x_ui and y must have the same shape.")
-        if not np.all(np.isfinite(x_ui)) or not np.all(np.isfinite(y)):
-            raise ValueError("x_ui and y must contain only finite values.")
-
-        output_file = self._plot_save_path(save_path, filename)
-        created_ax = ax is None
-        if created_ax:
-            fig, ax = self._subplots(output_file)
-        else:
-            fig = ax.figure
-
-        ax.plot(x_ui, y, marker="o", markersize=3, linewidth=1.0, label=label)
-        if label is not None:
-            ax.legend()
-        ax.set_title(title)
-        ax.set_xlabel("Discrete time (UI, main cursor = 0)")
-        ax.set_ylabel(ylabel)
-        if xlim_ui is not None:
-            ax.set_xlim(*xlim_ui)
-        ax.grid(True)
-        self._annotate_config(ax)
-
-        if output_file or created_ax:
-            self._finish_figure(fig, output_file)
-        return ax
-
-    def _h_dsamp(self) -> np.ndarray:
-        dfe = self.status.dfe
-        if dfe is None:
-            raise RuntimeError("COMStatus.dfe is not available.")
-        return self.status.victim.pulse.ir[dfe.pos::self.cfg.link.per_ui]
-
-    def _h_isi(self) -> np.ndarray:
-        if self.status.imp is not None:
-            return self.status.imp.h_ISI
-        dfe = self.status.dfe
-        if dfe is None or not hasattr(dfe, "h_ISI"):
-            raise RuntimeError("Residual ISI is not available. Run post-DTE impairment calculation first.")
-        return dfe.h_ISI
-
-    def _t_dsamp_ui(self) -> np.ndarray:
-        dfe = self.status.dfe
-        if dfe is None:
-            raise RuntimeError("COMStatus.dfe is not available.")
-        num_pre = (dfe.ts - dfe.pos) // self.cfg.link.per_ui
-        return np.arange(len(self._h_dsamp()), dtype=float) - float(num_pre)
-
-    def _h_j_ui_axis(self) -> np.ndarray:
-        dfe = self.status.dfe
-        if dfe is None:
-            raise RuntimeError("COMStatus.dfe is not available.")
-
-        h = self.status.victim.pulse.ir
-        pos = int(dfe.ts) % self.cfg.link.per_ui
-        center_idx = np.arange(pos, len(h), self.cfg.link.per_ui)
-        valid = (center_idx > 0) & (center_idx < len(h) - 1)
-        center_idx = center_idx[valid]
-        return (center_idx.astype(float) - float(dfe.ts)) / float(self.cfg.link.per_ui)
-
-    def plot_paths_pulses(
-        self,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, "path_pulses.png")
-        fig, ax = self._subplots(output_file)
-        for idx, path in enumerate(self.status.paths):
-            ir = path.pulse.ir
-            x = path.pulse.cfg.times_ui - path.pulse.cfg.times_ui[int(np.argmax(np.abs(ir)))]
-            ax.plot(x, ir, label=self._path_display_label(idx, path))
-        ax.set_title("Path Pulse Responses")
-        ax.set_xlabel("Time (UI)")
-        ax.set_ylabel("h(t)")
-        if xlim_ui is not None:
-            ax.set_xlim(*xlim_ui)
-        ax.grid(True)
-        ax.legend()
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def plot_paths_S_all_IL(
-        self,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, "path_S_all_IL.png")
-        fig, ax = self._subplots(output_file)
-        if xlim is None:
-            xlim = self._default_freq_xlim(self.status.paths[0].S_all.freqs)
-        for idx, path in enumerate(self.status.paths):
-            path.S_all.plot_IL(
-                ax=ax,
-                logx=True,
-                xlim=xlim,
-                label=self._path_display_label(idx, path),
-                auto_ylim=False,
-            )
-        self._apply_auto_ylim_from_lines(ax, xlim)
-        ax.axvline(self._f_nyq / 1e9, color="tab:red", linestyle="--", linewidth=0.8, label="f_nyq")
-        ax.set_title("Augmented Signal Path IL, S_all")
-        ax.legend()
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_link_sbr(
-        self,
-        segment: LinkSegment,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-2.0, 4.0),
-        subtitle: str = "",
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        segment.plot_sbr(ax=ax, x_origin="start", x_unit="ui", xlim_ui=xlim_ui)
-        self._set_plot_title(ax, title, subtitle)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_link_sr(
-        self,
-        segment: LinkSegment,
-        title: str,
-        filename: str,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-0.2, 1.2),
-        subtitle: str = "",
-        annotate_20_80: bool = False,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, filename)
-        fig, ax = self._subplots(output_file)
-        segment.plot_sr(ax=ax, x_origin="max", x_unit="ui", xlim_ui=xlim_ui)
-        if annotate_20_80:
-            self._annotate_step_transition(ax, segment)
-        self._set_plot_title(ax, title, subtitle)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _annotate_step_transition(self, ax: Any, segment: LinkSegment) -> None:
-        sr = np.asarray(segment.sr, dtype=float)
-        x_ui = (segment.times - segment.times[int(np.argmax(np.abs(segment.ir)))]) * self.cfg.link.fb
-        y0 = float(np.nanmin(sr))
-        y1 = float(np.nanmax(sr))
-        span = y1 - y0
-        if not np.isfinite(span) or span <= 0.0:
-            return
-
-        y20 = y0 + 0.2 * span
-        y80 = y0 + 0.8 * span
-
-        def crossing(level: float) -> Optional[float]:
-            above = np.flatnonzero(sr >= level)
-            if above.size == 0:
-                return None
-            idx = int(above[0])
-            if idx == 0:
-                return float(x_ui[0])
-            x0, x1 = float(x_ui[idx - 1]), float(x_ui[idx])
-            v0, v1 = float(sr[idx - 1]), float(sr[idx])
-            if np.isclose(v1, v0):
-                return x1
-            return x0 + (level - v0) * (x1 - x0) / (v1 - v0)
-
-        x20 = crossing(y20)
-        x80 = crossing(y80)
-        if x20 is None or x80 is None:
-            return
-
-        ax.axhline(y20, linestyle=":", color="tab:gray", linewidth=1.0)
-        ax.axhline(y80, linestyle=":", color="tab:gray", linewidth=1.0)
-        ax.axvline(x20, linestyle="--", color="tab:red", linewidth=1.0)
-        ax.axvline(x80, linestyle="--", color="tab:red", linewidth=1.0)
-        ax.annotate(
-            f"20%-80% = {x80 - x20:.3g} UI",
-            xy=((x20 + x80) / 2.0, y80),
-            xytext=(8, 8),
-            textcoords="offset points",
-            color="tab:red",
-            fontsize=9,
-        )
-
-    def plot_paths_H21_tf(
-        self,
-        save_path: str = "",
-        xlim: Optional[tuple[float, float]] = None,
-        ylim: Optional[tuple[float, float]] = None,
-    ) -> Any:
-        output_file = self._plot_save_path(save_path, "path_H21_tf.png")
-        fig, ax = self._subplots(output_file)
-        if xlim is None:
-            xlim = self._default_freq_xlim(self.status.paths[0].H_21.freqs)
-        for idx, path in enumerate(self.status.paths):
-            path.H_21.plot_tf(
-                ax=ax,
-                x_scale="log",
-                xlim=xlim,
-                ylim=ylim,
-                auto_ylim=False,
-                label=self._path_display_label(idx, path),
-            )
-        if ylim is None:
-            self._apply_auto_ylim_from_lines(ax, xlim)
-        ax.axvline(self._f_nyq / 1e9, color="tab:red", linestyle="--", linewidth=0.8, label="f_nyq")
-        ax.set_title("Voltage Transfer Function H21")
-        ax.legend()
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def plot_COMPath(self, path_idx: int = 0, save_path: str = "") -> dict[str, Any]:
-        """
-        Plot detailed path-building results for one COMPath.
-
-        Parameters
-        ----------
-        path_idx:
-            Index in COMStatus.paths. Default 0 plots the victim path.
-        save_path:
-            Optional output directory. If provided, figures are written under a
-            path-specific subdirectory.
-        """
-        path_idx = int(path_idx)
-        if path_idx < 0 or path_idx >= len(self.status.paths):
-            raise IndexError("path_idx is outside COMStatus.paths.")
-
-        path = self.status.paths[path_idx]
-        path_dir = self._path_dir(save_path, path_idx)
-        outputs: dict[str, Any] = {}
-        outputs["S_tx_sdd"] = self._plot_S_tx(path, path_dir)
-        outputs["S_ch_sdd"] = self._plot_S_ch(path, path_dir)
-        outputs["S_rx_sdd"] = self._plot_S_rx(path, path_dir)
-        outputs["S_all_sdd"] = self._plot_S_all(path, path_dir)
-        outputs["S_ch_IL"] = self._plot_sparam_il(
-            path.S_ch,
-            f"{self._path_label(path_idx)} S_ch IL",
-            "S_ch_IL.png",
-            path_dir,
-            subtitle=f"Measured channel Sdd21; {self._il_f_nyq_subtitle(path.S_ch)}",
-        )
-        outputs["S_all_IL"] = self._plot_sparam_il(
-            path.S_all,
-            f"{self._path_label(path_idx)} S_all IL",
-            "S_all_IL.png",
-            path_dir,
-            subtitle=f"Cascaded through-path Sdd21; {self._il_f_nyq_subtitle(path.S_all)}",
-        )
-        outputs["H_ffe_tf"] = self._plot_H_ffe(path, path_dir)
-        outputs["H_t_tf"] = self._plot_H_t(path, path_dir)
-        outputs["H_t_sr"] = self._plot_H_t_sr(path, path_dir)
-        outputs["H_21_tf"] = self._plot_H_21(path, path_dir)
-        outputs["H_21_ir"] = self._plot_link_ir(path.H_21, f"{self._path_label(path_idx)} H_21 IR", "H_21_ir.png", path_dir)
-        outputs["H_r_tf"] = self._plot_H_r(path, path_dir)
-        outputs["H_ctf_tf"] = self._plot_H_ctf(path, path_dir)
-        h_all_nyq = self._relative_gain_db(path.H_all, self._f_nyq)
-        h_all_subtitle = (
-            f"All continuous-time filters cascaded; gain @ f_nyq={h_all_nyq:.2f} dB"
-            if h_all_nyq is not None
-            else "All continuous-time filters cascaded; f_nyq outside measured band"
-        )
-        outputs["H_all_tf"] = self._plot_link_tf(
-            path.H_all,
-            f"{self._path_label(path_idx)} H_all",
-            "H_all_tf.png",
-            path_dir,
-            subtitle=h_all_subtitle,
-            annotate_nyq=True,
-        )
-        outputs["pulse_ir"] = self._plot_link_ir(path.pulse, f"{self._path_label(path_idx)} Pulse IR", "pulse_ir.png", path_dir)
-        return outputs
-
-    def _plot_S_tx(self, path: COMPath, save_path: str = "") -> Any:
-        return self._plot_sparam_sdd(
-            path.S_tx,
-            f"{path.kind} S_tx",
-            "S_tx_sdd.png",
-            save_path,
-            subtitle="TX package S-parameter",
-        )
-
-    def _plot_S_rx(self, path: COMPath, save_path: str = "") -> Any:
-        return self._plot_sparam_sdd(
-            path.S_rx,
-            f"{path.kind} S_rx",
-            "S_rx_sdd.png",
-            save_path,
-            subtitle="RX package S-parameter",
-        )
-
-    def _plot_S_ch(self, path: COMPath, save_path: str = "") -> Any:
-        return self._plot_sparam_sdd(
-            path.S_ch,
-            f"{path.kind} S_ch",
-            "S_ch_sdd.png",
-            save_path,
-            subtitle="Channel Sdd; IL@f_nyq is absolute when fb is inside measured band",
-            annotate_nyq=True,
-        )
-
-    def _plot_S_all(self, path: COMPath, save_path: str = "") -> Any:
-        return self._plot_sparam_sdd(
-            path.S_all,
-            f"{path.kind} S_all",
-            "S_all_sdd.png",
-            save_path,
-            subtitle="Cascaded S_tx + S_ch + S_rx; IL@f_nyq is absolute when fb is inside measured band",
-            annotate_nyq=True,
-        )
-
-    def _plot_H_ffe(self, path: COMPath, save_path: str = "") -> Any:
-        if path.kind == "next":
-            subtitle = "NEXT aggressor H_ffe = 1 by COM path convention"
-        else:
-            subtitle = f"txfir = {self._format_txfir(self.cfg.filter.txfir)}"
-        return self._plot_link_tf(
-            path.H_ffe,
-            f"{path.kind} H_ffe",
-            "H_ffe_tf.png",
-            save_path,
-            subtitle=subtitle,
-        )
-
-    def _plot_H_t(self, path: COMPath, save_path: str = "") -> Any:
-        Tr = self.cfg.filter.Tr
-        if Tr is None:
-            subtitle = "Tr = None"
-        else:
-            subtitle = f"Tr = {Tr * 1e12:.3g} ps = {Tr * self.cfg.link.fb:.3g} UI"
-        return self._plot_link_tf(
-            path.H_t,
-            f"{path.kind} H_t",
-            "H_t_tf.png",
-            save_path,
-            subtitle=subtitle,
-            annotate_nyq=True,
-        )
-
-    def _plot_H_t_sr(self, path: COMPath, save_path: str = "") -> Any:
-        Tr = self.cfg.filter.Tr
-        if Tr is None:
-            subtitle = "Tr = None"
-        else:
-            subtitle = f"Tr = {Tr * 1e12:.3g} ps = {Tr * self.cfg.link.fb:.3g} UI"
-        return self._plot_link_sr(
-            path.H_t,
-            f"{path.kind} H_t Step Response",
-            "H_t_sr.png",
-            save_path,
-            xlim_ui=(-0.4, 1.2),
-            subtitle=subtitle,
-            annotate_20_80=True,
-        )
-
-    def _plot_H_21(self, path: COMPath, save_path: str = "") -> Any:
-        return self._plot_link_tf(
-            path.H_21,
-            f"{path.kind} H_21",
-            "H_21_tf.png",
-            save_path,
-            subtitle="Terminated voltage transfer function; f_nyq marker shows channel loss relative to DC",
-            annotate_nyq=True,
-        )
-
-    def _plot_H_r(self, path: COMPath, save_path: str = "") -> Any:
-        fr = self.cfg.filter.fr
-        subtitle = "fr = None" if fr is None else f"fr = {fr / 1e9:.3g} GHz"
-        return self._plot_link_tf(
-            path.H_r,
-            f"{path.kind} H_r",
-            "H_r_tf.png",
-            save_path,
-            subtitle=subtitle,
-            annotate_3db=True,
-            annotate_nyq=True,
-        )
-
-    def _plot_H_ctf(self, path: COMPath, save_path: str = "") -> Any:
-        subtitle = (
-            f"g_DC={self.cfg.filter.g_DC} dB, g_DC2={self.cfg.filter.g_DC2} dB, "
-            f"fz={self._format_freq_ghz(self.cfg.filter.f_z)}, "
-            f"fp1={self._format_freq_ghz(self.cfg.filter.f_p1)}, "
-            f"fp2={self._format_freq_ghz(self.cfg.filter.f_p2)}"
-        )
-        return self._plot_link_tf(
-            path.H_ctf,
-            f"{path.kind} H_ctf",
-            "H_ctf_tf.png",
-            save_path,
-            subtitle=subtitle,
-        )
-
-    def plot_COMDFEStatus(self, save_path: str = "") -> dict[str, Any]:
-        if self.status.dfe is None:
-            raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
-        out_dir = "" if not save_path else str(Path(save_path) / "phase_dfe")
-        if out_dir:
-            Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-        outputs: dict[str, Any] = {}
-        outputs["h_dsamp"] = self._plot_pulse_and_h_dsamp(out_dir)
-        outputs["h_ISI"] = self.plot_h_ISI(save_path=out_dir)
-        outputs["dfe_summary"] = self._plot_dfe_summary(out_dir)
-        return outputs
-
-    def _plot_pulse_and_h_dsamp(self, save_path: str = "") -> Any:
-        if self.status.dfe is None:
-            raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
-        dfe = self.status.dfe
-        pulse_ir = np.asarray(self.status.victim.pulse.ir, dtype=float)
-        h_dsamp = self._h_dsamp()
-        per_ui = int(self.cfg.link.per_ui)
-        pulse_index = np.arange(len(pulse_ir), dtype=float)
-        dt_index = np.arange(len(h_dsamp), dtype=float) * per_ui + float(dfe.pos)
-        x_pulse = (pulse_index - float(dfe.ts)) / per_ui
-        x_dsamp = (dt_index - float(dfe.ts)) / per_ui
-
-        output_file = self._plot_save_path(save_path, "h_dsamp.png")
-        fig, ax = self._subplots(output_file)
-        ax.plot(x_pulse, pulse_ir, color="0.35", linewidth=1.0, label="pulse.ir (CT)")
-        ax.stem(x_dsamp, h_dsamp, linefmt="C0-", markerfmt="C0o", basefmt=" ", label="h_dsamp (DT)")
-        ax.axvline(0.0, color="tab:green", linestyle="--", linewidth=1.0, label=f"selected pos={dfe.pos}")
-        ax.set_xlabel("Time (UI, selected ts = 0)")
-        ax.set_ylabel("Amplitude (V)")
-        ax.set_xlim(-5.0, 20.0)
-        ax.grid(True)
-        ax.legend()
-        self._set_plot_title(ax, "CT Pulse and Selected DT Response", "93A selected sampling phase")
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_dfe_summary(
-        self,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-    ) -> Any:
-        if self.status.dfe is None:
-            raise ValueError("COMStatus.dfe is None; run DFE calculation first.")
-
-        output_file = self._plot_save_path(save_path, "dfe_summary.png")
-        fig, axes = self._subplots(output_file, 2, 1, figsize=(7, 6))
-        tap_idx = np.arange(1, len(self.status.dfe.dfe_coeff) + 1)
-        axes[0].bar(tap_idx, self.status.dfe.dfe_coeff)
-        axes[0].set_title("DFE Coefficients")
-        axes[0].set_xlabel("Tap index")
-        axes[0].set_ylabel("Coefficient")
-        axes[0].set_xlim(0.5, max(1.5, len(self.status.dfe.dfe_coeff) + 0.5))
-        axes[0].grid(True)
-
-        axes[1].bar(self._t_dsamp_ui(), self._h_isi(), width=0.8)
-        axes[1].set_title("Residual ISI Samples")
-        axes[1].set_xlabel("Discrete time (UI, main cursor = 0)")
-        axes[1].set_ylabel("Amplitude (V)")
-        if xlim_ui is not None:
-            axes[1].set_xlim(*xlim_ui)
-        axes[1].grid(True)
-        self._annotate_config(axes[1])
-        self._finish_figure(fig, output_file)
-        return axes
-
-    def plot_h_dsamp(
-        self,
-        ax: Any = None,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-        label: Optional[str] = None,
-    ) -> Any:
-        return self._plot_discrete_time_response(
-            self._t_dsamp_ui(),
-            self._h_dsamp(),
-            title="Downsampled Victim Pulse",
-            ylabel="h_dsamp (V)",
-            ax=ax,
-            save_path=save_path,
-            xlim_ui=xlim_ui,
-            label=label,
-            filename="h_dsamp.png",
-        )
-
-    def plot_h_ISI(
-        self,
-        ax: Any = None,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-        label: Optional[str] = None,
-    ) -> Any:
-        if self.status.dfe is None:
-            raise RuntimeError("COMStatus.dfe is not available.")
-        return self._plot_discrete_time_response(
-            self._t_dsamp_ui(),
-            self._h_isi(),
-            title="Residual ISI Samples",
-            ylabel="h_ISI (V)",
-            ax=ax,
-            save_path=save_path,
-            xlim_ui=xlim_ui,
-            label=label,
-            filename="h_ISI.png",
-        )
-
-    def plot_h_J(
-        self,
-        ax: Any = None,
-        save_path: str = "",
-        xlim_ui: Optional[tuple[float, float]] = (-5.0, 20.0),
-        label: Optional[str] = None,
-    ) -> Any:
-        if self.status.imp is None:
-            raise RuntimeError("COMStatus.imp is not available.")
-        return self._plot_discrete_time_response(
-            self._h_j_ui_axis(),
-            self.status.imp.h_J,
-            title="Sampled Jitter Sensitivity",
-            ylabel="h_J (V/UI)",
-            ax=ax,
-            save_path=save_path,
-            xlim_ui=xlim_ui,
-            label=label,
-            filename="h_J.png",
-        )
-
-    def plot_COMImpairmentStatus(self, save_path: str = "") -> dict[str, Any]:
-        if self.status.imp is None:
-            raise ValueError("COMStatus.imp is None; run imp calculation first.")
-        out_dir = "" if not save_path else str(Path(save_path) / "imp")
-        if out_dir:
-            Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-        outputs: dict[str, Any] = {}
-        outputs["imp_summary"] = self._plot_imp_summary(out_dir)
-        outputs["imp_proportion"] = self._plot_imp_proportion(out_dir)
-        outputs["h_J"] = self.plot_h_J(save_path=out_dir)
-        outputs["noise_filter"] = self._plot_noise_filter(out_dir)
-        return outputs
-
-    def _plot_imp_proportion(self, save_path: str = "") -> Any:
-        if self.status.imp is None:
-            raise ValueError("COMStatus.imp is None; run imp calculation first.")
-        labels = ["TX", "ISI", "J", "XT", "N"]
-        sigma = np.asarray(
-            [
-                self.status.imp.sigma_TX,
-                self.status.imp.sigma_ISI,
-                self.status.imp.sigma_J,
-                self.status.imp.sigma_XT,
-                self.status.imp.sigma_N,
-            ],
-            dtype=float,
-        )
-        variance = sigma**2
-        percentages = 100.0 * variance / np.sum(variance)
-        output_file = self._plot_save_path(save_path, "imp_proportion.png")
-        fig, ax = self._subplots(output_file, figsize=(7, 4))
-        bars = ax.bar(labels, percentages)
-        for bar, percentage in zip(bars, percentages):
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                bar.get_height(),
-                f"{percentage:.1f}%",
-                ha="center",
-                va="bottom",
-            )
-        ax.set_ylabel("Variance contribution (%)")
-        ax.set_ylim(0.0, max(100.0, float(np.max(percentages)) * 1.18))
-        ax.grid(True, axis="y", alpha=0.35)
-        self._set_plot_title(ax, "93A Impairment Proportion", "Percentage of total impairment variance")
-        self._annotate_imp_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_imp_summary(self, save_path: str = "") -> Any:
-        if self.status.imp is None:
-            raise ValueError("COMStatus.imp is None; run imp calculation first.")
-
-        labels = ["TX", "ISI", "J", "XT", "N"]
-        values = [
-            self.status.imp.sigma_TX,
-            self.status.imp.sigma_ISI,
-            self.status.imp.sigma_J,
-            self.status.imp.sigma_XT,
-            self.status.imp.sigma_N,
-        ]
-
-        output_file = self._plot_save_path(save_path, "imp_summary.png")
-        fig, ax = self._subplots(output_file)
-        ax.bar(labels, values)
-        ax.set_title("Imp RMS Breakdown")
-        ax.set_ylabel("RMS amplitude (V)")
-        ax.grid(True, axis="y")
-        text = f"As={self.status.imp.As:.4e} V"
-        if self.status.FOM is not None:
-            text += f"\nFOM={self.status.FOM:.2f} dB"
-        ax.text(0.98, 0.95, text, ha="right", va="top", transform=ax.transAxes)
-        self._annotate_imp_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def _plot_noise_filter(self, save_path: str = "") -> Any:
-        noise_filter = _build_H_r_93A(self.cfg.link, self.cfg.filter).cascade_tf(
-            _build_H_ctf_93A(self.cfg.link, self.cfg.filter)
-        )
-        output_file = self._plot_save_path(save_path, "noise_filter_tf.png")
-        fig, ax = self._subplots(output_file)
-        noise_filter.plot_tf(ax=ax)
-        if self.cfg.filter.fr is not None:
-            fr_ghz = self.cfg.filter.fr / 1e9
-            ax.axvline(fr_ghz, linestyle="--", color="tab:red", linewidth=1.0, label=f"fr={fr_ghz:.3f} GHz")
-            ax.legend()
-        ax.set_title("Receiver Noise Filter H_r * H_ctf")
-        self._annotate_config(ax)
-        self._finish_figure(fig, output_file)
-        return ax
-
-    def plot_COMPMFStatus(self, save_path: str = "") -> dict[str, Any]:
-        if self.status.pmf is None:
-            raise ValueError("COMStatus.pmf is None; run PMF calculation first.")
-        out_dir = "" if not save_path else str(Path(save_path) / "pmf")
-        if out_dir:
-            Path(out_dir).mkdir(parents=True, exist_ok=True)
-
-        pmf_status = self.status.pmf
-        outputs: dict[str, Any] = {}
-        components = [
-            (name, getattr(pmf_status, name))
-            for name in ("p_ISI", "p_G", "p_DD", "p_XT", "p_qn")
-            if getattr(pmf_status, name) is not None
-        ]
-        for name, pmf in components:
-            outputs[name] = self._plot_pmf(pmf, name, f"{name}.png", out_dir)
-
-        output_file = self._plot_save_path(out_dir, "pmf_components.png")
-        fig, ax = self._subplots(output_file)
-        for name, pmf in components:
-            pmf.plot(ax=ax, label=name)
-        self._set_plot_title(ax, "Final PMF Components")
-        if components:
-            self._annotate_pmf_settings(ax, components[0][1])
-        self._finish_figure(fig, output_file)
-        outputs["components"] = ax
-        outputs["combined_cdf"] = self._plot_pmf_summary(out_dir)
-        return outputs
-
-    def _plot_pmf_summary(self, save_path: str = "") -> Any:
-        if self.status.pmf is None or self.status.pmf.p_combined is None:
-            raise ValueError("COMStatus.pmf.p_combined is not available.")
-
-        pmf_status = self.status.pmf
-        total = pmf_status.p_combined
-        output_file = self._plot_save_path(save_path, "combined_cdf.png")
-        fig, axes = self._subplots(output_file, 2, 1, figsize=(7, 7), sharex=True)
-        pdf_ax, cdf_ax = axes
-        total.plot(ax=pdf_ax, label="p_total")
-        total.plot(ax=cdf_ax, quantity="cdf", label="CDF(p_total)")
-
-        der0 = float(self.cfg.DER_0)
-        y0 = float(total.quantile(der0)) if pmf_status.y0 is None else float(pmf_status.y0)
-        p_total_y0 = float(np.interp(y0, total.x, total.pmf))
-        for axis in axes:
-            axis.axvline(y0, color="tab:red", linestyle="--", linewidth=1.0)
-        pdf_ax.scatter([y0], [p_total_y0], color="tab:red", zorder=3)
-        pdf_ax.annotate(
-            f"A_ni={abs(y0):.3e} V",
-            xy=(y0, p_total_y0),
-            xytext=(8, 8),
-            textcoords="offset points",
-            color="tab:red",
-            fontsize=8,
-        )
-        cdf_ax.scatter([y0], [der0], color="tab:red", zorder=3)
-        cdf_ax.axhline(der0, color="tab:red", linestyle=":", linewidth=0.8)
-        cdf_ax.annotate(
-            f"DER_0={der0:.3e}\nA_ni={abs(y0):.3e} V",
-            xy=(y0, der0),
-            xytext=(8, 8),
-            textcoords="offset points",
-            color="tab:red",
-            fontsize=8,
-        )
-        cdf_values = np.asarray(total.cdf, dtype=float)
-        positive_cdf = cdf_values[np.isfinite(cdf_values) & (cdf_values > 0.0)]
-        cdf_ax.set_yscale("log")
-        lower = max(1e-12, float(np.min(positive_cdf)) * 0.5 if positive_cdf.size else 1e-12)
-        cdf_ax.set_ylim(lower, 1.0)
-
-        com_text = f"COM={pmf_status.COM:.3f} dB" if pmf_status.COM is not None else "COM=None"
-        self._set_plot_title(pdf_ax, "Total PMF PDF", f"{com_text}, DER_0={der0:.3e}, A_ni={abs(y0):.3e} V")
-        self._set_plot_title(cdf_ax, "Total PMF CDF", f"{com_text}, DER_0 threshold")
-        self._annotate_pmf_settings(cdf_ax, total)
-        self._finish_figure(fig, output_file)
-        return axes
-
-    def plot_single_run(self, save_path: str = "", path_idx: int = 0) -> dict[str, Any]:
-        """
-        Plot detailed single-run report figures.
-
-        Parameters
-        ----------
-        save_path:
-            Optional output directory.
-        path_idx:
-            Path index for the detailed COMPath plot. Default 0 is victim.
-        """
-        outputs: dict[str, Any] = {}
-        if save_path:
-            Path(save_path).mkdir(parents=True, exist_ok=True)
-
-        outputs["paths_pulses"] = self.plot_paths_pulses(save_path)
-        outputs["paths_S_all_IL"] = self.plot_paths_S_all_IL(save_path)
-        outputs["paths_H21_tf"] = self.plot_paths_H21_tf(save_path)
-        outputs["COMPath"] = self.plot_COMPath(path_idx=path_idx, save_path=save_path)
-        if self.status.dfe is not None:
-            outputs["COMDFEStatus"] = self.plot_COMDFEStatus(save_path)
-        if self.status.imp is not None:
-            outputs["COMImpairmentStatus"] = self.plot_COMImpairmentStatus(save_path)
-        if self.status.pmf is not None:
-            outputs["COMPMFStatus"] = self.plot_COMPMFStatus(save_path)
-        return outputs
-
-    def plot_search_run(self, save_path: str = "") -> dict[str, Any]:
-        """
-        Plot search-run report figures.
-
-        The current search detail view keeps search-level summary figures and
-        then plots the best candidate through the single-run report path.
-        """
-        if self.search_status is None:
-            raise ValueError("COMReport was not initialized with COMSearchStatus.")
-        outputs: dict[str, Any] = {}
-        if save_path:
-            Path(save_path).mkdir(parents=True, exist_ok=True)
-        outputs["search_fom_trace"] = self.search_status.plot_fom_trace(save_path)
-        outputs["search_top_candidates"] = self.search_status.plot_top_candidates(save_path)
-        best_dir = "" if not save_path else str(Path(save_path) / "best")
-        outputs["best"] = COMReport(self.cfg, self.search_status.best).plot_single_run(best_dir)
-        return outputs
+# =========================================
+from serdes_coding.reporting.com_report_93A import COMReport
 
 # ======================================
 # class helpers
@@ -3156,9 +1672,11 @@ def _build_txpkg_93A(freqs: np.ndarray, txpkg_cfg: COMPkgConfig, *, isNext: bool
     S_d = IEEECOMSparam.shunt_capacitance_93A(freqs, C_d, txpkg_cfg.R0)
     S_s = IEEECOMSparam.series_inductance_93A(freqs, L_s, txpkg_cfg.R0)
     S_b = IEEECOMSparam.shunt_capacitance_93A(freqs, C_b, txpkg_cfg.R0)
-    S_l = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c)
+    tl_coefficients = dict(gamma0=txpkg_cfg.gamma_0, a1=txpkg_cfg.a1,
+                           a2=txpkg_cfg.a2, tau=txpkg_cfg.tau)
+    S_l = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p, Zc=txpkg_cfg.Z_c, **tl_coefficients)
     if (txpkg_cfg.z_p2 is not None):
-        S_l2 = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2)
+        S_l2 = IEEECOMSparam.pkg_trans_line_93A(freqs, txpkg_cfg.R0, txpkg_cfg.z_p2, Zc=txpkg_cfg.Z_c2, **tl_coefficients)
     S_p = IEEECOMSparam.shunt_capacitance_93A(freqs, C_p, txpkg_cfg.R0)
 
     # cascade
@@ -3295,6 +1813,7 @@ def _build_channel_under_test_93A(channel_cfg: COMChannelConfig) -> list[SparamM
             mode="s4p",
             port_order=channel_cfg.port_order,
             z0=2.0 * channel_cfg.R0,
+            frequency_limit_Hz=channel_cfg.sparam_frequency_limit_Hz,
         )
         for path in paths
     ]
@@ -4155,7 +2674,7 @@ class COM:
         sigma_XT = np.sqrt( var_XT )
 
         # sigma_N
-        noise_psd = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0)
+        noise_psd = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0, cfg=link_cfg)
         noise_filter = (
             _build_H_r_93A(link_cfg, ft_cfg)
             .cascade_tf(_build_H_ctf_93A(link_cfg, ft_cfg))
@@ -4312,10 +2831,9 @@ if __name__ == "__main__":
         elapsed_s = time.perf_counter() - started
 
         outputs = cfg.export(str(REPORT_PATH))
-        outputs.update(status.export(str(REPORT_PATH), include_plots=False))
+        outputs.update(status.export(str(REPORT_PATH)))
         outputs.update(status.export_report_summary(str(REPORT_PATH)))
-        COMReport(cfg, status).plot_single_run(str(REPORT_PATH / "plots"), path_idx=0)
-        outputs["plots"] = str(REPORT_PATH / "plots")
+        outputs.update(COMReport(cfg, status).export_single_run(REPORT_PATH, path_idx=0))
 
         print(f"93A single_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
         print(f"case: {CASE_ID}")
@@ -4335,10 +2853,9 @@ if __name__ == "__main__":
         elapsed_s = time.perf_counter() - started
 
         outputs = cfg.export(str(REPORT_PATH))
-        outputs.update(status.export(str(REPORT_PATH), include_plots=False))
+        outputs.update(status.export(str(REPORT_PATH)))
         outputs.update(status.best.export_report_summary(str(REPORT_PATH / "best")))
-        COMReport(cfg, status).plot_search_run(str(REPORT_PATH / "plots"))
-        outputs["plots"] = str(REPORT_PATH / "plots")
+        outputs.update(COMReport(cfg, status).export_search_run(REPORT_PATH))
 
         print(f"93A search_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
         print(f"case: {CASE_ID}")

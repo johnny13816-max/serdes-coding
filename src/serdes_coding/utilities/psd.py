@@ -7,13 +7,14 @@ link-response layer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union
 
 import numpy as np
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
+    from .link import LinkConfig
 
 
 def _freqs_equal(
@@ -80,11 +81,14 @@ class ContinuousPSD:
     freqs: np.ndarray                # unit: Hz, one-sided non-negative frequency axis
     psd: np.ndarray                  # unit: quantity^2/Hz, one-sided PSD samples
     ifftable: bool = False           # True when freqs are aligned to a LinkConfig rfft grid
+    cfg: Optional['LinkConfig'] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.freqs = _validate_freqs(self.freqs)
         self.psd = self.validate_psd(self.psd, self.freqs)
         self.ifftable = bool(self.ifftable or self.is_ifftable_freqs(self.freqs))
+        if self.cfg is not None and not np.array_equal(self.freqs, self.cfg.freqs):
+            raise ValueError("ContinuousPSD grid must match its LinkConfig.")
 
     @staticmethod
     def validate_psd(psd: np.ndarray, freqs: np.ndarray) -> np.ndarray:
@@ -179,6 +183,7 @@ class ContinuousPSD:
         cls,
         freqs: np.ndarray,
         psd_value: float,
+        *, cfg: Optional['LinkConfig'] = None,
     ) -> 'ContinuousPSD':
         """
         Build a flat one-sided PSD from a constant PSD density.
@@ -194,7 +199,7 @@ class ContinuousPSD:
         psd_value = float(psd_value)
         if not np.isfinite(psd_value) or psd_value < 0.0:
             raise ValueError("psd_value must be finite and non-negative.")
-        return cls(freqs=freqs, psd=psd_value * np.ones_like(freqs, dtype=float))
+        return cls(freqs=freqs, psd=psd_value * np.ones_like(freqs, dtype=float), cfg=cfg)
 
     @classmethod
     def from_func(
@@ -266,7 +271,7 @@ class ContinuousPSD:
             right=0.0,
         )
 
-        return type(self)(freqs=f_new, psd=psd_new, ifftable=True)
+        return type(self)(freqs=f_new, psd=psd_new, ifftable=True, cfg=cfg)
 
     def filtered_by(self, response: 'LinkSegment') -> 'ContinuousPSD':
         """
@@ -280,7 +285,10 @@ class ContinuousPSD:
         """
         if not _freqs_equal(self.freqs, response.freqs):
             raise ValueError("PSD and LinkSegment frequency grids must match. Use aligned_to(cfg, dc=...) first.")
-        return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2, ifftable=self.ifftable)
+        if self.cfg is not None and self.cfg is not response.cfg:
+            raise ValueError("ContinuousPSD and LinkSegment require the same LinkConfig reference.")
+        return type(self)(freqs=self.freqs, psd=self.psd * np.abs(response.tf)**2,
+                          ifftable=self.ifftable, cfg=response.cfg)
 
     def to_sampled(
         self,
@@ -367,7 +375,8 @@ class ContinuousPSD:
         if len(psd_dt) > 1 and np.isclose(theta[-1], np.pi):
             psd_dt[-1] *= 0.5
 
-        return SampledPSD(theta=theta, psd=psd_dt, fb=fb)
+        cfg = self.cfg if self.cfg is not None and fb == self.cfg.fb and np.array_equal(theta, self.cfg.theta) else None
+        return SampledPSD(theta=theta, psd=psd_dt, fb=fb, cfg=cfg)
 
     def to_sigma(self) -> float:
         """
@@ -470,6 +479,7 @@ class SampledPSD:
     theta: np.ndarray                # unit: rad/sample, one-sided axis [0, pi]
     psd: np.ndarray                  # unit: quantity^2/Hz, rfft one-sided equivalent PSD samples
     fb: float                        # unit: Hz, sampling rate / baud rate
+    cfg: Optional['LinkConfig'] = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.theta = self.validate_theta(self.theta)
@@ -477,6 +487,9 @@ class SampledPSD:
         self.fb = float(self.fb)
         if not np.isfinite(self.fb) or self.fb <= 0.0:
             raise ValueError("fb must be finite and positive.")
+        if self.cfg is not None:
+            if not np.isclose(self.fb, self.cfg.fb) or not np.array_equal(self.theta, self.cfg.theta):
+                raise ValueError("SampledPSD grid must match its LinkConfig.")
 
     @staticmethod
     def validate_theta(theta: np.ndarray) -> np.ndarray:
@@ -531,6 +544,7 @@ class SampledPSD:
         theta: np.ndarray,
         psd_value: float,
         fb: float,
+        *, cfg: Optional['LinkConfig'] = None,
     ) -> 'SampledPSD':
         """
         Build a flat sampled PSD from a spec two-sided constant density.
@@ -553,7 +567,7 @@ class SampledPSD:
         psd = psd_value * np.ones_like(theta, dtype=float)
         one_sided_interior = (theta > 0.0) & (theta < np.pi)
         psd[one_sided_interior] *= 2.0
-        return cls(theta=theta, psd=psd, fb=fb)
+        return cls(theta=theta, psd=psd, fb=fb, cfg=cfg)
 
     @property
     def freqs(self) -> np.ndarray:
@@ -589,7 +603,10 @@ class SampledPSD:
             raise ValueError("SampledPSD and SampledResponse fb values must match.")
         if not np.allclose(self.theta, response.theta, rtol=1e-12, atol=1e-15):
             raise ValueError("SampledPSD and SampledResponse theta grids must match.")
-        return type(self)(theta=self.theta, psd=self.psd * response.magnitude_squared(), fb=self.fb)
+        if self.cfg is not None and response.cfg is not None and self.cfg is not response.cfg:
+            raise ValueError("SampledPSD and SampledResponse require the same LinkConfig reference.")
+        return type(self)(theta=self.theta, psd=self.psd * response.magnitude_squared(), fb=self.fb,
+                          cfg=self.cfg or response.cfg)
 
     def add(self, other: 'SampledPSD') -> 'SampledPSD':
         """
@@ -612,7 +629,10 @@ class SampledPSD:
             raise ValueError("SampledPSD fb values must match.")
         if not np.allclose(self.theta, other.theta, rtol=1e-12, atol=1e-15):
             raise ValueError("SampledPSD theta grids must match.")
-        return type(self)(theta=self.theta, psd=self.psd + other.psd, fb=self.fb)
+        if self.cfg is not None and other.cfg is not None and self.cfg is not other.cfg:
+            raise ValueError("SampledPSD addition requires the same LinkConfig reference.")
+        return type(self)(theta=self.theta, psd=self.psd + other.psd, fb=self.fb,
+                          cfg=self.cfg or other.cfg)
 
     def __add__(self, other: 'SampledPSD') -> 'SampledPSD':
         """

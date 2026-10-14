@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import numpy as np
 
 from ..utilities.link import LinkConfig
 from ..models.com_model_93A import (
@@ -28,6 +29,7 @@ from .com_excel_common import (
     _read_project_channels,
     _read_project_fixed_config,
     _read_project_search_config,
+    _validate_channel_package_R0,
     _run_str,
     _run_value,
     _scalar_setting,
@@ -56,7 +58,7 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
     fixed = _read_project_fixed_config(excel_path)
     channel = _read_project_channels(excel_path)
 
-    return COMConfig(
+    cfg = COMConfig(
         link=LinkConfig(
             fb=_fixed_float(fixed, "fb"),
             per_ui=int(_fixed_float(fixed, "per_ui")),
@@ -90,7 +92,8 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
         rxpkg=_fixed_pkg_config(fixed, "rxpkg"),
         dfe=COMDFEConfig(
             N_b=int(_fixed_float(fixed, "N_b")),
-            b_max=_fixed_float(fixed, "b_max"),
+            b_max=_project_dfe_limits(fixed),
+            bb_min=_project_dfe_limits(fixed, "b_min"),
         ),
         imp=COMImpairmentConfig_93A(
             R_LM=_fixed_float(fixed, "R_LM"),
@@ -102,15 +105,17 @@ def _project_excel_to_config(excel_path: Path) -> COMConfig:
         L=int(_fixed_float(fixed, "L")),
         DER_0=_fixed_float(fixed, "DER_0"),
         pmf=COMPMFConfig(
-            dy_override=_fixed_optional_float(fixed, "dy_override"),
             dy_rel_As=_fixed_float(fixed, "dy_rel_As"),
             dy_abs_max=_fixed_float(fixed, "dy_abs_max"),
-            tap_abs_th_override=_fixed_optional_float(fixed, "tap_abs_th_override"),
             tap_rel_As=_fixed_float(fixed, "tap_rel_As"),
             keep_mass=_fixed_float(fixed, "keep_mass"),
             gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
     )
+    _validate_channel_package_R0(
+        cfg.channel, cfg.txpkg_victim, cfg.txpkg_fext, cfg.txpkg_next, cfg.rxpkg
+    )
+    return cfg
 
 
 def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
@@ -136,6 +141,9 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
     C_p = _matrix_setting(table, "C_p") * 1e-9
     z_p_tx = _vector_setting(table, "z_p (TX)")
     package_Z_c = _matrix_setting(table, "package_Z_c")
+    tl_gamma = _vector_setting(table, "package_tl_gamma0_a1_a2")
+    if len(tl_gamma) != 3:
+        raise ValueError("package_tl_gamma0_a1_a2 must contain gamma0, a1, a2.")
     legacy_pkg = COMPkgConfig(
         C_d=float(C_d[0, 0]),
         L_s=float(L_s[0, 0]),
@@ -147,13 +155,21 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
         Z_c=float(package_Z_c[0, 0]),
         z_p2=None,
         Z_c2=float(package_Z_c[0, 1]) if package_Z_c.shape[1] > 1 else float(package_Z_c[0, 0]),
+        gamma_0=float(tl_gamma[0]),
+        a1=float(tl_gamma[1]),
+        a2=float(tl_gamma[2]),
+        tau=_scalar_setting(table, "package_tl_tau"),
     )
 
     port_order = tuple(int(x) - 1 for x in _vector_setting(table, "Port Order"))
     if len(port_order) != 4:
         raise ValueError("Port Order must contain exactly four ports.")
 
-    return COMConfig(
+    R_d = _vector_setting(table, "R_d")
+    if len(R_d) != 2:
+        raise ValueError("R_d must contain TX and RX die termination resistances.")
+
+    cfg = COMConfig(
         link=LinkConfig(
             fb=f_b,
             per_ui=per_ui,
@@ -178,6 +194,9 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
             A_ne=_scalar_setting(table, "A_ne"),
         ),
         channel=COMChannelConfig(
+            R0=_scalar_setting(table, "R_0"),
+            R_d_tx=float(R_d[0]),
+            R_d_rx=float(R_d[1]),
             victim_s4p_path=str(chnl_dir / "example2_THRU.s4p"),
             next_s4p_paths=(
                 str(chnl_dir / "example2_NEXT1.s4p"),
@@ -189,9 +208,6 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
                 str(chnl_dir / "example2_FEXT2.s4p"),
             ),
             port_order=port_order,
-            R0=_scalar_setting(table, "R_0"),
-            gamma_src=0.0,
-            gamma_load=0.0,
         ),
         txpkg_victim=legacy_pkg,
         txpkg_fext=legacy_pkg,
@@ -211,6 +227,10 @@ def _pychopmarg_excel_to_config(excel_path: Path) -> COMConfig:
         L=int(_scalar_setting(table, "L")),
         DER_0=_scalar_setting(table, "DER_0"),
     )
+    _validate_channel_package_R0(
+        cfg.channel, cfg.txpkg_victim, cfg.txpkg_fext, cfg.txpkg_next, cfg.rxpkg
+    )
+    return cfg
 
 
 def _project_excel_to_search_config(excel_path: Path) -> COMSearchConfig:
@@ -238,6 +258,16 @@ def _pychopmarg_excel_to_search_config(excel_path: Path) -> COMSearchConfig:
     )
 
 
+def _project_dfe_limits(fixed, name="b_max"):
+    values = np.asarray(_fixed_sequence(fixed, name), dtype=float)
+    count = int(_fixed_float(fixed, "N_b"))
+    if len(values) not in {1, count} or not np.all(np.isfinite(values)) or (name == "b_max" and np.any(values < 0)):
+        raise ValueError(f"{name} must contain one finite limit or exactly N_b limits; b_max must be nonnegative.")
+    if name == 'b_min' and np.any(values > np.asarray(_fixed_sequence(fixed, 'b_max'))):
+        raise ValueError('b_min must not exceed b_max.')
+    return float(values[0]) if len(values) == 1 else values
+
+
 def _fixed_pkg_config(fixed: dict[str, object], prefix: str) -> COMPkgConfig:
     return COMPkgConfig(
         C_d=_fixed_float(fixed, f"{prefix}.C_d"),
@@ -250,6 +280,10 @@ def _fixed_pkg_config(fixed: dict[str, object], prefix: str) -> COMPkgConfig:
         Z_c=_fixed_float(fixed, f"{prefix}.Z_c"),
         z_p2=_fixed_optional_float(fixed, f"{prefix}.z_p2"),
         Z_c2=_fixed_float(fixed, f"{prefix}.Z_c2"),
+        gamma_0=_fixed_float(fixed, f"{prefix}.gamma_0"),
+        a1=_fixed_float(fixed, f"{prefix}.a1"),
+        a2=_fixed_float(fixed, f"{prefix}.a2"),
+        tau=_fixed_float(fixed, f"{prefix}.tau"),
     )
 
 __all__ = ["excel_to_config_93A", "excel_to_search_config_93A"]

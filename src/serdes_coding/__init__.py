@@ -42,6 +42,10 @@ def __getattr__(name: str):
         from .reporting.com_report_178A import COMReport178A
 
         return COMReport178A
+    if name == "COMReport93A":
+        from .reporting.com_report_93A import COMReport
+
+        return COMReport
     if name in {
         "excel_to_config",
         "excel_to_config_93A",
@@ -81,6 +85,7 @@ def __getattr__(name: str):
 __all__ = [
     "COM178A",
     "COMReport178A",
+    "COMReport93A",
     "COM93A",
     "COMSearchRow178A",
     "COMSearchStatus178A",

@@ -16,9 +16,10 @@ import sys
 from time import perf_counter
 from typing import Any, Literal, Optional, Sequence
 import numpy as np
+from scipy.signal import lfilter
 
 try:
-    from ..utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+    from ..utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, LinkSegment, SampledPSD, SampledResponse
     from ..utilities.sparam import SparamModel
     from ..utilities.pmf import Pmf1D
     from ..search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
@@ -29,7 +30,7 @@ except ImportError:
     source_root = str(Path(__file__).resolve().parents[2])
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from serdes_coding.utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
+    from serdes_coding.utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, LinkSegment, SampledPSD, SampledResponse
     from serdes_coding.utilities.sparam import SparamModel
     from serdes_coding.utilities.pmf import Pmf1D
     from serdes_coding.search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
@@ -43,10 +44,8 @@ COMPMFConfig = com_93A.COMPMFConfig
 COMPMFRuntimeConfig = com_93A.COMPMFRuntimeConfig
 COMPMFStatus = com_93A.COMPMFStatus
 COMPath = com_93A.COMPath
-COMReport = com_93A.COMReport
 COMSearchCandidate = com_93A.COMSearchCandidate
 COMSearchConfig = com_93A.COMSearchConfig
-COMSharedPath = com_93A.COMSharedPath
 _build_channel_under_test_93A = com_93A._build_channel_under_test_93A
 _build_pmf_interference_93A = com_93A._build_pmf_interference_93A
 _build_pmf_XT_all_93A = com_93A._build_pmf_XT_all_93A
@@ -275,6 +274,39 @@ class IEEECOMSparam(com_93A.IEEECOMSparam):
         S_1 = cls.shunt_capacitance_93A(freqs, ph_cfg.C_1, R0)
         return (S_0.cascade_com_93A(S_h)).cascade_com_93A(S_1)
 
+@dataclass(frozen=True, repr=False)
+class COMBilinearCTLE(_PrettyDataclass):
+    """Two-section digital CTLE used by the 178A reference pulse branch."""
+
+    b1: np.ndarray
+    a1: np.ndarray
+    b2: np.ndarray
+    a2: np.ndarray
+    Fs: float
+
+    def __post_init__(self) -> None:
+        for name in ("b1", "a1", "b2", "a2"):
+            value = np.asarray(getattr(self, name), dtype=float)
+            if value.ndim != 1 or value.size == 0 or not np.all(np.isfinite(value)):
+                raise ValueError(f"COMBilinearCTLE.{name} must be a finite 1-D array.")
+            value = value.copy()
+            value.setflags(write=False)
+            object.__setattr__(self, name, value)
+        if not np.isfinite(float(self.Fs)) or float(self.Fs) <= 0.0:
+            raise ValueError("COMBilinearCTLE.Fs must be finite and positive.")
+        object.__setattr__(self, "Fs", float(self.Fs))
+
+    def filtered(self, ir: np.ndarray) -> np.ndarray:
+        """Apply both causal IIR sections with zero initial state."""
+        ir = np.asarray(ir, dtype=float)
+        if ir.ndim != 1 or not np.all(np.isfinite(ir)):
+            raise ValueError("COMBilinearCTLE input must be a finite 1-D array.")
+        return np.asarray(
+            lfilter(self.b2, self.a2, lfilter(self.b1, self.a1, ir)),
+            dtype=float,
+        )
+
+
 class IEEECOMFilter(com_93A.IEEECOMFilter):
     """
     IEEE 802.3 Annex 93A COM-specific scalar filter builders.
@@ -285,6 +317,26 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
     The FFT/grid convention and scalar response conversion remain in
     LinkSegment.
     """
+
+    @classmethod
+    def _from_finite_record_ir(
+        cls,
+        ir: np.ndarray,
+        cfg: LinkConfig,
+    ) -> "IEEECOMFilter":
+        """Store an intentional finite FFT record without causality correction.
+
+        The reference bilinear-CTLE path keeps the raw IFFT record when
+        causality enforcement is disabled.  This model-local constructor keeps
+        that behavior out of the general ``LinkSegment.from_ir()`` contract.
+        """
+        segment = cls(cfg)
+        record = segment.validate_ir(ir, correct_wrap=False)
+        segment._raw_ir = record
+        segment._causal_ir = record
+        segment._causal_shift_samples = 0
+        segment._ir = record
+        return segment
 
     @classmethod
     def rx_equalizer(
@@ -331,6 +383,108 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
             / denom
         )
         return cls.from_tf(f, H_ctf, cfg)
+
+    @staticmethod
+    def _bilinear_section_coefficients(
+        cfg: LinkConfig,
+        *,
+        f_z: float,
+        f_p1: float,
+        g_dc: float,
+        f_p2: Optional[float] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Build one causal CTLE section using the MATLAB TD_CTLE mapping."""
+        values = {"f_z": f_z, "f_p1": f_p1}
+        if f_p2 is not None:
+            values["f_p2"] = f_p2
+        if any(not np.isfinite(float(value)) or float(value) <= 0.0 for value in values.values()):
+            raise ValueError("Bilinear CTLE frequencies must be finite and positive.")
+        if not np.isfinite(float(g_dc)):
+            raise ValueError("Bilinear CTLE gain must be finite.")
+
+        K = 2.0 * float(cfg.Fs)
+        p1 = -2.0 * np.pi * float(f_p1)
+        zero = -2.0 * np.pi * float(f_z) * 10.0 ** (float(g_dc) / 20.0)
+        p1d = (K + p1) / (K - p1)
+        zd = (K + zero) / (K - zero)
+
+        if f_p2 is None:
+            # Exact f_p2 -> infinity limit of MATLAB TD_CTLE. The common
+            # z=-1 pole/zero pair cancels, leaving this first-order section.
+            gain = (K - zero) / (K - p1) * float(f_p1) / float(f_z)
+            b = gain * np.array([1.0, -zd], dtype=float)
+            a = np.array([1.0, -p1d], dtype=float)
+        else:
+            p2 = -2.0 * np.pi * float(f_p2)
+            p2d = (K + p2) / (K - p2)
+            kd = (
+                (K - zero)
+                / ((K - p1) * (K - p2))
+                * float(f_p1)
+                / float(f_z)
+            )
+            b = (-p2) * kd * np.poly([zd, -1.0])
+            a = np.poly([p1d, p2d])
+
+        poles = np.roots(a)
+        if not np.all(np.isfinite(poles)) or np.any(np.abs(poles) >= 1.0):
+            raise ValueError("Bilinear CTLE section must have poles inside the unit circle.")
+        return np.asarray(b, dtype=float), np.asarray(a, dtype=float)
+
+    @classmethod
+    def apply_rx_equalizer_bilinear(
+        cls,
+        ir: np.ndarray,
+        cfg: LinkConfig,
+        *,
+        g_1: float,
+        g_2: float,
+        f_z1: float,
+        f_z2: float,
+        f_p1: float,
+        f_p2: float,
+        f_p3: float,
+    ) -> np.ndarray:
+        """Apply two CTLE IIR sections to a normalized discrete-time kernel."""
+        ir = np.asarray(ir, dtype=float)
+        if ir.ndim != 1 or ir.size != cfg.Nfft or not np.all(np.isfinite(ir)):
+            raise ValueError("Bilinear CTLE input must be a finite full-grid discrete kernel.")
+        b1, a1 = cls._bilinear_section_coefficients(
+            cfg, f_z=f_z1, f_p1=f_p1, f_p2=f_p2, g_dc=g_1
+        )
+        b2, a2 = cls._bilinear_section_coefficients(
+            cfg, f_z=f_z2, f_p1=f_p3, g_dc=g_2
+        )
+        return COMBilinearCTLE(b1=b1, a1=a1, b2=b2, a2=a2, Fs=cfg.Fs).filtered(ir)
+
+    @classmethod
+    def build_rx_equalizer_bilinear(
+        cls,
+        cfg: LinkConfig,
+        *,
+        g_1: float,
+        g_2: float,
+        f_z1: float,
+        f_z2: float,
+        f_p1: float,
+        f_p2: float,
+        f_p3: float,
+    ) -> COMBilinearCTLE:
+        """Build the shared two-section digital CTLE for one candidate."""
+        b1, a1 = cls._bilinear_section_coefficients(
+            cfg, f_z=f_z1, f_p1=f_p1, f_p2=f_p2, g_dc=g_1
+        )
+        b2, a2 = cls._bilinear_section_coefficients(
+            cfg, f_z=f_z2, f_p1=f_p3, g_dc=g_2
+        )
+        return COMBilinearCTLE(b1=b1, a1=a1, b2=b2, a2=a2, Fs=cfg.Fs)
+
+
+@dataclass(repr=False)
+class COMSharedPath(com_93A.COMSharedPath):
+    """178A shared path with an optional digital CTLE pulse model."""
+
+    ctle_iir: Optional[COMBilinearCTLE] = None
 
 # =========================================
 # 178A configs, integrated to COMConfig
@@ -617,6 +771,7 @@ class COMRunConfig(_PrettyDataclass):
     pre_dte_pmf_method: Literal["gaussian_approx", "pmf_exact"] = "gaussian_approx"
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
+    pmf_dy_override: Optional[float] = None  # V; bypass derived PMF grid step when set
     floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pos_sweep_method: Literal["each_phase", "coarse_fine"] = "each_phase"
     pos_coarse_stride: int = 4
@@ -634,6 +789,10 @@ class COMRunConfig(_PrettyDataclass):
         self.pmf_keep_mass = float(self.pmf_keep_mass)
         if not np.isfinite(self.pmf_keep_mass) or not 0.0 < self.pmf_keep_mass <= 1.0:
             raise ValueError("COMRunConfig.pmf_keep_mass must be finite and in (0, 1].")
+        if self.pmf_dy_override is not None:
+            self.pmf_dy_override = float(self.pmf_dy_override)
+            if not np.isfinite(self.pmf_dy_override) or self.pmf_dy_override <= 0.0:
+                raise ValueError("COMRunConfig.pmf_dy_override must be finite and positive.")
         if self.floating_mode not in {"heuristic", "simplified", "spec-defined"}:
             raise ValueError(
                 "COMRunConfig.floating_mode must be 'heuristic', 'simplified', or 'spec-defined'."
@@ -739,6 +898,121 @@ class COMMLSDConfig(_PrettyDataclass):
             "target must not be guessed."
         )
 
+
+@dataclass(frozen=True)
+class COMPolicyConfig:
+    """One-level collection of 178A algorithm policy and its preset provenance."""
+
+    out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay"
+    channel_renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first"
+    pre_dte_adc_clipping_convention: Literal[
+        "annex_d3", "matlab_4_17_reference_only"
+    ] = "annex_d3"
+    final_adc_quantization_convention: Literal[
+        "annex_d3", "matlab_4_17_reference_only"
+    ] = "annex_d3"
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
+    rxffe_record_realization: Literal[
+        "linear_convolution", "finite_record_circshift"
+    ] = "linear_convolution"
+    noise_grid_method: Literal["analysis_grid", "fixed_ui"] = "analysis_grid"
+    noise_grid_num_ui: Optional[int] = None
+    discrete_pmf_placement: Literal["linear", "nearest"] = "linear"
+    interference_pmf_method: Literal["signal_fir", "pam_atoms"] = "signal_fir"
+    xtalk_pmf_accumulation: Literal["pathwise_convolution"] = "pathwise_convolution"
+    gaussian_pmf_method: Literal["bin_integral", "reference_sample"] = "bin_integral"
+    uniform_pmf_method: Literal["bin_integral", "nearest_centers"] = "bin_integral"
+    pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit"
+    final_pmf_grid: Literal["fine", "relative_As"] = "fine"
+    final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
+    gaussian_n_sigma_override: Optional[float] = None
+    added_noise_pdf: Literal["gaussian_addition", "scaled_total_pdf"] = "gaussian_addition"
+    sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum"
+    reported_der: Literal["raw_sequence_sum", "baseline_pdf_re_evaluation"] = "raw_sequence_sum"
+    applied_config_profile: Optional[str] = None
+    config_profile_overrides: dict[str, object] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        allowed = {
+            "out_of_measured": {"cosine_decay", "zero_padding"},
+            "channel_renormalization_order": {"sdd_first", "s4p_first"},
+            "pre_dte_adc_clipping_convention": {"annex_d3", "matlab_4_17_reference_only"},
+            "final_adc_quantization_convention": {"annex_d3", "matlab_4_17_reference_only"},
+            "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
+            "rxffe_record_realization": {"linear_convolution", "finite_record_circshift"},
+            "noise_grid_method": {"analysis_grid", "fixed_ui"},
+            "discrete_pmf_placement": {"linear", "nearest"},
+            "interference_pmf_method": {"signal_fir", "pam_atoms"},
+            "xtalk_pmf_accumulation": {"pathwise_convolution"},
+            "gaussian_pmf_method": {"bin_integral", "reference_sample"},
+            "uniform_pmf_method": {"bin_integral", "nearest_centers"},
+            "pmf_scaling_method": {"mass_deposit", "interpolate_ordinates"},
+            "final_pmf_grid": {"fine", "relative_As"},
+            "final_adc_pmf_projection": {"annex_d3", "reference_support"},
+            "added_noise_pdf": {"gaussian_addition", "scaled_total_pdf"},
+            "sequence_termination": {"fixed_length_sum", "matlab_relative_tail"},
+            "reported_der": {"raw_sequence_sum", "baseline_pdf_re_evaluation"},
+        }
+        for name, choices in allowed.items():
+            if getattr(self, name) not in choices:
+                raise ValueError(f"COMPolicyConfig.{name} must be one of {sorted(choices)}.")
+        if self.gaussian_n_sigma_override is not None:
+            value = float(self.gaussian_n_sigma_override)
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    "COMPolicyConfig.gaussian_n_sigma_override must be finite and positive."
+                )
+            object.__setattr__(self, "gaussian_n_sigma_override", value)
+        if self.noise_grid_method == "analysis_grid":
+            if self.noise_grid_num_ui is not None:
+                raise ValueError("analysis_grid requires noise_grid_num_ui=None.")
+        else:
+            if (
+                self.noise_grid_num_ui is None
+                or int(self.noise_grid_num_ui) != self.noise_grid_num_ui
+                or int(self.noise_grid_num_ui) < 2
+            ):
+                raise ValueError("fixed_ui requires an integer noise_grid_num_ui >= 2.")
+            if int(self.noise_grid_num_ui) % 2 != 0:
+                raise ValueError(
+                    "fixed_ui requires even noise_grid_num_ui so the PSD includes Nyquist."
+                )
+            object.__setattr__(self, "noise_grid_num_ui", int(self.noise_grid_num_ui))
+        if (
+            self.final_adc_pmf_projection == "reference_support"
+            and self.final_adc_quantization_convention != "matlab_4_17_reference_only"
+        ):
+            raise ValueError(
+                "final_adc_pmf_projection='reference_support' requires "
+                "final_adc_quantization_convention='matlab_4_17_reference_only'."
+            )
+        if self.applied_config_profile is not None:
+            object.__setattr__(self, "applied_config_profile", str(self.applied_config_profile))
+        object.__setattr__(self, "config_profile_overrides", dict(self.config_profile_overrides))
+
+    def resolve_noise_grid(self, link_cfg: LinkConfig) -> LinkConfig:
+        """Return the shared grid used by every MMSE noise PSD component."""
+        if self.noise_grid_method == "analysis_grid":
+            return link_cfg
+        return LinkConfig.from_Nfft(
+            fb=link_cfg.fb,
+            per_ui=link_cfg.per_ui,
+            Nfft=int(self.noise_grid_num_ui) * link_cfg.per_ui,
+        )
+
+    def fit_noise_response(self, response: np.ndarray) -> np.ndarray:
+        """Apply the explicit finite record used before a noise DFT."""
+        response = np.asarray(response, dtype=float)
+        if response.ndim != 1:
+            raise ValueError("noise-grid response must be one-dimensional.")
+        if self.noise_grid_method == "analysis_grid":
+            return response
+        fitted = np.zeros(int(self.noise_grid_num_ui), dtype=float)
+        count = min(len(response), len(fitted))
+        fitted[:count] = response[:count]
+        return fitted
+
+
 @dataclass(repr=False)
 class COMConfig(_PrettyDataclass):
     """Top-level 178A COM configuration grouped by function."""
@@ -756,6 +1030,20 @@ class COMConfig(_PrettyDataclass):
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
     execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
     mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
+    policy: COMPolicyConfig = field(default_factory=COMPolicyConfig)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.policy, COMPolicyConfig):
+            raise TypeError("policy must be a COMPolicyConfig.")
+        if (
+            self.policy.noise_grid_method == "fixed_ui"
+            and int(self.policy.noise_grid_num_ui) < int(self.dte.N_max)
+        ):
+            raise ValueError("policy.noise_grid_num_ui must cover COMDTEConfig.N_max lags.")
+
+    def resolve_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
+        """Compatibility identity: adapters now construct effective run profiles."""
+        return run_cfg
 
     def to_export_dict(self) -> dict[str, object]:
         """
@@ -768,6 +1056,12 @@ class COMConfig(_PrettyDataclass):
             "type": type(self).__name__,
             "config": self._json_value(self),
             "derived": {
+                "policy": self._json_value(self.policy),
+                "effective_execution": {
+                    "single_run": self._json_value(self.resolve_run_cfg(self.execution.single_run)),
+                    "search_sweep": self._json_value(self.resolve_run_cfg(self.execution.search_sweep)),
+                    "search_final": self._json_value(self.resolve_run_cfg(self.execution.search_final)),
+                },
                 "link": self._json_value(self.link),
                 "channel_measured_grid": self._json_value(self.channel.measured_grid_summary()),
                 "channel_aligned_grid": self._json_value(self.channel.aligned_grid_summary()),
@@ -852,6 +1146,16 @@ class COMAddedNoiseStatus(_PrettyDataclass):
 
 
 @dataclass(repr=False)
+class COMMLSDNoiseStatus(_PrettyDataclass):
+    """Eq. (178A-54) PSD and autocorrelation, before DER evaluation."""
+    S_isi: SampledPSD
+    sigma_isi: float
+    S_ni: SampledPSD
+    sigma_ni: float
+    R_ni: np.ndarray
+
+
+@dataclass(repr=False)
 class COMMLSDStatus(_PrettyDataclass):
     """MLSD-only inputs and results, separate from physical impairment stages."""
     added_noise: COMAddedNoiseStatus
@@ -861,7 +1165,9 @@ class COMMLSDStatus(_PrettyDataclass):
     sigma_ni: Optional[float] = None
     R_ni: Optional[np.ndarray] = None
     der_by_j: Optional[np.ndarray] = None
+    DER_MLSD_raw_sequence: Optional[float] = None
     DER_MLSD: Optional[float] = None
+    DER_MLSD_reported: Optional[float] = None
     A_MLSD: Optional[float] = None
     delta_COM: Optional[float] = None
     COM_MLSD_raw: Optional[float] = None
@@ -907,6 +1213,7 @@ class COMAdcInputPMF(_PrettyDataclass):
     V_qc: Optional[float] = None
     delta: Optional[float] = None
     method: Optional[str] = None
+    clipping_convention: Optional[str] = None
 
 @dataclass(repr=False)
 class COMImpStageStatus(_PrettyDataclass):
@@ -1142,8 +1449,8 @@ class COMStatus(com_93A.COMStatus):
             return self.mlsd.COM_MLSD
         return None if self.pmf is None else self.pmf.COM
 
-    def export(self, save_path: str, *, include_plots: bool = False) -> dict[str, str]:
-        """Export a 178A status without invoking the legacy 93A exporter.
+    def export(self, save_path: str) -> dict[str, str]:
+        """Export 178A status data without invoking a report renderer.
 
         The inherited 93A exporter assumes the flat 93A impairment contract,
         including ``imp.sigma_TX``. 178A impairment data is grouped by stage,
@@ -1153,47 +1460,7 @@ class COMStatus(com_93A.COMStatus):
         out_dir.mkdir(parents=True, exist_ok=True)
         summary_path = out_dir / "status_summary.txt"
         summary_path.write_text(str(self), encoding="utf-8")
-        outputs = {"status_summary_txt": str(summary_path)}
-
-        if include_plots:
-            cfg = getattr(self, "_config_for_report", None)
-            if cfg is None:
-                raise ValueError(
-                    "178A plot export requires the originating COMConfig."
-                )
-            # Direct IPython %run has no package context for relative imports.
-            from serdes_coding.reporting.com_report_178A import COMReport178A
-
-            plot_dir = out_dir / "plots"
-            report = COMReport178A(cfg, self).plot_single_run(plot_dir)
-            # Validate every PNG returned by the reporter, rather than a fixed
-            # figure count: enabled stages can legitimately produce more plots.
-            import json
-            import hashlib
-            plot_files = []
-            def collect(value):
-                if isinstance(value, dict):
-                    for item in value.values():
-                        collect(item)
-                elif isinstance(value, (list, tuple)):
-                    for item in value:
-                        collect(item)
-                elif isinstance(value, (str, Path)) and str(value).endswith(".png"):
-                    plot_files.append(Path(value))
-            collect(report)
-            if not plot_files:
-                raise RuntimeError("178A report produced no PNG outputs.")
-            records = []
-            for path in sorted(set(plot_files)):
-                data = path.read_bytes()
-                if len(data) < 100 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
-                    raise RuntimeError(f"Invalid or empty report PNG: {path}")
-                records.append({"path": path.relative_to(out_dir).as_posix(),
-                                "sha256": hashlib.sha256(data).hexdigest(), "bytes": len(data)})
-            (out_dir / "plot_manifest.json").write_text(
-                json.dumps({"count": len(records), "files": records}, indent=2), encoding="utf-8")
-            outputs["plots"] = str(plot_dir)
-        return outputs
+        return {"status_summary_txt": str(summary_path)}
 
 
 # ----------------------------------------
@@ -1302,7 +1569,184 @@ def _build_H_ctf(link_cfg: LinkConfig, ft_cfg: COMFilterConfig) -> IEEECOMFilter
         required["f_p3"],
     )
 
-def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:
+
+def _reference_fd_to_td_record(
+    measured_freqs: np.ndarray,
+    measured_tf: np.ndarray,
+    link_cfg: LinkConfig,
+    *,
+    relative_truncation_threshold: float = 1e-3,
+) -> np.ndarray:
+    """Realize the reference raw-IFFT finite record consumed by TD CTLE.
+
+    This is the fixed numerical definition of ``bilinear_iir``: retain the
+    measured frequency spacing, interpolate magnitude and unwrapped phase onto
+    the nearest compatible Nyquist grid, zero above the measured band, perform
+    a raw Hermitian IFFT with no causality correction, then retain through the
+    last sample above 0.1% of the impulse peak.
+    """
+    freqs = LinkConfig.validate_freqs(measured_freqs)
+    response = np.asarray(measured_tf, dtype=complex)
+    if response.shape != freqs.shape or not np.all(np.isfinite(response)):
+        raise ValueError("measured CTLE input TF must be finite and match its frequency grid.")
+    if len(freqs) < 3:
+        raise ValueError("reference FD-to-TD realization requires at least three frequency points.")
+
+    measured_df = float(freqs[2] - freqs[1])
+    if measured_df <= 0.0:
+        raise ValueError("reference FD-to-TD realization requires positive frequency spacing.")
+    n_steps = max(1, int(np.floor(link_cfg.f_nyq / measured_df + 0.5)))
+    output_freqs = np.arange(n_steps + 1, dtype=float) * (link_cfg.f_nyq / n_steps)
+
+    magnitude = np.abs(response)
+    phase = np.unwrap(np.angle(response))
+    if freqs[0] > 0.0:
+        low_count = min(10, len(freqs))
+        magnitude_at_dc = float(np.polyval(np.polyfit(freqs[:low_count], magnitude[:low_count], 1), 0.0))
+        freqs = np.r_[0.0, freqs]
+        magnitude = np.r_[max(magnitude_at_dc, np.finfo(float).eps), magnitude]
+        phase = np.r_[0.0, phase]
+
+    in_band = output_freqs <= freqs[-1]
+    interpolated = np.zeros(output_freqs.shape, dtype=complex)
+    magnitude_i = np.interp(output_freqs[in_band], freqs, magnitude)
+    phase_i = np.interp(output_freqs[in_band], freqs, phase)
+    interpolated[in_band] = magnitude_i * np.exp(1j * phase_i)
+    interpolated[0] = interpolated[0].real + 0j
+    interpolated[-1] = interpolated[-1].real + 0j
+
+    raw_record = np.fft.irfft(interpolated, n=2 * n_steps)
+    peak = float(np.max(np.abs(raw_record)))
+    retained = np.flatnonzero(np.abs(raw_record) > peak * relative_truncation_threshold)
+    if len(retained) == 0:
+        return raw_record[:1].copy()
+    return raw_record[: int(retained[-1]) + 1].copy()
+
+
+def _evaluate_pre_ctle_on_measured_grid(
+    S_all: SparamModel,
+    link_cfg: LinkConfig,
+    channel_cfg: COMChannelConfig,
+    ft_cfg: COMFilterConfig,
+    *,
+    kind: Literal["victim", "next", "fext"],
+    include_txffe: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build the composite pre-CTLE TF on the measured S-parameter grid."""
+    freqs = S_all.freqs
+    H_21 = S_all.voltage_transfer_function(
+        gamma_src=channel_cfg.gamma_src,
+        gamma_load=channel_cfg.gamma_load,
+    )
+    if not include_txffe:
+        txfir = np.array([1.0])
+        num_pre = 0
+    elif kind == "next":
+        txfir = np.array([0.0, 1.0, 0.0])
+        num_pre = 1
+    else:
+        txfir = np.asarray(ft_cfg.txfir, dtype=float)
+        num_pre = int(ft_cfg.num_pre)
+    H_ffe = np.zeros_like(freqs, dtype=complex)
+    for tap_index, coefficient in enumerate(txfir):
+        # Eq. 178A-13: the main cursor is n=0 at tap index num_pre.
+        n = tap_index - num_pre
+        H_ffe += coefficient * np.exp(-1j * 2.0 * np.pi * n * freqs / link_cfg.fb)
+
+    # Eq. 93A-46 reused by 178A for transmitter transition time.
+    H_t = np.exp(-2.0 * (np.pi * freqs * ft_cfg.Tr / 1.6832) ** 2)
+    # Eq. 178A receiver-noise bandwidth response (shared 93A-20 primitive).
+    ratio = freqs / ft_cfg.fr
+    H_r = 1.0 / (
+        1.0 - 3.414214 * ratio**2 + ratio**4
+        + 1j * 2.613126 * (ratio - ratio**3)
+    )
+    # The reference FD-to-TD realization carries the transition filter's 3Tr
+    # time origin.  This is a pure delay, not a separately selectable filter.
+    time_origin = np.exp(-1j * 2.0 * np.pi * freqs * (3.0 * ft_cfg.Tr))
+    return freqs, H_ffe * H_t * H_21 * H_r * time_origin
+
+
+def _realize_ctle_response(
+    pre_ctle: LinkSegment,
+    H_ctf: LinkSegment,
+    link_cfg: LinkConfig,
+    realization: Literal["continuous_tf", "bilinear_iir"],
+    ctle_iir: Optional[COMBilinearCTLE],
+    *,
+    measured_freqs: Optional[np.ndarray] = None,
+    measured_tf: Optional[np.ndarray] = None,
+) -> tuple[LinkSegment, Literal["frequency_tf", "finite_record_ir"]]:
+    """Realize only the CTLE output from an already-built pre-CTLE response.
+
+    TX FFE, channel/package cascade, receiver filtering, and symbol-pulse
+    formation are outside this boundary.  The returned domain tag tells the
+    common symbol-pulse helper how to preserve the selected realization's
+    numerical convolution semantics.
+    """
+    if realization == "continuous_tf":
+        return pre_ctle.cascade_tf(H_ctf), "frequency_tf"
+    if realization != "bilinear_iir":
+        raise ValueError("CTLE pulse realization must be continuous_tf or bilinear_iir.")
+    if ctle_iir is None:
+        raise ValueError("bilinear_iir realization requires shared.ctle_iir.")
+    if not np.isclose(ctle_iir.Fs, link_cfg.Fs, rtol=0.0, atol=0.0):
+        raise ValueError("shared.ctle_iir sample rate must match LinkConfig.Fs.")
+    if measured_freqs is None or measured_tf is None:
+        raise ValueError("bilinear_iir realization requires the measured pre-CTLE TF.")
+    discrete_kernel = _reference_fd_to_td_record(
+        measured_freqs,
+        measured_tf,
+        link_cfg,
+    )
+    ctle_ir = ctle_iir.filtered(discrete_kernel)
+    ctle_record = np.zeros(link_cfg.Nfft, dtype=float)
+    if len(ctle_ir) > link_cfg.Nfft:
+        raise COMLengthMismatchError(
+            "bilinear CTLE finite record exceeds LinkConfig.Nfft: "
+            f"len={len(ctle_ir)}, Nfft={link_cfg.Nfft}."
+        )
+    ctle_record[:len(ctle_ir)] = ctle_ir * link_cfg.Fs
+    return IEEECOMFilter._from_finite_record_ir(ctle_record, link_cfg), "finite_record_ir"
+
+
+def _apply_rectangular_unit_pulse(
+    post_ctle: LinkSegment,
+    X: LinkSegment,
+    link_cfg: LinkConfig,
+    amplitude: float,
+    domain: Literal["frequency_tf", "finite_record_ir"],
+) -> LinkSegment:
+    """Apply the common one-UI rectangular symbol pulse after CTLE realization."""
+    if domain == "frequency_tf":
+        return post_ctle.cascade_tf(X)
+    if domain != "finite_record_ir":
+        raise ValueError("CTLE response domain must be frequency_tf or finite_record_ir.")
+    discrete_kernel = post_ctle.ir / link_cfg.Fs
+    support = np.flatnonzero(discrete_kernel != 0.0)
+    discrete_kernel = (
+        discrete_kernel[: int(support[-1]) + 1]
+        if len(support)
+        else discrete_kernel[:1]
+    )
+    pulse_ir = lfilter(
+        np.ones(link_cfg.per_ui, dtype=float),
+        np.array([1.0]),
+        discrete_kernel,
+    ) * float(amplitude)
+    pulse_record = np.zeros(link_cfg.Nfft, dtype=float)
+    if len(pulse_ir) > link_cfg.Nfft:
+        raise COMLengthMismatchError(
+            "bilinear CTLE symbol pulse exceeds LinkConfig.Nfft: "
+            f"len={len(pulse_ir)}, Nfft={link_cfg.Nfft}."
+        )
+    pulse_record[:len(pulse_ir)] = pulse_ir
+    return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
+
+def _build_channel_under_test(
+    channel_cfg: COMChannelConfig,
+    renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first",
+) -> list[SparamModel]:
     """
     Build 178A measured-domain channel-under-test S-parameter models.
 
@@ -1310,7 +1754,27 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel
     - index 0: victim
     - following indices: NEXT channels, then FEXT channels
     """
-    return _build_channel_under_test_93A(channel_cfg)
+    if renormalization_order == "sdd_first":
+        return _build_channel_under_test_93A(channel_cfg)
+    if renormalization_order != "s4p_first":
+        raise ValueError("renormalization_order must be sdd_first or s4p_first.")
+    if channel_cfg.victim_s4p_path is None:
+        raise ValueError("channel_cfg.victim_s4p_path must be provided.")
+    paths = [
+        channel_cfg.victim_s4p_path,
+        *channel_cfg.next_s4p_paths,
+        *channel_cfg.fext_s4p_paths,
+    ]
+    channels = [
+        SparamModel.from_touchstone(
+            path, mode="s4p", port_order=channel_cfg.port_order,
+            z0=2.0 * channel_cfg.R0, renormalization_order="s4p_first",
+            frequency_limit_Hz=channel_cfg.sparam_frequency_limit_Hz,
+        )
+        for path in paths
+    ]
+    common_freqs = channel_cfg.align_grid(channels)
+    return [channel.resampled(common_freqs) for channel in channels]
 
 def _build_path(
     link_cfg: LinkConfig,
@@ -1320,6 +1784,8 @@ def _build_path(
     shared: COMSharedPath,
     kind: Literal["victim", "next", "fext"],
     S_ch: SparamModel,
+    out_of_measured: Literal["cosine_decay", "zero_padding"],
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"],
 ) -> COMPath:
     """
     Build one 178A COM signal path from a measured-domain channel-under-test model.
@@ -1333,15 +1799,18 @@ def _build_path(
     if kind == "next":
         S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg, isNext=True)
         H_ffe = shared.H_ffe_next
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_ne)
+        amplitude = ft_cfg.A_ne
+        X = IEEECOMFilter.rect_pulse_93A(link_cfg, amplitude)
     elif kind == "fext":
         S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg)
         H_ffe = shared.H_ffe
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_fe)
+        amplitude = ft_cfg.A_fe
+        X = IEEECOMFilter.rect_pulse_93A(link_cfg, amplitude)
     elif kind == "victim":
         S_tx = _build_txpkg(S_ch.freqs, txpkg_cfg)
         H_ffe = shared.H_ffe
-        X = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
+        amplitude = ft_cfg.A_v
+        X = IEEECOMFilter.rect_pulse_93A(link_cfg, amplitude)
     else:
         raise ValueError(f"Unsupported COM path kind: {kind}")
 
@@ -1351,15 +1820,41 @@ def _build_path(
         gamma_src=channel_cfg.gamma_src,
         gamma_load=channel_cfg.gamma_load,
         dc=channel_cfg.missing_dc_policy,
+        out_of_measured=out_of_measured,
     )
-    H_all = (
+    H_pre = (
         H_ffe
         .cascade_tf(shared.H_t)
         .cascade_tf(H_21)
         .cascade_tf(shared.H_r)
-        .cascade_tf(shared.H_ctf)
     )
-    pulse = H_all.cascade_tf(X)
+    H_all = H_pre.cascade_tf(shared.H_ctf)
+    measured_freqs = None
+    measured_pre_ctle = None
+    if ctle_pulse_realization == "bilinear_iir":
+        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(
+            S_all,
+            link_cfg,
+            channel_cfg,
+            ft_cfg,
+            kind=kind,
+        )
+    post_ctle, pulse_domain = _realize_ctle_response(
+        H_pre,
+        shared.H_ctf,
+        link_cfg,
+        ctle_pulse_realization,
+        shared.ctle_iir,
+        measured_freqs=measured_freqs,
+        measured_tf=measured_pre_ctle,
+    )
+    pulse = _apply_rectangular_unit_pulse(
+        post_ctle,
+        X,
+        link_cfg,
+        amplitude,
+        pulse_domain,
+    )
 
     return COMPath(
         kind=kind,
@@ -1382,13 +1877,42 @@ def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     """
     link_cfg = cfg.link
     ft_cfg = cfg.filter
+    H_ctf = _build_H_ctf(link_cfg, ft_cfg)
+    ctle_iir = None
+    if cfg.policy.ctle_pulse_realization == "bilinear_iir":
+        required = {
+            "g_1": ft_cfg.g_1,
+            "g_2": ft_cfg.g_2,
+            "f_z1": ft_cfg.f_z1,
+            "f_z2": ft_cfg.f_z2,
+            "f_p1": ft_cfg.f_p1,
+            "f_p2": ft_cfg.f_p2,
+            "f_p3": ft_cfg.f_p3,
+        }
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise ValueError(
+                "COMFilterConfig178A is missing required bilinear CTF fields: "
+                + ", ".join(missing)
+            )
+        ctle_iir = IEEECOMFilter.build_rx_equalizer_bilinear(
+            link_cfg,
+            g_1=required["g_1"],
+            g_2=required["g_2"],
+            f_z1=required["f_z1"],
+            f_z2=required["f_z2"],
+            f_p1=required["f_p1"],
+            f_p2=required["f_p2"],
+            f_p3=required["f_p3"],
+        )
     return COMSharedPath(
         H_ffe=_build_H_ffe(link_cfg, ft_cfg),
         H_ffe_next=_build_H_ffe_next(link_cfg),
         H_t=_build_H_t(link_cfg, ft_cfg),
         S_rx=_build_rxpkg(freqs, cfg.rxpkg),
         H_r=_build_H_r(link_cfg, ft_cfg),
-        H_ctf=_build_H_ctf(link_cfg, ft_cfg),
+        H_ctf=H_ctf,
+        ctle_iir=ctle_iir,
     )
 
 def _build_paths(
@@ -1421,6 +1945,8 @@ def _build_paths(
             shared=shared,
             kind="victim",
             S_ch=channels[0],
+            out_of_measured=cfg.policy.out_of_measured,
+            ctle_pulse_realization=cfg.policy.ctle_pulse_realization,
         )
     ]
 
@@ -1438,6 +1964,8 @@ def _build_paths(
                 shared=shared,
                 kind="next",
                 S_ch=S_ch,
+                out_of_measured=cfg.policy.out_of_measured,
+                ctle_pulse_realization=cfg.policy.ctle_pulse_realization,
             )
         )
 
@@ -1451,6 +1979,8 @@ def _build_paths(
                 shared=shared,
                 kind="fext",
                 S_ch=S_ch,
+                out_of_measured=cfg.policy.out_of_measured,
+                ctle_pulse_realization=cfg.policy.ctle_pulse_realization,
             )
         )
 
@@ -1478,7 +2008,7 @@ def _build_psd_rx_noise(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_c
     # 178A-17 uses eta_0/2 as the two-sided white-noise density. ContinuousPSD
     # stores one-sided CT PSD, so the corresponding positive-frequency value is
     # eta_0.
-    S_rn_broadband = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0)
+    S_rn_broadband = ContinuousPSD.from_constant(link_cfg.freqs, imp_cfg.eta_0, cfg=link_cfg)
     H_rn = _build_H_r(link_cfg, ft_cfg).cascade_tf(_build_H_ctf(link_cfg, ft_cfg))
     S_rn_filtered = S_rn_broadband.filtered_by(H_rn)
     return S_rn_filtered.to_sampled(link_cfg.fb, link_cfg.theta)
@@ -1493,14 +2023,40 @@ def _find_pos_xtalk(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
     """
     return _find_pos_xtalk_93A(h_XT, per_ui)
 
-def _build_psd_xtalk(h_XTs: list[np.ndarray], link_cfg: LinkConfig, sigma_x: float) -> tuple[SampledPSD, list[np.ndarray]]:
+def _build_psd_xtalk(
+    h_XTs: list[np.ndarray],
+    link_cfg: LinkConfig,
+    sigma_x: float,
+    *,
+    noise_link_cfg: Optional[LinkConfig] = None,
+    noise_grid: COMPolicyConfig = COMPolicyConfig(),
+) -> tuple[SampledPSD, list[np.ndarray]]:
+
+    noise_link_cfg = noise_link_cfg or link_cfg
 
     # initialized with psd_constant = 0.0
-    S_xn_all = SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+    S_xn_all = SampledPSD.from_constant(
+        noise_link_cfg.theta, 0.0, noise_link_cfg.fb, cfg=noise_link_cfg
+    )
     h_XTs_dsamp = []
     for h_XT in h_XTs:
-        _, h_XT_dsamp = _find_pos_xtalk(h_XT, link_cfg.per_ui)
-        S_xn_temp = _build_psd_from_DFT_response(h_XT_dsamp, link_cfg, sigma_x**2)
+        # Eq. 178A-18 selects one sampling phase per crosstalk path.  A fixed
+        # noise record applies before both the phase-energy search and DFT,
+        # matching num_ui_RXFF_noise in the MATLAB/SiCoPR implementation.
+        if noise_grid.noise_grid_method == "fixed_ui":
+            record_samples = int(noise_grid.noise_grid_num_ui) * link_cfg.per_ui
+            phase, h_XT_noise = _find_pos_xtalk(
+                np.asarray(h_XT)[:record_samples], link_cfg.per_ui
+            )
+            h_XT_dsamp = np.asarray(h_XT)[phase::link_cfg.per_ui]
+        else:
+            phase, h_XT_noise = _find_pos_xtalk(h_XT, link_cfg.per_ui)
+            h_XT_dsamp = h_XT_noise
+        S_xn_temp = _build_psd_from_DFT_response(
+            noise_grid.fit_noise_response(h_XT_noise),
+            noise_link_cfg,
+            sigma_x**2,
+        )
         h_XTs_dsamp.append(h_XT_dsamp)
         S_xn_all = S_xn_all.add(S_xn_temp)
 
@@ -1558,16 +2114,21 @@ def _build_psd_from_DFT_response(
             "Choose an expanded sampled grid or an explicit fixed-grid DTFT "
             "projection; do not truncate the response implicitly."
         )
-    S_base = SampledPSD.from_constant(link_cfg.theta, variance / link_cfg.fb, link_cfg.fb)
+    S_base = SampledPSD.from_constant(link_cfg.theta, variance / link_cfg.fb, link_cfg.fb, cfg=link_cfg)
     H = SampledResponse.from_ir(h_dsamp, link_cfg)
     return S_base.filtered_by(H)
 
 def _build_psd_tx_noise(
     victim: COMPath,
     link_cfg: LinkConfig,
+    channel_cfg: COMChannelConfig,
     ft_cfg: COMFilterConfig,
     imp_cfg: COMImpairmentConfig,
     pos: int,
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"],
+    *,
+    noise_link_cfg: Optional[LinkConfig] = None,
+    noise_grid: COMPolicyConfig = COMPolicyConfig(),
 ) -> tuple[SampledPSD, np.ndarray]:
     """
     Build transmitter output noise PSD and the sampled no-FFE pulse response.
@@ -1575,18 +2136,93 @@ def _build_psd_tx_noise(
     Reference:
     - IEEE 802.3 Annex 178A.1.7.3, Eq. 178A-19 and Eq. 178A-20.
     """
-    H_noffe = (
+    noise_link_cfg = noise_link_cfg or link_cfg
+    H_pre_noffe = (
         victim.H_t
         .cascade_tf(victim.H_21)
         .cascade_tf(victim.H_r)
-        .cascade_tf(victim.H_ctf)
     )
     X_v = IEEECOMFilter.rect_pulse_93A(link_cfg, ft_cfg.A_v)
-    h_tn = H_noffe.cascade_tf(X_v).ir[int(pos)::link_cfg.per_ui]
+    measured_freqs = None
+    measured_pre_ctle = None
+    if ctle_pulse_realization == "bilinear_iir":
+        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(
+            victim.S_all,
+            link_cfg,
+            channel_cfg,
+            ft_cfg,
+            kind="victim",
+            include_txffe=False,
+        )
+    post_ctle_noffe, pulse_domain = _realize_ctle_response(
+        H_pre_noffe,
+        victim.H_ctf,
+        link_cfg,
+        ctle_pulse_realization,
+        victim.shared.ctle_iir,
+        measured_freqs=measured_freqs,
+        measured_tf=measured_pre_ctle,
+    )
+    pulse_noffe = _apply_rectangular_unit_pulse(
+        post_ctle_noffe,
+        X_v,
+        link_cfg,
+        ft_cfg.A_v,
+        pulse_domain,
+    )
+    h_tn = pulse_noffe.ir[int(pos)::link_cfg.per_ui]
     variance = 10 ** (-imp_cfg.SNR_TX / 10)
-    return _build_psd_from_DFT_response(h_tn, link_cfg, variance), h_tn
+    return _build_psd_from_DFT_response(
+        noise_grid.fit_noise_response(h_tn), noise_link_cfg, variance
+    ), h_tn
 
-def _calculate_h_J(h: np.ndarray, pos: int, link_cfg: LinkConfig, w: Optional[np.ndarray]=None) -> np.ndarray:
+def _apply_fir_finite_record(response: np.ndarray, taps: np.ndarray) -> np.ndarray:
+    """Apply FIR taps as a fixed-length circular shift sum."""
+    response = np.asarray(response, dtype=float)
+    taps = np.asarray(taps, dtype=float)
+    if response.ndim != 1 or taps.ndim != 1:
+        raise ValueError("finite-record FIR inputs must be one-dimensional.")
+    result = np.zeros_like(response)
+    for tap_index in np.flatnonzero(taps != 0.0):
+        result += float(taps[tap_index]) * np.roll(response, int(tap_index))
+    return result
+
+
+def _apply_rxffe_response(
+    response: SampledResponse,
+    taps: np.ndarray,
+    link_cfg: LinkConfig,
+    realization: Literal["linear_convolution", "finite_record_circshift"],
+    context: str,
+) -> SampledResponse:
+    """Apply the selected post-FFE record-boundary convention."""
+    taps = np.asarray(taps, dtype=float)
+    if realization == "finite_record_circshift":
+        return SampledResponse.from_ir(
+            _apply_fir_finite_record(response.ir, taps),
+            link_cfg,
+        )
+    if realization != "linear_convolution":
+        raise ValueError(
+            "RxFFE record realization must be linear_convolution or "
+            "finite_record_circshift."
+        )
+    tap_response = SampledResponse.from_ir(taps, link_cfg)
+    try:
+        return response.cascade_ir(tap_response, force_grid=True)
+    except GridOverflowError as error:
+        raise error.with_context(context) from error
+
+
+def _calculate_h_J(
+    h: np.ndarray,
+    pos: int,
+    link_cfg: LinkConfig,
+    w: Optional[np.ndarray] = None,
+    rxffe_record_realization: Literal[
+        "linear_convolution", "finite_record_circshift"
+    ] = "linear_convolution",
+) -> np.ndarray:
     """
     Calculate 178A sampled jitter sensitivity.
 
@@ -1608,8 +2244,17 @@ def _calculate_h_J(h: np.ndarray, pos: int, link_cfg: LinkConfig, w: Optional[np
     h_m1 = h[center_idx - 1]
     h_p1 = h[center_idx + 1]
     if w is not None:
-        h_m1 = np.convolve(h_m1, w)
-        h_p1 = np.convolve(h_p1, w)
+        if rxffe_record_realization == "linear_convolution":
+            h_m1 = np.convolve(h_m1, w)
+            h_p1 = np.convolve(h_p1, w)
+        elif rxffe_record_realization == "finite_record_circshift":
+            h_m1 = _apply_fir_finite_record(h_m1, w)
+            h_p1 = _apply_fir_finite_record(h_p1, w)
+        else:
+            raise ValueError(
+                "RxFFE record realization must be linear_convolution or "
+                "finite_record_circshift."
+            )
     h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
     return h_J
 
@@ -1618,12 +2263,18 @@ def _build_psd_tx_jitter(
     link_cfg: LinkConfig,
     imp_cfg: COMImpairmentConfig,
     pos: int,
-    sigma_X: float
+    sigma_X: float,
+    *,
+    noise_link_cfg: Optional[LinkConfig] = None,
+    noise_grid: COMPolicyConfig = COMPolicyConfig(),
 ) -> tuple[SampledPSD, np.ndarray]:
 
+    noise_link_cfg = noise_link_cfg or link_cfg
     h_J = _calculate_h_J(victim.pulse.ir, pos, link_cfg)
     jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
-    S_jn = _build_psd_from_DFT_response(h_J, link_cfg, jitter_variance)
+    S_jn = _build_psd_from_DFT_response(
+        noise_grid.fit_noise_response(h_J), noise_link_cfg, jitter_variance
+    )
     return S_jn, h_J
 
 def _calculate_V_qc(
@@ -1632,13 +2283,17 @@ def _calculate_V_qc(
     sigma_ga: float,
     P_qc: float,
     pmf_cfg: COMPMFRuntimeConfig,
+    *,
+    cdf_tail: Optional[float] = None,
+    L: Optional[int] = None,
+    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
 ) -> COMAdcInputPMF:
     """Build the exact ADC-input PMF chain and resolve V_qc from p_sn."""
-    pmf_s = _build_pmf_interference_93A(
-        p_sig, 
-        h_dsamp, 
-        pmf_cfg,
-        name="Noiseless signal",
+    if pmf_methods.interference_pmf_method == "pam_atoms" and L is None:
+        raise ValueError("Atomic ADC PMF construction requires PAM order L.")
+    pmf_s = _build_pmf_interference_178A(
+        p_sig, h_dsamp, pmf_cfg, L or len(p_sig.pmf),
+        method=pmf_methods.interference_pmf_method, name="Noiseless signal",
     )
 
     pmf_ga = Pmf1D.gaussian(
@@ -1647,16 +2302,20 @@ def _calculate_V_qc(
         dx=pmf_cfg.dy,
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
-        name="Noise"
+        name="Noise",
+        method=pmf_methods.gaussian_pmf_method,
     )
 
     pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal")
-    V_qc = -(pmf_sn.quantile(P_qc/2))
+    # Annex 178A.1.7.6 uses P_qc/2; the reference-only pre-DTE branch
+    # supplies P_qc explicitly from calculate_pre_dte_imp_at_pos().
+    V_qc = -(pmf_sn.quantile(P_qc / 2 if cdf_tail is None else cdf_tail))
 
     return COMAdcInputPMF(
         p_sig=p_sig,
         p_s=pmf_s,
         p_ga=pmf_ga,
+        p_n=pmf_ga,
         p_sn=pmf_sn,
         V_qc=V_qc,
         method="pmf_exact",
@@ -1668,6 +2327,8 @@ def _calculate_V_qc_gaussian_approx(
     sigma_ga: float,
     P_qc: float,
     pmf_cfg: COMPMFRuntimeConfig,
+    *,
+    cdf_tail: Optional[float] = None,
 ) -> COMAdcInputPMF:
     """
     Fast approximation for 178A pre-DTE quantization clipping amplitude.
@@ -1685,7 +2346,8 @@ def _calculate_V_qc_gaussian_approx(
     var_x = float(np.sum((x - mu_x)**2 * probs))
     var_signal = var_x * float(np.sum(np.asarray(h_dsamp, dtype=float)**2))
     sigma_sn = float(np.sqrt(max(0.0, var_signal + float(sigma_ga)**2)))
-    V_qc = float(NormalDist().inv_cdf(1.0 - float(P_qc) / 2.0) * sigma_sn)
+    tail = float(P_qc) / 2.0 if cdf_tail is None else float(cdf_tail)
+    V_qc = float(NormalDist().inv_cdf(1.0 - tail) * sigma_sn)
     p_sn = Pmf1D.gaussian(
         mu=0.0,
         sigma=sigma_sn,
@@ -1710,6 +2372,10 @@ def _build_psd_adc_qn(
     pmf_cfg: COMPMFRuntimeConfig, 
     link_cfg: LinkConfig,
     vqc_method: str = "gaussian_approx",
+    *,
+    cdf_tail: Optional[float] = None,
+    L: Optional[int] = None,
+    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
 ) -> tuple[SampledPSD, COMAdcInputPMF]:
 
     if vqc_method == "gaussian_approx":
@@ -1719,12 +2385,16 @@ def _build_psd_adc_qn(
             sigma_ga,
             P_qc,
             pmf_cfg,
+            cdf_tail=cdf_tail,
         )
         V_qc = adc_input_pmf.V_qc
         if V_qc is None:
             raise RuntimeError("Gaussian-approximate ADC input did not resolve V_qc.")
     elif vqc_method == "pmf_exact":
-        adc_input_pmf = _calculate_V_qc(p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg)
+        adc_input_pmf = _calculate_V_qc(
+            p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg, cdf_tail=cdf_tail,
+            L=L, pmf_methods=pmf_methods,
+        )
         V_qc = adc_input_pmf.V_qc
         if V_qc is None:
             raise RuntimeError("Exact ADC-input PMF did not resolve V_qc.")
@@ -1735,7 +2405,7 @@ def _build_psd_adc_qn(
     delta = 2 * V_qc / (2**N_qb - 1)
 
     # 178A-26
-    S_qn = SampledPSD.from_constant(link_cfg.theta, (delta**2/12)/link_cfg.fb, link_cfg.fb)
+    S_qn = SampledPSD.from_constant(link_cfg.theta, (delta**2/12)/link_cfg.fb, link_cfg.fb, cfg=link_cfg)
 
     adc_input_pmf.delta = delta
     return S_qn, adc_input_pmf
@@ -1743,7 +2413,7 @@ def _build_psd_adc_qn(
 # for psd fallback
 def _zero_sampled_psd(link_cfg: LinkConfig) -> SampledPSD:
     """Return a zero-valued sampled-domain PSD on link_cfg.theta."""
-    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb)
+    return SampledPSD.from_constant(link_cfg.theta, 0.0, link_cfg.fb, cfg=link_cfg)
 
 # -----------------------------------------
 # calculate_MMSE_DTE(): private helper
@@ -2096,45 +2766,122 @@ def _resolve_adc_input_pmf_config(
     pmf_config: COMPMFConfig,
     As: float,
     run_cfg: COMRunConfig,
+    *,
+    gaussian_n_sigma_override: Optional[float] = None,
 ) -> COMPMFRuntimeConfig:
     """Resolve execution-policy PMF settings used before ADC quantization."""
+    resolved = pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality)
     return replace(
-        pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality),
+        resolved,
+        dy=resolved.dy if run_cfg.pmf_dy_override is None else run_cfg.pmf_dy_override,
         keep_mass=run_cfg.pmf_keep_mass,
+        gaussian_n_sigma=(
+            resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
+            else gaussian_n_sigma_override
+        ),
     )
 
 
 def _resolve_final_com_pmf_config(
     pmf_config: COMPMFConfig,
     As: float,
+    run_cfg: COMRunConfig,
+    *,
+    gaussian_n_sigma_override: Optional[float] = None,
+    final_pmf_grid: Literal["fine", "relative_As"] = "fine",
 ) -> COMPMFRuntimeConfig:
     """Resolve accuracy-required PMF settings used to calculate final COM."""
+    # In the reference profile, RxFFE is represented with a unit main tap.
+    # This model retains the unnormalized main gain, so reference delta_y
+    # must be multiplied by that gain: 0.001*(As/gain)*gain = 0.001*As.
+    use_relative_grid = final_pmf_grid == "relative_As"
+    if final_pmf_grid not in {"fine", "relative_As"}:
+        raise ValueError("final_pmf_grid must be fine or relative_As.")
+    resolved = pmf_config.resolve(As, grid_quality="coarse" if use_relative_grid else "fine")
     return replace(
-        pmf_config.resolve(As, grid_quality="fine"),
+        resolved,
+        dy=(
+            resolved.dy if use_relative_grid or run_cfg.pmf_dy_override is None
+            else run_cfg.pmf_dy_override
+        ),
         keep_mass=1.0,
+        gaussian_n_sigma=(
+            resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
+            else gaussian_n_sigma_override
+        ),
     )
 
 
-def _build_pmf_pam_L(L: int, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
+def _pam_levels(L: int) -> np.ndarray:
+    return np.array([2 * level / (L - 1) - 1 for level in range(L)], dtype=float)
+
+
+def _build_pmf_pam_L(
+    L: int,
+    pmf_cfg: COMPMFRuntimeConfig,
+    *,
+    placement: Literal["linear", "nearest"] = "linear",
+) -> Pmf1D:
     # Base PAM4 signal pmf
     return Pmf1D.multi_dirac(
-        values = np.array([2*l/(L-1)-1 for l in range(L)]),
+        values = _pam_levels(L),
         probs = 1/L * np.ones(L),
         dx = pmf_cfg.dy,
         unit = "volt",
-        name = f"PAM{L}_signal"
+        name = f"PAM{L}_signal",
+        placement=placement,
     )
+
+
+def _build_pmf_interference_178A(
+    p_sig: Pmf1D,
+    h: np.ndarray,
+    pmf_cfg: COMPMFRuntimeConfig,
+    L: int,
+    *,
+    method: Literal["signal_fir", "pam_atoms"] = "signal_fir",
+    name: Optional[str] = None,
+) -> Pmf1D:
+    if method == "pam_atoms":
+        return Pmf1D.fir_filter_atoms(
+            _pam_levels(L), np.full(L, 1.0 / L), np.asarray(h, dtype=float),
+            dx=pmf_cfg.dy, keep_mass=pmf_cfg.keep_mass,
+            tap_abs_th=np.nextafter(pmf_cfg.dy, np.inf),
+            unit="volt", name=name or "",
+        )
+    if method == "signal_fir":
+        return _build_pmf_interference_93A(p_sig, h, pmf_cfg, name=name)
+    raise ValueError("interference PMF method must be signal_fir or pam_atoms.")
+
 
 def _build_pmf_w_XT_all(
     p_sig: Pmf1D,
     h_XTs_w: list[np.ndarray | SampledResponse],
     pmf_cfg: COMPMFRuntimeConfig,
+    *,
+    L: Optional[int] = None,
+    methods: COMPolicyConfig = COMPolicyConfig(),
 ) -> Pmf1D:
-    return _build_pmf_XT_all_93A(
-        p_sig,
-        [value.ir if isinstance(value, SampledResponse) else value for value in h_XTs_w],
-        pmf_cfg,
-    )
+    responses = [value.ir if isinstance(value, SampledResponse) else value for value in h_XTs_w]
+    if methods.interference_pmf_method == "pam_atoms":
+        if L is None:
+            raise ValueError("Atomic crosstalk PMF construction requires PAM order L.")
+        result = Pmf1D.multi_dirac(
+            np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy,
+            unit="volt", name="XT_all", placement=methods.discrete_pmf_placement,
+        )
+        for response in responses:
+            result = result.combine(
+                _build_pmf_interference_178A(
+                    p_sig, response, pmf_cfg, L,
+                    method=methods.interference_pmf_method, name="XT",
+                ),
+                name="XT_all",
+            )
+        return result
+    if methods.interference_pmf_method == "signal_fir":
+        return _build_pmf_XT_all_93A(p_sig, responses, pmf_cfg)
+    raise ValueError("Unsupported crosstalk PMF construction method.")
 
 def _build_adc_input_pmf_exact(
     p_sig: Pmf1D, 
@@ -2146,19 +2893,28 @@ def _build_adc_input_pmf_exact(
     P_qc: float,
     N_qb: int,
     pmf_cfg: COMPMFRuntimeConfig,
+    *,
+    L: Optional[int] = None,
+    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
 ) -> COMAdcInputPMF:
     """Build the selected-phase exact ADC-input PMF chain for final COM."""
+    if pmf_methods.interference_pmf_method == "pam_atoms" and L is None:
+        raise ValueError("Atomic ADC PMF construction requires PAM order L.")
+    pam_order = L or len(p_sig.pmf)
     
     # noiseless signal
-    pmf_s = _build_pmf_interference_93A(
-        p_sig, 
-        h_dsamp, 
-        pmf_cfg,
-        name="Noiseless signal",
+    pmf_s = _build_pmf_interference_178A(
+        p_sig, h_dsamp, pmf_cfg, pam_order,
+        method=pmf_methods.interference_pmf_method, name="Noiseless signal",
     )
 
-    pmf_XT = _build_pmf_w_XT_all(p_sig, h_XTs_dsamp, pmf_cfg)
-    pmf_DD = _build_pmf_interference_93A(p_sig, A_DD * h_J, pmf_cfg, name="ADC-input Dual-Dirac")
+    pmf_XT = _build_pmf_w_XT_all(
+        p_sig, h_XTs_dsamp, pmf_cfg, L=pam_order, methods=pmf_methods,
+    )
+    pmf_DD = _build_pmf_interference_178A(
+        p_sig, A_DD * h_J, pmf_cfg, pam_order,
+        method=pmf_methods.interference_pmf_method, name="ADC-input Dual-Dirac",
+    )
 
     pmf_ga = Pmf1D.gaussian(
         mu=0,
@@ -2166,7 +2922,8 @@ def _build_adc_input_pmf_exact(
         dx=pmf_cfg.dy,
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
-        name="Gaussian Noise"
+        name="Gaussian Noise",
+        method=pmf_methods.gaussian_pmf_method,
     )
     pmf_n = pmf_XT.combine(pmf_DD).combine(pmf_ga, name="ADC-input noise")
 
@@ -2187,7 +2944,11 @@ def _build_adc_input_pmf_exact(
         method="pmf_exact",
     )
 
-def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig) -> Pmf1D:
+def _build_pmf_G(
+    imp_status: COMImpairmentStatus, dte_status: COMDTEStatus,
+    link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig, *,
+    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
+) -> Pmf1D:
     del dte_status, link_cfg
     post_ffe = imp_status.post_ffe
     if post_ffe is None or post_ffe.psd is None or post_ffe.psd.sigma_G is None:
@@ -2199,8 +2960,77 @@ def _build_pmf_G(imp_status: COMImpairmentStatus, dte_status: COMDTEStatus, link
         dx=pmf_cfg.dy,
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
-        name="Noise"
+        name="Noise",
+        method=gaussian_method,
     )
+
+
+def _final_adc_clip_reference_only(
+    imp_status: COMImpairmentStatus,
+    L: int,
+    pmf_cfg: COMPMFRuntimeConfig,
+    main_gain: float,
+    A_DD: float,
+    P_qc: float,
+    *,
+    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+) -> tuple[float, COMPMFRuntimeConfig, Pmf1D]:
+    """MATLAB 4.17 comparison boundary: pre-FFE signal plus normalized final noise.
+
+    This is deliberately separate from the Annex D3 post-FFE ADC-input PMF.
+    SiCoPR's final quantizer convolves the pre-FFE victim signal with the
+    post-FFE ISI/XT/DD/Gaussian noise expressed back at the ADC input, then
+    locates the one-sided ``P_qc`` CDF point.
+    """
+    if not np.isfinite(main_gain) or main_gain <= 0.0:
+        raise ValueError("Reference final ADC clipping requires positive RX FFE main gain.")
+    # The final PMF uses the post-FFE voltage grid. Refer it back to the ADC
+    # input together with the post-FFE responses; otherwise a 59x FFE gain
+    # silently makes the clipping CDF grid 59x coarser than the final PDF.
+    clip_cfg = replace(
+        pmf_cfg,
+        dy=pmf_cfg.dy / main_gain,
+        tap_abs_th=pmf_cfg.tap_abs_th / main_gain,
+    )
+    p_sig = _build_pmf_pam_L(
+        L, clip_cfg, placement=pmf_methods.discrete_pmf_placement,
+    )
+    p_s = _build_pmf_interference_178A(
+        p_sig, imp_status.h_dsamp.ir, clip_cfg, L,
+        method=pmf_methods.interference_pmf_method, name="ADC reference signal",
+    )
+    p_isi = _build_pmf_interference_178A(
+        p_sig, imp_status.h_ISI.ir / main_gain, clip_cfg, L,
+        method=pmf_methods.interference_pmf_method, name="ADC reference ISI",
+    )
+    p_xt = _build_pmf_w_XT_all(
+        p_sig,
+        [
+            (path.ir if isinstance(path, SampledResponse) else path) / main_gain
+            for path in imp_status.h_XTs_w
+        ],
+        clip_cfg,
+        L=L,
+        methods=pmf_methods,
+    )
+    p_dd = _build_pmf_interference_178A(
+        p_sig,
+        A_DD * imp_status.h_w_J.ir / main_gain,
+        clip_cfg,
+        L, method=pmf_methods.interference_pmf_method, name="ADC reference Dual-Dirac",
+    )
+    p_ga = Pmf1D.gaussian(
+        mu=0.0,
+        sigma=imp_status.sigma_G / main_gain,
+        dx=clip_cfg.dy,
+        n_sigma=clip_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="ADC reference Gaussian",
+        method=pmf_methods.gaussian_pmf_method,
+    )
+    p_noise = p_isi.combine(p_xt).combine(p_dd).combine(p_ga)
+    p_sn = p_s.combine(p_noise)
+    return -float(p_sn.quantile(P_qc)), clip_cfg, p_noise
 
 
 def evaluate_delta_com_an(
@@ -2209,6 +3039,8 @@ def evaluate_delta_com_an(
     pmf_dfe: COMPMFStatus,
     pmf_cfg: COMPMFRuntimeConfig,
     der_0: float,
+    *,
+    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
 ) -> COMAddedNoiseStatus:
     """Evaluate the Annex 178A MLSD added-receiver-noise penalty.
 
@@ -2275,11 +3107,16 @@ def evaluate_delta_com_an(
         theta=post_psd.S_rn.theta,
         psd=g_an * post_psd.S_rn.psd,
         fb=post_psd.S_rn.fb,
+        cfg=post_psd.S_rn.cfg,
     )
     sigma_G = float(post_psd.sigma_G)
+    # Eq. (178A-51): to_sigma() integrates S_an on the SampledPSD one-sided grid;
+    # hypot then forms sqrt(sigma_G^2 + sigma_added^2).
     sigma_added = float(S_an.to_sigma())
     sigma_an = float(np.hypot(sigma_G, sigma_added))
 
+    # Eq. (178A-51) and its following text: replace the Gaussian part of p_an
+    # with sigma_an, retaining the DFE-stage ISI/XT/DD/quantization PMFs.
     p_G_an = Pmf1D.gaussian(
         mu=0.0,
         sigma=sigma_an,
@@ -2287,6 +3124,7 @@ def evaluate_delta_com_an(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="Added receiver noise",
+        method=gaussian_method,
     )
     p_an = (
         pmf_dfe.p_ISI
@@ -2325,6 +3163,7 @@ def solve_g_an(
     *,
     cvg_th: float = 1e-2,
     max_iter: int = 64,
+    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
 ) -> COMAddedNoiseStatus:
     """Solve Eq. (178A-50) scale factor for a target added-noise penalty.
 
@@ -2371,7 +3210,9 @@ def solve_g_an(
         candidate.iteration_history = list(history)
         return candidate
 
-    low = evaluate_delta_com_an(0.0, post_ffe, pmf_dfe, pmf_cfg, der_0)
+    low = evaluate_delta_com_an(
+        0.0, post_ffe, pmf_dfe, pmf_cfg, der_0, gaussian_method=gaussian_method,
+    )
     low.target_delta_com_an = target_delta_com_an
     low.residual_dB = low.delta_com_an_temp - target_delta_com_an
     low.iterations = 0
@@ -2388,7 +3229,10 @@ def solve_g_an(
     high_g_an = 1.0
     high: Optional[COMAddedNoiseStatus] = None
     for iteration in range(1, max_iter + 1):
-        candidate = evaluate_delta_com_an(high_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        candidate = evaluate_delta_com_an(
+            high_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0,
+            gaussian_method=gaussian_method,
+        )
         candidate.target_delta_com_an = target_delta_com_an
         candidate.residual_dB = candidate.delta_com_an_temp - target_delta_com_an
         candidate.iterations = iteration
@@ -2419,7 +3263,10 @@ def solve_g_an(
     best = min((low, high), key=lambda status: abs(status.residual_dB))
     for iteration in range(int(high.iterations) + 1, max_iter + 1):
         mid_g_an = (low_g_an + high_g_an) / 2.0
-        mid = evaluate_delta_com_an(mid_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0)
+        mid = evaluate_delta_com_an(
+            mid_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0,
+            gaussian_method=gaussian_method,
+        )
         mid.target_delta_com_an = target_delta_com_an
         mid.residual_dB = mid.delta_com_an_temp - target_delta_com_an
         mid.iterations = iteration
@@ -2448,27 +3295,117 @@ def solve_g_an(
     )
 
 
+def _pmf_variance(pmf: Pmf1D) -> float:
+    """Return the variance of one normalized PMF on its physical x grid."""
+    mean = float(np.sum(pmf.pmf * pmf.x))
+    return float(np.sum(pmf.pmf * (pmf.x - mean) ** 2))
+
+
+def _build_scaled_total_pdf_added_noise(
+    target_delta_com_an: float,
+    post_ffe: COMImpStageStatus,
+    pmf_dfe: COMPMFStatus,
+    der_0: float,
+    *,
+    scaling_method: Literal["mass_deposit", "interpolate_ordinates"],
+) -> COMAddedNoiseStatus:
+    """Build the MATLAB 4.17 reference p_an by scaling the complete DFE PDF."""
+    if pmf_dfe.p_combined is None:
+        raise ValueError("scaled_total_pdf requires the complete COM_DFE PMF.")
+    post_psd = post_ffe.psd
+    if post_psd is None or post_psd.S_rn is None or post_psd.sigma_G is None:
+        raise ValueError(
+            "scaled_total_pdf requires post-FFE receiver-noise PSD S_rn and sigma_G."
+        )
+
+    scale = float(10.0 ** (float(target_delta_com_an) / 20.0))
+    p_ref = pmf_dfe.p_combined
+    p_an = p_ref.scale_x(
+        scale,
+        keep_dx=True,
+        dx_ref=p_ref.dx,
+        method=scaling_method,
+    )
+    variance_ref = _pmf_variance(p_ref)
+    variance_an = _pmf_variance(p_an)
+    receiver_variance = float(post_psd.S_rn.to_sigma() ** 2)
+    variance_added = variance_an - variance_ref
+    if receiver_variance <= 0.0 or variance_added < -1e-15:
+        raise COMError(
+            "scaled_total_pdf produced invalid added-noise variance: "
+            f"added={variance_added!r}, receiver={receiver_variance!r}."
+        )
+    variance_added = max(0.0, variance_added)
+    g_an = variance_added / receiver_variance
+    S_an = SampledPSD(
+        theta=post_psd.S_rn.theta,
+        psd=g_an * post_psd.S_rn.psd,
+        fb=post_psd.S_rn.fb,
+        cfg=post_psd.S_rn.cfg,
+    )
+    A_ref = abs(float(p_ref.quantile(der_0)))
+    A_an = abs(float(p_an.quantile(der_0)))
+    if A_ref <= 0.0 or A_an <= 0.0:
+        raise COMError("scaled_total_pdf requires positive reference-tail amplitudes.")
+    return COMAddedNoiseStatus(
+        g_an=float(g_an),
+        S_an=S_an,
+        sigma_an=float(np.hypot(post_psd.sigma_G, S_an.to_sigma())),
+        p_an=p_an,
+        delta_com_an_temp=float(20.0 * np.log10(A_an / A_ref)),
+        target_delta_com_an=float(target_delta_com_an),
+        residual_dB=float(20.0 * np.log10(A_an / A_ref) - target_delta_com_an),
+        iterations=0,
+        sigma_added=float(S_an.to_sigma()),
+        A_ref=A_ref,
+        A_an=A_an,
+    )
+
+
+def _build_mlsd_sequence_vector(j: int, b_lim_1: float) -> np.ndarray:
+    """Build Eq. (178A-49) using the specification's one-based i index."""
+    u_j = np.empty(j + 1, dtype=float)
+    u_j[0] = 1.0
+    if j > 1:
+        indices = np.arange(2, j + 1, dtype=int)
+        u_j[1:j] = ((-1.0) ** (indices - 1)) * (1.0 - b_lim_1)
+    # The last element is i=j+1 in Eq. (178A-49).  Its Python position is j,
+    # but converting the array subscript does not change the equation exponent.
+    u_j[j] = ((-1.0) ** (j + 1)) * b_lim_1
+    return u_j
+
+
+def _reference_cdf_ev(pmf: Pmf1D, positive_threshold: float) -> float:
+    """Match MATLAB CDF_ev: first PMF grid point x >= -threshold."""
+    index = int(np.searchsorted(pmf.x, -float(positive_threshold), side="left"))
+    index = min(max(index, 0), len(pmf.pmf) - 1)
+    return float(pmf.cdf[index])
+
+
 def calculate_der_mlsd(
-    mlsd_status: COMMLSDStatus,
+    p_an: Pmf1D,
+    R_ni: np.ndarray,
     *,
     L: int,
     As: float,
     b_lim_1: float,
     trunc_len: int,
+    pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
+    sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum",
 ) -> tuple[float, np.ndarray]:
     """Evaluate the truncated Annex 178A MLSD detector error ratio.
 
-    This function implements the recurrence in Eqs. (178A-47) through
-    (178A-53).  ``p_j`` is deliberately local: it is only the state needed to
+    This function implements Eqs. (178A-48), (178A-49), (178A-52), and
+    (178A-53). ``p_j`` is deliberately local: it is only the state needed to
     construct the next sequence-length term.  The returned ``der_by_j`` holds
-    the weighted Eq. (178A-47) contribution for each ``j=1..trunc_len``;
+    the weighted Eq. (178A-48) contribution for each ``j=1..trunc_len``;
     therefore ``der_by_j.sum()`` is the truncated ``DER_MLSD``.
 
-    ``initialize_mlsd_status()`` must have run first so that Eq. (178A-54)
-    autocorrelation ``R_ni`` is available on the same post-FFE model.
+    The caller supplies the Eq. (178A-51) added-noise PDF and Eq. (178A-54)
+    autocorrelation directly. Neither input is modified.
     """
-    if not isinstance(mlsd_status, COMMLSDStatus):
-        raise TypeError("mlsd_status must be a COMMLSDStatus.")
+    if not isinstance(p_an, Pmf1D):
+        raise TypeError("p_an must be a Pmf1D.")
 
     L = int(L)
     if L < 2:
@@ -2490,13 +3427,9 @@ def calculate_der_mlsd(
             "b_lim_1 must differ from one when trunc_len is greater than one."
         )
 
-    p_an = mlsd_status.added_noise.p_an
-    if not isinstance(p_an, Pmf1D):
-        raise TypeError("mlsd_status.added_noise.p_an must be a Pmf1D.")
-
-    if mlsd_status.R_ni is None:
-        raise ValueError("mlsd_status.R_ni is required before calculating DER_MLSD.")
-    R_ni = np.asarray(mlsd_status.R_ni)
+    if R_ni is None:
+        raise ValueError("R_ni is required before calculating DER_MLSD.")
+    R_ni = np.asarray(R_ni)
     if R_ni.ndim != 1 or R_ni.size < trunc_len + 1:
         raise COMLengthMismatchError(
             "MLSD R_ni must be one-dimensional with at least trunc_len + 1 "
@@ -2508,35 +3441,51 @@ def calculate_der_mlsd(
     if not np.all(np.isfinite(R_ni)) or R_ni[0] <= 0.0:
         raise ValueError("MLSD R_ni must be finite with positive R_ni[0].")
 
-    # This local import keeps scipy confined to the Toeplitz calculation that
-    # directly represents Eq. (178A-49).
+    # This local import keeps scipy confined to the normalized Toeplitz V_j
+    # described after Eq. (178A-54).
     from scipy.linalg import toeplitz
 
     der_by_j = np.empty(trunc_len, dtype=float)
     p_j: Optional[Pmf1D] = None
-    p_1_term = p_an.scale_x(-b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+    # Eq. (178A-52): p_an(y / b_1) / |b_1| is the PDF of +b_1 times the noise.
+    p_1_term = p_an.scale_x(
+        b_lim_1,
+        keep_dx=True,
+        dx_ref=p_an.dx,
+        method=pmf_scaling_method,
+    )
     p_later_term: Optional[Pmf1D] = None
     if trunc_len > 1:
-        p_later_term = p_an.scale_x(1.0 - b_lim_1, keep_dx=True, dx_ref=p_an.dx)
+        # Eq. (178A-53): the recurrence adds (1 - b_1) times the noise.
+        p_later_term = p_an.scale_x(
+            1.0 - b_lim_1,
+            keep_dx=True,
+            dx_ref=p_an.dx,
+            method=pmf_scaling_method,
+        )
+
+    if sequence_termination not in {"fixed_length_sum", "matlab_relative_tail"}:
+        raise ValueError(
+            "sequence_termination must be fixed_length_sum or matlab_relative_tail."
+        )
+    p_trunc = p_an
+    truncation_term: Optional[float] = None
 
     for j in range(1, trunc_len + 1):
-        # Eqs. (178A-52) and (178A-53). scale_x preserves PMF mass, which is
-        # the discrete-grid equivalent of each equation's 1 / |scale| factor.
         if j == 1:
+            # Eq. (178A-52): convolve p_an with the scaled first term.
+            # scale_x includes the PDF's 1 / |b_1| normalization.
             p_j = p_an.combine(p_1_term, name="MLSD p_1")
         else:
             assert p_j is not None and p_later_term is not None
+            # Eq. (178A-53): recur with the scaled later term; scale_x
+            # includes the PDF's 1 / |1 - b_1| normalization.
             p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}")
 
-        # Eq. (178A-48): u_j is indexed from 1 in the specification.
-        u_j = np.empty(j + 1, dtype=float)
-        u_j[0] = 1.0
-        if j > 1:
-            indices = np.arange(2, j + 1, dtype=int)
-            u_j[1:j] = ((-1.0) ** (indices - 1)) * (1.0 - b_lim_1)
-        u_j[j] = ((-1.0) ** j) * b_lim_1
+        # Eq. (178A-49), including its one-based i=j+1 final element.
+        u_j = _build_mlsd_sequence_vector(j, b_lim_1)
 
-        # Eq. (178A-49), normalized by R_ni(0).
+        # The Toeplitz V_j defined after Eq. (178A-54), normalized by R_ni(0).
         V_j = toeplitz(R_ni[:j + 1] / R_ni[0])
         quadratic = float(u_j @ V_j @ u_j)
         norm_sq = float(u_j @ u_j)
@@ -2544,22 +3493,47 @@ def calculate_der_mlsd(
             raise COMError(
                 f"MLSD V_{j} produced invalid u_j^T V_j u_j={quadratic!r}."
             )
+        # Eq. (178A-48): evaluate the CDF P_j at its u_j/V_j threshold.
         threshold = -As * norm_sq ** 1.5 / np.sqrt(quadratic)
-        der_event = float(p_j.cdf_at(threshold))
+        der_event = (
+            _reference_cdf_ev(p_j, -threshold)
+            if sequence_termination == "matlab_relative_tail"
+            else float(p_j.cdf_at(threshold))
+        )
         if not np.isfinite(der_event) or not 0.0 <= der_event <= 1.0:
             raise COMError(
                 f"MLSD p_{j} CDF produced invalid event probability {der_event!r}."
             )
 
-        # Eq. (178A-47), including the probability of a j-event sequence.
+        # Eq. (178A-48), including the probability of a j-event sequence.
         der_by_j[j - 1] = ((L - 1.0) / L) ** (j - 1) * der_event
+
+        if sequence_termination == "matlab_relative_tail":
+            if j == trunc_len:
+                # MATLAB 4.17 truncation penalty drops the final u_j element and
+                # evaluates the separately accumulated p_trunc distribution.
+                u_trunc = u_j[:j]
+                V_trunc = V_j[:j, :j]
+                trunc_quadratic = float(u_trunc @ V_trunc @ u_trunc)
+                trunc_norm_sq = float(u_trunc @ u_trunc)
+                trunc_threshold = -As * trunc_norm_sq ** 1.5 / np.sqrt(trunc_quadratic)
+                truncation_term = float(
+                    L
+                    * ((L - 1.0) / L) ** (j - 1)
+                    * _reference_cdf_ev(p_trunc, -trunc_threshold)
+                )
+            elif j < trunc_len:
+                assert p_later_term is not None
+                p_trunc = p_trunc.combine(p_later_term, name=f"MLSD p_trunc_{j}")
 
     if not np.all(np.isfinite(der_by_j)) or np.any(der_by_j < 0.0):
         raise COMError("MLSD DER contributions must be finite and non-negative.")
 
+    # Eq. (178A-48): sum the truncated j-event contributions.
     DER_MLSD = float(np.sum(der_by_j))
-    mlsd_status.der_by_j = der_by_j
-    mlsd_status.DER_MLSD = DER_MLSD
+    if sequence_termination == "matlab_relative_tail":
+        assert truncation_term is not None
+        DER_MLSD = float(np.sum(der_by_j[:-1]) + truncation_term)
     return DER_MLSD, der_by_j
 
 
@@ -2586,7 +3560,12 @@ class COM(com_93A.COM):
 
     def __init__(self, cfg: COMConfig):
         self.cfg = cfg
+        self.noise_link_cfg = cfg.policy.resolve_noise_grid(cfg.link)
         self.status: Optional[COMStatus | COMSearchStatus] = None
+
+    def _effective_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
+        """Return the run profile already resolved by the input adapter."""
+        return self.cfg.resolve_run_cfg(run_cfg)
 
     def run(
         self,
@@ -2629,6 +3608,7 @@ class COM(com_93A.COM):
         the enabled MLSD receiver stage. ``target="full"`` includes MLSD only
         when ``cfg.mlsd.enable`` is true.
         """
+        run_cfg = self._effective_run_cfg(run_cfg)
         self.status = COMStatus()
         started = perf_counter()
 
@@ -2752,12 +3732,12 @@ class COM(com_93A.COM):
 
         if run_cfg.target in {"dfe", "mlsd", "full"}:
             report("calculate_COM_DFE: start")
-            self._assign_pmf(self.calculate_COM_DFE(merged_imp_status, best_dte))
+            self._assign_pmf(self.calculate_COM_DFE(merged_imp_status, best_dte, run_cfg=run_cfg))
             report("calculate_COM_DFE: done")
 
         if mlsd_requested:
             report("calculate_COM_MLSD: start")
-            self.calculate_COM_MLSD()
+            self.calculate_COM_MLSD(run_cfg=run_cfg)
             report("calculate_COM_MLSD: done")
         report("single-run complete")
         return self._require_status()
@@ -2855,7 +3835,9 @@ class COM(com_93A.COM):
         2. build path-shared models
         3. build every path-specific model
         """
-        channels = _build_channel_under_test(self.cfg.channel)
+        channels = _build_channel_under_test(
+            self.cfg.channel, self.cfg.policy.channel_renormalization_order,
+        )
         shared = _build_shared_path(self.cfg, channels[0].freqs)
         return _build_paths(self.cfg, shared, channels)
 
@@ -2883,6 +3865,7 @@ class COM(com_93A.COM):
             stage; the selected pre-DTE result records these terms later.
         """
         link_cfg = self.cfg.link
+        noise_link_cfg = self.noise_link_cfg
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
         L = self.cfg.L
@@ -2895,11 +3878,17 @@ class COM(com_93A.COM):
         sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
 
         # Receiver input noise PSD
-        S_rn = _build_psd_rx_noise(link_cfg, imp_cfg, ft_cfg)
+        S_rn = _build_psd_rx_noise(noise_link_cfg, imp_cfg, ft_cfg)
         sigma_rn = S_rn.to_sigma()
 
         # Crosstalk PSD
-        S_xn, h_XTs_dsamp = _build_psd_xtalk(h_XTs, link_cfg, sigma_X)
+        S_xn, h_XTs_dsamp = _build_psd_xtalk(
+            h_XTs,
+            link_cfg,
+            sigma_X,
+            noise_link_cfg=noise_link_cfg,
+            noise_grid=self.cfg.policy,
+        )
         sigma_xn = S_xn.to_sigma()
 
         return (
@@ -2947,6 +3936,7 @@ class COM(com_93A.COM):
         and the derived oversampled main-cursor index ``ts`` are stored only
         by the subsequent COMDTEStatus.
         """
+        run_cfg = self._effective_run_cfg(run_cfg)
         link_cfg = self.cfg.link
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
@@ -2959,6 +3949,10 @@ class COM(com_93A.COM):
                 "common must be the complete output of "
                 "calculate_pre_dte_imp_common()."
             )
+        # The common stage owns the concrete noise-grid object. Reuse that
+        # exact reference so equivalent COMConfig copies can consume a cached
+        # common result without violating SampledPSD's shared-grid contract.
+        noise_link_cfg = common.S_rn.cfg or self.noise_link_cfg
         if not isinstance(h_XTs_dsamp, list) or any(
             np.asarray(h_xt_dsamp).ndim != 1 for h_xt_dsamp in h_XTs_dsamp
         ):
@@ -2970,6 +3964,7 @@ class COM(com_93A.COM):
             self.cfg.pmf,
             imp_cfg.R_LM / (L - 1),
             run_cfg,
+            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
         )
         
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
@@ -2988,31 +3983,69 @@ class COM(com_93A.COM):
         S_xn = common.S_xn
 
         # transmitter output noise PSD, Eq. 178A-19 and Eq. 178A-20.
-        S_tn, h_tn = _build_psd_tx_noise(victim, link_cfg, ft_cfg, imp_cfg, pos)
+        S_tn, h_tn = _build_psd_tx_noise(
+            victim,
+            link_cfg,
+            self.cfg.channel,
+            ft_cfg,
+            imp_cfg,
+            pos,
+            self.cfg.policy.ctle_pulse_realization,
+            noise_link_cfg=noise_link_cfg,
+            noise_grid=self.cfg.policy,
+        )
         sigma_tn = S_tn.to_sigma()
 
         # transmitter jitter-induced noise PSD, Eq. 178A-21 and Eq. 178A-22.
-        S_jn, h_J = _build_psd_tx_jitter(victim, link_cfg, imp_cfg, pos, sigma_X)
+        S_jn, h_J = _build_psd_tx_jitter(
+            victim,
+            link_cfg,
+            imp_cfg,
+            pos,
+            sigma_X,
+            noise_link_cfg=noise_link_cfg,
+            noise_grid=self.cfg.policy,
+        )
         sigma_jn = S_jn.to_sigma()
 
         # quantization noise
-        p_sig = _build_pmf_pam_L(L, pmf_cfg)
+        p_sig = _build_pmf_pam_L(
+            L, pmf_cfg, placement=self.cfg.policy.discrete_pmf_placement,
+        )
+        # Keep the full Eq. (178A-21)/(178A-22) jitter term in the MMSE
+        # covariance. Only the ADC clipping input changes in the reference
+        # comparison branch.
         S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
-        sigma_ga = S_ga.to_sigma()
+        if self.cfg.policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only":
+            S_jn_clip = _build_psd_from_DFT_response(
+                self.cfg.policy.fit_noise_response(h_J),
+                noise_link_cfg,
+                sigma_X**2 * imp_cfg.sigma_RJ**2,
+            )
+            S_clip = S_rn.add(S_xn).add(S_tn).add(S_jn_clip)
+            cdf_tail = imp_cfg.P_qc
+        else:
+            S_clip = S_ga
+            cdf_tail = None  # Preserve the Annex P_qc/2 default.
+        sigma_clip = S_clip.to_sigma()
         if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            S_qn = _zero_sampled_psd(link_cfg)
+            S_qn = _zero_sampled_psd(noise_link_cfg)
             adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
         else:
             S_qn, adc_input_pmf = _build_psd_adc_qn(
                 p_sig = p_sig, 
                 h_dsamp = h_dsamp,
-                sigma_ga = sigma_ga, 
+                sigma_ga = sigma_clip,
                 P_qc = imp_cfg.P_qc,
                 N_qb = imp_cfg.N_qb,
                 pmf_cfg = pmf_cfg, 
-                link_cfg = link_cfg,
+                link_cfg = noise_link_cfg,
                 vqc_method=run_cfg.pre_dte_pmf_method,
+                cdf_tail=cdf_tail,
+                L=L,
+                pmf_methods=self.cfg.policy,
             )
+        adc_input_pmf.clipping_convention = self.cfg.policy.pre_dte_adc_clipping_convention
         sigma_qn = S_qn.to_sigma()
 
         # summation and IDFT
@@ -3137,7 +4170,7 @@ class COM(com_93A.COM):
         """Finalize selected-phase equivalent responses and post-DTE diagnostics.
 
         The post-DTE component PSDs are 93A-aligned reporting quantities on the
-        expanded ``h_w`` grid.  DFE COM consumes the separately calculated
+        run-level sampled grid. DFE COM consumes the separately calculated
         Gaussian sigma, ADC-input clipping material, and equivalent responses;
         changing reporting PSD construction must not change MSE or COM.
         """
@@ -3160,22 +4193,28 @@ class COM(com_93A.COM):
             if len(nonzero_w)
             else w_lim_ndarray[:1]
         )
-        w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, self.cfg.link)
+        noise_link_cfg = imp_pre.S_rn.cfg or self.noise_link_cfg
+        w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, noise_link_cfg)
 
-        # Equivalent responses use complete linear convolution.  The victim
-        # response owns the common expanded post-DTE grid.
-        h_w = imp_pre.h_dsamp.cascade_ir(w_lim_pre, per_ui=self.per_ui)
-        post_link_cfg = LinkConfig.from_Nfft(
-            self.cfg.link.fb,
-            self.per_ui,
-            h_w.nfft * self.per_ui,
+        h_w = _apply_rxffe_response(
+            imp_pre.h_dsamp,
+            w_lim_ndarray,
+            self.cfg.link,
+            self.cfg.policy.rxffe_record_realization,
+            "post_ffe victim",
         )
-        H_rxffe = SampledResponse.from_ir(w_finite, post_link_cfg)
+        H_rxffe = SampledResponse.from_ir(w_finite, noise_link_cfg)
 
         h_XTs_w: list[SampledResponse] = []
-        for h_XT_dsamp in imp_pre.h_XTs_dsamp:
-            h_XT_w = h_XT_dsamp.cascade_ir(w_lim_pre, per_ui=self.per_ui)
-            h_XTs_w.append(SampledResponse.from_ir(h_XT_w.ir, post_link_cfg))
+        for path_index, h_XT_dsamp in enumerate(imp_pre.h_XTs_dsamp, start=1):
+            h_XT_w = _apply_rxffe_response(
+                h_XT_dsamp,
+                w_lim_ndarray,
+                self.cfg.link,
+                self.cfg.policy.rxffe_record_realization,
+                f"post_ffe XT{path_index}",
+            )
+            h_XTs_w.append(h_XT_w)
 
         h_ISI_ndarray = h_w.ir.copy()
         d = int(dte_status.d)
@@ -3187,7 +4226,8 @@ class COM(com_93A.COM):
             )
         h_ISI_ndarray[d] = 0.0
         h_ISI_ndarray[d + 1:dfe_stop] -= dte_status.b_lim
-        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, post_link_cfg)
+        h_ISI_noise = self.cfg.policy.fit_noise_response(h_ISI_ndarray)
+        h_ISI = SampledResponse.from_ir(h_ISI_noise, noise_link_cfg)
         sigma_ISI = float(imp_pre.sigma_X * np.sqrt(np.sum(h_ISI.ir**2)))
 
         # DDJ uses the original selected-phase construction: take the two
@@ -3197,14 +4237,22 @@ class COM(com_93A.COM):
             dte_status.pos,
             self.cfg.link,
             w_finite,
+            self.cfg.policy.rxffe_record_realization,
         )
-        h_w_J = SampledResponse.from_ir(h_w_J_ndarray, post_link_cfg)
+        if self.cfg.policy.rxffe_record_realization == "finite_record_circshift":
+            h_w_J = SampledResponse.from_ir(h_w_J_ndarray, self.cfg.link)
+        else:
+            try:
+                h_w_J = SampledResponse.from_linear_ir(h_w_J_ndarray, self.cfg.link)
+            except GridOverflowError as error:
+                raise error.with_context("post_ffe DDJ") from error
 
+        run_cfg = self._effective_run_cfg(run_cfg)
         # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
         # three Gaussian sources there, and filter once by the pre-grid FFE.
         S_jn_RJ_pre = _build_psd_from_DFT_response(
-            imp_pre.h_J.ir,
-            self.cfg.link,
+            self.cfg.policy.fit_noise_response(imp_pre.h_J.ir),
+            noise_link_cfg,
             imp_pre.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
         )
         S_G_pre = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ_pre)
@@ -3217,8 +4265,13 @@ class COM(com_93A.COM):
             self.cfg.pmf,
             As,
             run_cfg,
+            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
         )
-        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg_adc_input)
+        p_sig = _build_pmf_pam_L(
+            self.cfg.L,
+            pmf_cfg_adc_input,
+            placement=self.cfg.policy.discrete_pmf_placement,
+        )
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
             adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
         else:
@@ -3232,44 +4285,39 @@ class COM(com_93A.COM):
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
                 pmf_cfg=pmf_cfg_adc_input,
+                L=self.cfg.L,
+                pmf_methods=self.cfg.policy,
             )
 
-        # 93A-aligned post-DTE component PSDs for reporting.  Every component
-        # is represented on the common expanded h_w grid.
-        def _regrid_pre_psd(source: SampledPSD) -> SampledPSD:
-            return SampledPSD(
-                theta=post_link_cfg.theta,
-                psd=np.interp(post_link_cfg.theta, source.theta, source.psd),
-                fb=post_link_cfg.fb,
-            )
+        # All pre/post-FFE PSDs share the run-level sampled grid.
+        S_rn = imp_pre.S_rn.filtered_by(H_rxffe)
+        S_tn = imp_pre.S_tn.filtered_by(H_rxffe)
 
-        S_rn = _regrid_pre_psd(imp_pre.S_rn).filtered_by(H_rxffe)
-        S_tn = _regrid_pre_psd(imp_pre.S_tn).filtered_by(H_rxffe)
-
-        S_xn = _zero_sampled_psd(post_link_cfg)
+        S_xn = _zero_sampled_psd(noise_link_cfg)
         for h_XT_w in h_XTs_w:
             S_xn = S_xn.add(
                 _build_psd_from_DFT_response(
-                    h_XT_w.ir,
-                    post_link_cfg,
+                    self.cfg.policy.fit_noise_response(h_XT_w.ir),
+                    noise_link_cfg,
                     imp_pre.sigma_X**2,
                 )
             )
 
         S_jn = _build_psd_from_DFT_response(
-            h_w_J.ir,
-            post_link_cfg,
+            self.cfg.policy.fit_noise_response(h_w_J.ir),
+            noise_link_cfg,
             imp_pre.sigma_X**2
             * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
         )
 
         if adc_input_pmf.delta is None:
-            S_qn = _zero_sampled_psd(post_link_cfg)
+            S_qn = _zero_sampled_psd(noise_link_cfg)
         else:
             S_qn_adc = SampledPSD.from_constant(
-                post_link_cfg.theta,
-                (adc_input_pmf.delta**2 / 12.0) / post_link_cfg.fb,
-                post_link_cfg.fb,
+                noise_link_cfg.theta,
+                (adc_input_pmf.delta**2 / 12.0) / noise_link_cfg.fb,
+                noise_link_cfg.fb,
+                cfg=noise_link_cfg,
             )
             S_qn = S_qn_adc.filtered_by(H_rxffe)
 
@@ -3309,51 +4357,70 @@ class COM(com_93A.COM):
             H_rxffe=H_rxffe,
         )
 
-    def initialize_mlsd_status(
+    def build_mlsd_noise(
         self,
         imp_status: COMImpairmentStatus,
         added_noise: COMAddedNoiseStatus,
-    ) -> COMMLSDStatus:
+    ) -> COMMLSDNoiseStatus:
         """Build Eq. (178A-54) MLSD input PSD and autocorrelation once.
 
         ``S_ni`` and ``R_ni`` are independent of MLSD sequence length ``j``.
-        They are therefore computed before the DER summation and stored with
-        the MLSD analysis result rather than in the physical impairment status.
+        Return them before DER summation without constructing the final MLSD status.
         """
-        post_ffe = imp_status.post_ffe
-        if post_ffe is None or post_ffe.psd is None or post_ffe.psd.S_rn is None:
+        pre_dte = imp_status.pre_dte
+        if pre_dte is None or pre_dte.psd is None or pre_dte.psd.S_total is None:
             raise ValueError(
-                "initialize_mlsd_status requires post-FFE receiver noise PSD S_rn."
+                "build_mlsd_noise requires pre-FFE total noise PSD S_n."
             )
-
-        S_rn = post_ffe.psd.S_rn
+        S_n = pre_dte.psd.S_total
+        H_rxffe = imp_status.H_rxffe
+        if not isinstance(H_rxffe, SampledResponse):
+            raise TypeError("build_mlsd_noise requires H_rxffe to be a SampledResponse.")
         h_ISI = imp_status.h_ISI
         if not isinstance(h_ISI, SampledResponse):
             raise TypeError(
-                "initialize_mlsd_status requires h_ISI to be a SampledResponse."
+                "build_mlsd_noise requires h_ISI to be a SampledResponse."
             )
         if not np.isfinite(imp_status.sigma_X) or imp_status.sigma_X < 0.0:
-            raise ValueError("initialize_mlsd_status requires finite non-negative sigma_X.")
+            raise ValueError("build_mlsd_noise requires finite non-negative sigma_X.")
 
+        if (
+            S_n.theta.shape != H_rxffe.theta.shape
+            or not np.isclose(S_n.fb, H_rxffe.fb)
+            or not np.allclose(S_n.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
+        ):
+            raise ValueError("pre-FFE S_n must share the H_rxffe theta grid and fb.")
         for name, psd in (("added_noise.S_an", added_noise.S_an),):
-            if not np.isclose(psd.fb, S_rn.fb) or not np.allclose(
-                psd.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+            if (
+                psd.theta.shape != H_rxffe.theta.shape
+                or not np.isclose(psd.fb, H_rxffe.fb)
+                or not np.allclose(psd.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
             ):
                 raise ValueError(
-                    f"{name} must share the post-FFE S_rn theta grid and fb."
+                    f"{name} must share the H_rxffe theta grid and fb."
                 )
-        if not np.isclose(h_ISI.fb, S_rn.fb) or not np.allclose(
-            h_ISI.theta, S_rn.theta, rtol=1e-12, atol=1e-15
+        if (
+            h_ISI.theta.shape != H_rxffe.theta.shape
+            or not np.isclose(h_ISI.fb, H_rxffe.fb)
+            or not np.allclose(h_ISI.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
         ):
-            raise ValueError("h_ISI must share the post-FFE S_rn theta grid and fb.")
+            raise ValueError("h_ISI must share the H_rxffe theta grid and fb.")
 
-        # Eq. (178A-54). post-FFE S_rn already includes |H_rxffe|^2.
-        S_isi = SampledPSD(
-            theta=S_rn.theta,
-            psd=(imp_status.sigma_X**2 / S_rn.fb) * h_ISI.magnitude_squared(),
-            fb=S_rn.fb,
-        )
-        S_ni = S_rn.add(added_noise.S_an).add(S_isi)
+        # Eq. (178A-54): S_n is the complete pre-FFE Eq. (178A-15) PSD.
+        # The run-level grid is shared, so no intermediate PSD regrid is needed.
+        # Eq. (178A-54), first term: S_n * |H_rxffe|^2.
+        S_n_filtered = S_n.filtered_by(H_rxffe)
+        # Eq. (178A-54) gives a two-sided ISI density. from_constant() folds
+        # interior rFFT bins into SampledPSD's one-sided representation.
+        S_isi = SampledPSD.from_constant(
+            H_rxffe.theta,
+            imp_status.sigma_X**2 / H_rxffe.fb,
+            H_rxffe.fb,
+            cfg=H_rxffe.cfg,
+        ).filtered_by(h_ISI)
+        # Eq. (178A-54): sum receiver, added, and ISI noise densities.
+        S_ni = S_n_filtered.add(added_noise.S_an).add(S_isi)
+        # Eq. (178A-16), as directed by the text after Eq. (178A-54).
         R_ni = S_ni.to_autocorrelation()
         if not np.all(np.isfinite(R_ni)) or R_ni.size == 0 or R_ni[0] <= 0.0:
             raise COMError(
@@ -3361,8 +4428,7 @@ class COM(com_93A.COM):
                 f"R_ni[0]={R_ni[0] if R_ni.size else None!r}."
             )
 
-        return COMMLSDStatus(
-            added_noise=added_noise,
+        return COMMLSDNoiseStatus(
             S_isi=S_isi,
             sigma_isi=S_isi.to_sigma(),
             S_ni=S_ni,
@@ -3370,7 +4436,12 @@ class COM(com_93A.COM):
             R_ni=R_ni,
         )
 
-    def calculate_COM_DFE(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
+    def calculate_COM_DFE(
+        self,
+        imp_status: COMImpairmentStatus,
+        dte_status: COMDTEStatus,
+        run_cfg: Optional[COMRunConfig] = None,
+    ) -> COMPMFStatus:
         """
         Calculate 178A final COM result after DFE.
 
@@ -3382,35 +4453,51 @@ class COM(com_93A.COM):
             Selected 178A receiver DTE result.
         """
         imp_cfg = self.cfg.imp
+        run_cfg = self._effective_run_cfg(
+            self.cfg.execution.single_run if run_cfg is None else run_cfg
+        )
         pmf_cfg_for_com = _resolve_final_com_pmf_config(
             self.cfg.pmf,
             imp_status.As,
+            run_cfg,
+            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
+            final_pmf_grid=self.cfg.policy.final_pmf_grid,
         )
         As = imp_status.As
 
         # base pmf of PAM-L
-        p_sig = _build_pmf_pam_L(self.cfg.L, pmf_cfg_for_com)
+        p_sig = _build_pmf_pam_L(
+            self.cfg.L,
+            pmf_cfg_for_com,
+            placement=self.cfg.policy.discrete_pmf_placement,
+        )
 
         # pmf of ISI
-        p_ISI = _build_pmf_interference_93A(
-            p_sig, imp_status.h_ISI.ir, pmf_cfg_for_com, name="ISI"
+        p_ISI = _build_pmf_interference_178A(
+            p_sig, imp_status.h_ISI.ir, pmf_cfg_for_com, self.cfg.L,
+            method=self.cfg.policy.interference_pmf_method, name="ISI",
         )
 
         # pmf of XT (all combined)
         p_w_XT_all = _build_pmf_w_XT_all(
-            p_sig, imp_status.h_XTs_w, pmf_cfg_for_com
+            p_sig, imp_status.h_XTs_w, pmf_cfg_for_com,
+            L=self.cfg.L, methods=self.cfg.policy,
         )
 
         # pmf of tx Dual-dirac jitter
-        p_w_DD = _build_pmf_interference_93A(
+        p_w_DD = _build_pmf_interference_178A(
             p_sig,
             imp_cfg.A_DD * imp_status.h_w_J.ir,
             pmf_cfg_for_com,
+            self.cfg.L,
+            method=self.cfg.policy.interference_pmf_method,
             name="Dual-Dirac",
         )
 
-        # Final quantization PMF consumes the exact ADC-input material prepared
-        # by calculate_post_ffe_imp(). Pre-DTE S_qn remains MMSE-only.
+        # Annex D3 final quantization consumes the selected-phase ADC-input
+        # delta prepared by calculate_post_ffe_imp(). The reference-only branch
+        # below follows MATLAB 4.17's distinct final-PDF clipping boundary.
+        # Pre-DTE S_qn remains MMSE-only in both branches.
         if imp_status.post_ffe is None:
             raise RuntimeError("calculate_COM_DFE requires post-FFE impairment status.")
         adc_input_pmf = imp_status.post_ffe.adc_input
@@ -3423,11 +4510,10 @@ class COM(com_93A.COM):
                 name="ADC_QN",
             )
         else:
-            if adc_input_pmf.method != "pmf_exact" or adc_input_pmf.delta is None:
+            if adc_input_pmf.method != "pmf_exact":
                 raise RuntimeError(
                     "calculate_COM_DFE requires post-DTE ADC input material with method='pmf_exact'."
                 )
-            p_delta = Pmf1D.uniform(adc_input_pmf.delta, pmf_cfg_for_com)
             w_lim = np.asarray(dte_status.w_lim, dtype=float)
             expected_shape = (int(self.cfg.dte.N_max),)
             if w_lim.shape != expected_shape:
@@ -3435,18 +4521,69 @@ class COM(com_93A.COM):
                     "calculate_COM_DFE() requires COMDTEStatus.w_lim to be the "
                     f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_lim.shape}."
                 )
+            if self.cfg.policy.final_adc_quantization_convention == "matlab_4_17_reference_only":
+                # MATLAB 4.17 / SiCoPR final-PDF branch: P_qc at the ADC-input
+                # CDF and quantization noise through all non-main RX FFE taps.
+                main_gain = float(w_lim[self.cfg.dte.d_w])
+                V_qc, adc_grid_cfg, p_noise_adc = _final_adc_clip_reference_only(
+                    imp_status,
+                    self.cfg.L,
+                    pmf_cfg_for_com,
+                    main_gain,
+                    imp_cfg.A_DD,
+                    imp_cfg.P_qc,
+                    pmf_methods=self.cfg.policy,
+                )
+                delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
+                quantization_taps = w_lim.copy()
+                quantization_taps[self.cfg.dte.d_w] = 0.0
+                # The uniform error exists at the ADC input. Project each
+                # scaled tap to the final (post-FFE) PMF grid in fir_filter.
+                p_delta = Pmf1D.uniform(
+                    delta, adc_grid_cfg,
+                    method=self.cfg.policy.uniform_pmf_method,
+                    support=(
+                        p_noise_adc
+                        if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                        else None
+                    ),
+                )
+            else:
+                # Annex 178A-44: every FFE tap contributes to final ADC
+                # quantization PMF; clipping remains at the post-FFE owner.
+                if adc_input_pmf.delta is None:
+                    raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
+                delta = adc_input_pmf.delta
+                quantization_taps = w_lim
+                p_delta = Pmf1D.uniform(
+                    delta, pmf_cfg_for_com,
+                    method=self.cfg.policy.uniform_pmf_method,
+                )
             p_qn = p_delta.fir_filter(
-                w_lim,
+                quantization_taps,
                 keep_mass = pmf_cfg_for_com.keep_mass,
                 dx_ref = pmf_cfg_for_com.dy,
-                tap_abs_th = pmf_cfg_for_com.tap_abs_th,
+                tap_abs_th = (
+                    np.nextafter(0.0, 1.0)
+                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                    else pmf_cfg_for_com.tap_abs_th
+                ),
                 max_taps = None,
-                name = "ADC_QN"
+                name = "ADC_QN",
+                scaling_method=self.cfg.policy.pmf_scaling_method,
+                initial_bin_range=(
+                    (p_noise_adc.st_idx, p_noise_adc.st_idx + len(p_noise_adc.pmf) - 1)
+                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                    and self.cfg.policy.final_adc_quantization_convention
+                    == "matlab_4_17_reference_only"
+                    else None
+                ),
             )
 
         # pmf of gaussian noise
         p_G = _build_pmf_G(
-            imp_status, dte_status, self.cfg.link, pmf_cfg_for_com
+            imp_status, dte_status, self.cfg.link, pmf_cfg_for_com,
+            gaussian_method=self.cfg.policy.gaussian_pmf_method,
         )
 
         # combined pmf, A_ni
@@ -3470,11 +4607,11 @@ class COM(com_93A.COM):
             COM=COM,
         )
 
-    def calculate_COM_MLSD(self) -> COMMLSDStatus:
+    def calculate_COM_MLSD(self, run_cfg: Optional[COMRunConfig] = None) -> COMMLSDStatus:
         """Calculate the Annex 178A MLSD COM adjustment after COM_DFE.
 
         The DFE PMF remains the immutable baseline.  Eq. (178A-47) derives
-        ``COM_MLSD_raw`` from its ``COM_DFE`` and ``A_ni``; the specification
+        ``COM_MLSD_raw`` from its ``COM_DFE`` and ``A_s``; the specification
         then floors the selected result at ``COM_DFE``.
         """
         if not self.cfg.mlsd.enable:
@@ -3511,21 +4648,46 @@ class COM(com_93A.COM):
                 f"got COM_DFE={COM_DFE!r}, A_ni={A_ni!r}."
             )
 
-        pmf_cfg = _resolve_final_com_pmf_config(self.cfg.pmf, imp_status.As)
-        added_noise = solve_g_an(
-            self.cfg.mlsd.resolved_delta_com_an(),
-            imp_status.post_ffe,
-            pmf_dfe,
-            pmf_cfg,
-            self.cfg.DER_0,
+        run_cfg = self._effective_run_cfg(
+            self.cfg.execution.single_run if run_cfg is None else run_cfg
         )
-        mlsd_status = self.initialize_mlsd_status(imp_status, added_noise)
-        DER_MLSD, _ = calculate_der_mlsd(
-            mlsd_status,
+        pmf_cfg = _resolve_final_com_pmf_config(
+            self.cfg.pmf, imp_status.As, run_cfg,
+            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
+            final_pmf_grid=self.cfg.policy.final_pmf_grid,
+        )
+        # Eqs. (178A-50) and (178A-51): calibrate added receiver noise.
+        # The Annex realization replaces only the Gaussian component.  The
+        # reference realization scales the complete DFE PDF before deriving g_an.
+        if self.cfg.policy.added_noise_pdf == "scaled_total_pdf":
+            added_noise = _build_scaled_total_pdf_added_noise(
+                self.cfg.mlsd.resolved_delta_com_an(),
+                imp_status.post_ffe,
+                pmf_dfe,
+                self.cfg.DER_0,
+                scaling_method=self.cfg.policy.pmf_scaling_method,
+            )
+        else:
+            added_noise = solve_g_an(
+                self.cfg.mlsd.resolved_delta_com_an(),
+                imp_status.post_ffe,
+                pmf_dfe,
+                pmf_cfg,
+                self.cfg.DER_0,
+                gaussian_method=self.cfg.policy.gaussian_pmf_method,
+            )
+        # Eq. (178A-54): build the MLSD noise PSD and autocorrelation.
+        noise = self.build_mlsd_noise(imp_status, added_noise)
+        # Eqs. (178A-48), (178A-49), (178A-52), (178A-53): calculate DER.
+        DER_MLSD, der_by_j = calculate_der_mlsd(
+            added_noise.p_an,
+            noise.R_ni,
             L=self.cfg.L,
             As=imp_status.As,
             b_lim_1=float(b_lim[0]),
             trunc_len=self.cfg.mlsd.trunc_len,
+            pmf_scaling_method=self.cfg.policy.pmf_scaling_method,
+            sequence_termination=self.cfg.policy.sequence_termination,
         )
         if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:
             raise COMError(
@@ -3533,18 +4695,43 @@ class COM(com_93A.COM):
                 f"got {DER_MLSD!r}."
             )
 
+        # Eq. (178A-47): -P_an^{-1}(DER_MLSD) is the MLSD amplitude.
         A_MLSD = -float(added_noise.p_an.quantile(DER_MLSD))
         if not np.isfinite(A_MLSD) or A_MLSD <= 0.0:
             raise COMError(
                 "MLSD inverse-CDF amplitude must be finite and positive; "
                 f"got {A_MLSD!r} at DER_MLSD={DER_MLSD:.6e}."
             )
-        delta_COM = float(20.0 * np.log10(A_MLSD / A_ni))
+        # Eq. (178A-47): the MLSD increment is relative to A_s, not A_ni.
+        delta_COM = float(20.0 * np.log10(A_MLSD / imp_status.As))
         COM_MLSD_raw = COM_DFE + delta_COM
-        mlsd_status.A_MLSD = A_MLSD
-        mlsd_status.delta_COM = delta_COM
-        mlsd_status.COM_MLSD_raw = COM_MLSD_raw
-        mlsd_status.COM_MLSD = max(COM_DFE, COM_MLSD_raw)
+        DER_MLSD_raw_sequence = float(np.sum(der_by_j))
+        if self.cfg.policy.reported_der == "baseline_pdf_re_evaluation":
+            # MATLAB 4.17 re-evaluates the published DER on the original DFE
+            # PDF at the amplitude implied by the calculated MLSD increment.
+            DER_MLSD_reported = _reference_cdf_ev(
+                pmf_dfe.p_combined,
+                imp_status.As * 10.0 ** (delta_COM / 20.0),
+            )
+        else:
+            DER_MLSD_reported = DER_MLSD
+        mlsd_status = COMMLSDStatus(
+            added_noise=added_noise,
+            S_isi=noise.S_isi,
+            sigma_isi=noise.sigma_isi,
+            S_ni=noise.S_ni,
+            sigma_ni=noise.sigma_ni,
+            R_ni=noise.R_ni,
+            der_by_j=der_by_j,
+            DER_MLSD_raw_sequence=DER_MLSD_raw_sequence,
+            DER_MLSD=DER_MLSD,
+            DER_MLSD_reported=DER_MLSD_reported,
+            A_MLSD=A_MLSD,
+            delta_COM=delta_COM,
+            COM_MLSD_raw=COM_MLSD_raw,
+            # Text following Eq. (178A-49): MLSD COM is at least COM_DFE.
+            COM_MLSD=max(COM_DFE, COM_MLSD_raw),
+        )
         self._assign_mlsd(mlsd_status)
         return mlsd_status
 
@@ -3577,6 +4764,7 @@ __all__ = [
     "COMAdcInputPMF",
     "COMAddedNoiseStatus",
     "COMAddedNoiseIterationStatus",
+    "COMBilinearCTLE",
     "COMChannelConfig",
     "COMConfig",
     "COMDTEConfig",
@@ -3589,12 +4777,15 @@ __all__ = [
     "COMImpairmentStatus",
     "COMImpStageStatus",
     "COMPMFConfig",
+    "COMPolicyConfig",
     "COMPMFStatus",
     "COMRunStatus",
     "COMRunConfig",
+    "COMSharedPath",
     "COMMainCursorError",
     "COMLengthMismatchError",
     "COMMLSDConfig",
+    "COMMLSDNoiseStatus",
     "COMMLSDStatus",
     "COMTxfirMainCursorError",
     "COMPkgConfig",
@@ -3697,7 +4888,10 @@ if __name__ == "__main__":
         status = COM(cfg).run(progress=True)
         elapsed_s = perf_counter() - started
         print(f"178A single_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")
-        COMReport178A(cfg, status).plot_single_run(REPORT_PATH)
+        outputs = cfg.export(str(REPORT_PATH))
+        outputs.update(status.export(str(REPORT_PATH)))
+        outputs.update(COMReport178A(cfg, status).export_single_run(REPORT_PATH))
+        print(outputs)
     else:
         REPORT_PATH = REPORT_ROOT / SEARCH_OUTPUT_NAME
         search_cfg = com_excel_io.excel_to_search_config_178A(str(CONFIG_PATH))

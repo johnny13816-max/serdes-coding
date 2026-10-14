@@ -15,13 +15,12 @@ from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
 import numpy as np
 
 from ..models import com_model_93A as com_93A
-
+from ..utilities.link import GridOverflowError
 if TYPE_CHECKING:
     from ..models.com_model_178A import COMConfig, COMStatus
 
 
 _PrettyDataclass = com_93A._PrettyDataclass
-COMReport = com_93A.COMReport
 COMSearchCandidate = com_93A.COMSearchCandidate
 COMSearchConfig = com_93A.COMSearchConfig
 
@@ -35,6 +34,10 @@ PARTIAL_RESULT_FIELDS = (
 FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + (
     "final_status",
     "final_error",
+    "grid_length",
+    "full_length",
+    "tail_peak_ratio",
+    "tail_energy_ratio",
     "COM_DFE_dB",
     "COM_dB",
     "post_ffe_As_V",
@@ -73,59 +76,16 @@ class COMSearchStatus(_PrettyDataclass):
     num_success: int
     num_infeasible: int
     num_error: int
+    num_grid_overflow: int = 0
 
     @property
     def COM(self) -> Optional[float]:
         return self.best.final_COM
 
-    def plot_mse_trace(self, save_path: str = "") -> Any:
-        """Plot the minimum DTE MSE of each retained search candidate."""
-        ok_rows = [row for row in self.rows if row.status == "ok"]
-        if not ok_rows:
-            raise ValueError("COMSearchStatus.rows contains no successful rows.")
-        output_file = COMReport._plot_save_path(save_path, "search_mse_trace.png")
-        fig, ax = COMReport._subplots(output_file)
-        ax.plot([row.idx for row in ok_rows], [row.mse for row in ok_rows], marker="o", linewidth=1.0)
-        ax.axhline(self.best_row.mse, linestyle="--", color="tab:red", label=f"best MSE={self.best_row.mse:.3e} V^2")
-        ax.set_title("Search Minimum DTE MSE")
-        ax.set_xlabel("Candidate index")
-        ax.set_ylabel("MSE (V^2)")
-        ax.grid(True)
-        ax.legend()
-        COMReport._finish_figure(fig, output_file)
-        return ax
 
-    def plot_top_candidates(self, save_path: str = "", top_n: int = 10) -> Any:
-        """Plot the lowest-MSE search candidates."""
-        ok_rows = [row for row in self.rows if row.status == "ok"]
-        if not ok_rows:
-            raise ValueError("COMSearchStatus.rows contains no successful rows.")
-        if top_n <= 0:
-            raise ValueError("top_n must be positive.")
-        rows = sorted(ok_rows, key=lambda row: row.mse)[:int(top_n)]
-        labels = [f"{row.idx}\n({row.candidate.g_DC:.1f},{row.candidate.g_DC2:.1f})" for row in rows]
-        output_file = COMReport._plot_save_path(save_path, "search_top_candidates.png")
-        fig, ax = COMReport._subplots(output_file, figsize=(max(7, 0.7 * len(rows)), 4))
-        ax.bar(np.arange(len(rows)), [row.mse for row in rows])
-        ax.set_xticks(np.arange(len(rows)))
-        ax.set_xticklabels(labels)
-        ax.set_title("Lowest-MSE Search Candidates")
-        ax.set_xlabel("Candidate idx\n(g_1, g_2)")
-        ax.set_ylabel("MSE (V^2)")
-        ax.grid(True, axis="y")
-        COMReport._finish_figure(fig, output_file)
-        return ax
 
-    def plot_summary(self, save_path: str = "") -> dict[str, Any]:
-        """Plot 178A MSE-search summaries and the selected candidate status."""
-        best_path = "" if not save_path else str(Path(save_path) / "best")
-        return {
-            "search_mse_trace": self.plot_mse_trace(save_path),
-            "search_top_candidates": self.plot_top_candidates(save_path),
-            "best": self.best.plot_summary(best_path),
-        }
 
-    def export(self, save_path: str, *, include_plots: bool = True) -> dict[str, str]:
+    def export(self, save_path: str) -> dict[str, str]:
         """Export MSE-ranked rows and the selected final candidate status."""
         out_dir = Path(save_path)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -136,17 +96,17 @@ class COMSearchStatus(_PrettyDataclass):
             "num_success": self.num_success,
             "num_infeasible": self.num_infeasible,
             "num_error": self.num_error,
+            "num_grid_overflow": self.num_grid_overflow,
             "COM": self._json_scalar(self.COM),
             "best_row_idx": self.best_row.idx,
             "best_row_mse": self._json_scalar(self.best_row.mse),
             "rows": [_row_to_dict(row) for row in self.rows],
         })
-        best_outputs = self.best.export(str(out_dir / "best"), include_plots=include_plots)
-        outputs = {"search_summary": str(summary_path), "best_arrays": best_outputs["arrays"]}
-        if include_plots:
-            self.plot_summary(str(out_dir / "plots"))
-            outputs["plots"] = str(out_dir / "plots")
-        return outputs
+        best_outputs = self.best.export(str(out_dir / "best"))
+        return {
+            "search_summary": str(summary_path),
+            "best_status_summary": best_outputs["status_summary_txt"],
+        }
 
 
 @dataclass(frozen=True)
@@ -309,7 +269,6 @@ def finalize_search(
         raise RuntimeError("No successful partial-search candidate is available for finalization.")
 
     artifacts.top_k_dir.mkdir(parents=True, exist_ok=True)
-    full_com_rows = successful[:cfg.execution.search_top_k]
     report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * cfg.execution.search_top_k
     report_rows = successful[:report_limit]
     signal_amplitude = _signal_amplitude(cfg)
@@ -318,12 +277,18 @@ def finalize_search(
         for row in report_rows
     }
     finalized: list[tuple[COMSearchRow, Any]] = []
+    grid_overflow_count = 0
+    generic_error_count = 0
+    attempted_count = 0
     final_started = time.perf_counter()
-    total_final = len(full_com_rows)
-    print(f"178A search_final: start, {total_final} candidates, include_plots={include_plots}", flush=True)
-    for final_index, row in enumerate(full_com_rows, start=1):
+    target_final = min(cfg.execution.search_top_k, len(successful))
+    print(f"178A search_final: start, target={target_final} valid candidates, include_plots={include_plots}", flush=True)
+    for row in successful:
+        if len(finalized) >= target_final:
+            break
+        attempted_count += 1
         candidate_started = time.perf_counter()
-        label = f"178A search_final {final_index}/{total_final} candidate={row.idx}"
+        label = f"178A search_final attempt={attempted_count} valid={len(finalized)}/{target_final} candidate={row.idx}"
         stage = "calculation"
         print(f"{label}: calculation start", flush=True)
         candidate_cfg = _config_with_candidate(cfg, row.candidate)
@@ -336,13 +301,12 @@ def finalize_search(
             print(f"{label}: calculation done in {time.perf_counter() - candidate_started:.1f}s", flush=True)
             stage = "report export"
             print(f"{label}: report export start, include_plots={include_plots}", flush=True)
-            # 178A plotting is owned by COMReport178A, which needs the
-            # originating runtime/project config in addition to COMStatus.
-            status._config_for_report = candidate_cfg
-            status.export(
-                str(artifacts.top_k_dir / f"{row.idx:06d}"),
-                include_plots=include_plots,
-            )
+            candidate_dir = artifacts.top_k_dir / f"{row.idx:06d}"
+            status.export(str(candidate_dir))
+            if include_plots:
+                from serdes_coding.reporting.com_report_178A import COMReport178A
+
+                COMReport178A(candidate_cfg, status).export_single_run(candidate_dir)
             print(f"{label}: report export done", flush=True)
             finalized.append((row, status))
             final_rows_by_idx[row.idx] = _final_row(
@@ -351,7 +315,18 @@ def finalize_search(
                 run_status=status,
                 signal_amplitude=signal_amplitude,
             )
+        except GridOverflowError as exc:
+            grid_overflow_count += 1
+            print(f"{label}: WARNING {exc}", flush=True)
+            final_rows_by_idx[row.idx] = _final_row(
+                row,
+                status="grid_overflow",
+                error=str(exc),
+                overflow=exc,
+                signal_amplitude=signal_amplitude,
+            )
         except Exception as exc:
+            generic_error_count += 1
             print(f"{label}: ERROR during {stage}: {type(exc).__name__}: {exc}", flush=True)
             # Finalization is an aggregation stage: preserve one candidate's
             # failure and continue so the remaining top-K candidates can be
@@ -365,30 +340,34 @@ def finalize_search(
                 )
             )
 
-        elapsed = time.perf_counter() - final_started
-        eta = elapsed / final_index * (total_final - final_index)
         print(
             f"{label}: {final_rows_by_idx[row.idx]['final_status']}, "
             f"candidate_elapsed={time.perf_counter() - candidate_started:.1f}s, "
-            f"elapsed={elapsed:.1f}s, eta={eta:.1f}s", flush=True,
+            f"elapsed={time.perf_counter() - final_started:.1f}s", flush=True,
         )
 
     print("178A search_final: writing full_search_results.csv", flush=True)
-    final_rows = [final_rows_by_idx[row.idx] for row in report_rows]
+    final_rows = [final_rows_by_idx[row.idx] for row in successful[:max(report_limit, attempted_count)]]
     _write_csv(artifacts.final_results_path, FINAL_RESULT_FIELDS, final_rows)
-    if len(finalized) != total_final:
+    if generic_error_count:
         raise RuntimeError(
-            f"{total_final - len(finalized)}/{total_final} final candidates failed; "
+            f"{generic_error_count} final candidates failed for non-grid reasons; "
             "see full_search_results.csv. Partial outputs have been preserved."
+        )
+    if not finalized:
+        raise RuntimeError(
+            "No final candidate fits the fixed grid; see full_search_results.csv "
+            "and reduce target_df before rerunning from the source inputs."
         )
 
     print(
-        f"178A search_final: complete, success={len(finalized)}/{total_final}, "
+        f"178A search_final: complete, valid={len(finalized)}/{target_final}, "
+        f"grid_overflow={grid_overflow_count}, "
         f"elapsed={time.perf_counter() - final_started:.1f}s", flush=True,
     )
     best_row, best_status = min(finalized, key=lambda item: item[0].mse)
     retained = _select_rows(partial_rows, search)
-    return COMSearchStatus(
+    search_status = COMSearchStatus(
         best=best_status,
         best_row=best_row,
         rows=retained,
@@ -396,7 +375,16 @@ def finalize_search(
         num_success=sum(row.status == "ok" for row in partial_rows),
         num_infeasible=sum(row.status == "infeasible" for row in partial_rows),
         num_error=sum(row.status == "error" for row in partial_rows),
+        num_grid_overflow=grid_overflow_count,
     )
+    cfg.export(str(artifacts.root))
+    search_status.export(str(artifacts.root))
+    if include_plots:
+        from serdes_coding.reporting.com_report_178A import COMReport178A
+
+        best_cfg = _config_with_candidate(cfg, best_row.candidate)
+        COMReport178A(best_cfg, search_status).export_search_run(artifacts.root)
+    return search_status
 
 
 def run_full_search(
@@ -546,9 +534,10 @@ def _row_to_dict(row: COMSearchRow) -> dict[str, Any]:
 def _final_row(
     row: COMSearchRow,
     *,
-    status: Literal["", "ok", "error"],
+    status: Literal["", "ok", "error", "grid_overflow"],
     run_status: Optional[Any] = None,
     error: str = "",
+    overflow: Optional[Any] = None,
     signal_amplitude: float,
 ) -> dict[str, Any]:
     partial = _partial_row_dict(row, signal_amplitude=signal_amplitude)
@@ -591,6 +580,10 @@ def _final_row(
         **partial,
         "final_status": status,
         "final_error": error,
+        "grid_length": "" if overflow is None else overflow.grid_length,
+        "full_length": "" if overflow is None else overflow.full_length,
+        "tail_peak_ratio": "" if overflow is None else overflow.peak_ratio,
+        "tail_energy_ratio": "" if overflow is None else overflow.energy_ratio,
         **metrics,
     }
 
