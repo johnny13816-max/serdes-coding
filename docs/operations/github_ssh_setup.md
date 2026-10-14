@@ -71,7 +71,7 @@ Step 5: Change the repository remote to SSH
 -------------------------------------------
 Run in PowerShell:
 
-    cd "C:\Users\johnn\OneDrive\文件\Serdes-learn\serdes-coding"
+    cd "C:\Users\johnn\Documents\Serdes-learn\serdes-coding"
     git remote set-url origin git@github.com:johnny13816-max/serdes-coding.git
 
 Confirm:
@@ -96,4 +96,3 @@ If there is no new commit, success may look like:
 After this setup, Codex should be able to push using:
 
     "C:\Program Files\Git\cmd\git.exe" push origin main
-

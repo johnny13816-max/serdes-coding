@@ -1,0 +1,26 @@
+case_id: c2m_8023dj_4p13p0_250mm
+purpose: IEEE 802.3dj 4p13p0 C2M cross-version reference case
+models:
+  - 93A
+  - 178A
+configs:
+  93A: 93A/config.xlsx
+  178A: 178A/config.xlsx
+channel_authority:
+  93A: 93A/config.xlsx#channels
+  178A: 178A/config.xlsx#channels
+results:
+  93A: 93A/results
+  178A: 178A/results
+reference_data:
+  channel_set: reference_data/COM_channel_data/C2M/mellitz_3dj_02_2409
+  host_length_mm: 250
+config_validation:
+  93A: valid
+  178A: incomplete_fixed_config
+adhoc_config:
+  source_id: ieee_matlab
+  format_id: ieee8023dj_com_adhoc/d3p2/200g_cakr_178/v1
+  source_batch: ieee_matlab_config_templates_c2m_200g
+  match_status: compatible
+  workbook: reference_data/COM_adhoc_config/ieee_matlab/config_com-4p13p0_802p3dj_d2p3_200G_C2M_TP0_TP2_Egress_26_01_27.xlsx

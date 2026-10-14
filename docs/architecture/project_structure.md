@@ -12,36 +12,69 @@ Do not infer the active project from a temporary checkout or stale tool cwd. Ver
 
 ```text
 serdes-coding/
-  AGENTS.md                    operating rules
-  pyproject.toml               Python package and dependencies
-  .venv/                       local Python/IPython environment
+  .git/                       Git metadata
+  .github/                    CI and workflow definitions
+  .venv/                      local Python/IPython runtime; never committed
+  cases/
+    _templates/<model>/
+      config.xlsx             fixed model-specific project-config template; channels blank
+    <case_id>/
+      case_manifest.yaml      case identity, provenance and model pairing
+      README.md               case-specific purpose and limitations, when needed
+      178A/
+        config.xlsx           178A project config including channel references
+        results/<run_name>/   generated 178A data and figures
+      93A/
+        config.xlsx           93A project config including channel references
+        results/<run_name>/   generated 93A data and figures
+  compatibility/              standalone direct-import exports for legacy Python
+    README.md                  use and maintenance boundary
+    utility_py36.py            CPython 3.6.0 compatibility export
+    utility_py37.py            CPython 3.7.3 compatibility export
+    requirements_py36.txt      Python 3.6 compatibility-test dependencies
+    requirements_py37.txt      Python 3.7 compatibility-test dependencies
+    validate_utility_py36.py   exact Python 3.6.0 validation entry
+  docs/                       architecture, model, operation, planning and validation records
+  reference_data/             immutable external inputs stored once with provenance
+    COM_adhoc_config/          raw external configuration workbooks
+      hansel/                  files received directly from Hansel
+      ieee_matlab/             files distributed with IEEE COM Ad Hoc Matlab code
+      manifest.csv             source, parser format, match status and checksum
+    COM_channel_data/          existing channel S-parameters and source collateral
+  scripts/                    orchestration, conversion and validation entries
   src/serdes_coding/
-    io/                        reference/project formats to typed runtime config
-    models/                    COM dataclasses, equations and model pipeline
-    utilities/                 reusable numerical and S-parameter primitives
-    search/                    candidate traversal, sweep, merge and finalization
-    reporting/                 plots and result export
-  cases/<case_id>/
-    case_manifest.yaml         case provenance and model pairing
-    178A/config.xlsx            model inputs including channel references
-    178A/results/<run_name>/    generated result data and figures
-    93A/config.xlsx             when the case supports 93A
-    93A/results/<run_name>/     generated 93A results
-  reference_data/               external datasets and provenance
-  templates/                   reusable workbook/input templates
-  docs/                        contracts, decisions, plans and validation notes
-  scripts/                     orchestration and validation commands
-  tests/                       automated tests
-  notebooks/                   exploratory notebooks
-  examples/                    maintained usage examples
-  .github/                     CI and workflow definitions
-  tmp/                         disposable scratch or recovery backups only
+    interfaces/               user-facing GUI and interaction boundaries
+    io/                       reference/project formats to typed runtime config
+    models/                   COM dataclasses, equations and model pipeline
+    reporting/                plots and result export
+    search/                   candidate traversal, sweep, merge and finalization
+    utilities/                reusable numerical and S-parameter primitives
+  tests/                      automated validation
+  .gitattributes              Git attribute rules
+  .gitignore                  generated/local artifact exclusions
+  AGENTS.md                   mandatory operating rules
+  README.md                   repository entry and overview
+  pyproject.toml              Python package and dependency definition
+  poetry.lock                 resolved dependency lock
 ```
 
+Optional top-level directories are limited to `tmp/`, `notebooks/`, and
+`examples/`. Keep them only while they contain active disposable work or
+maintained artifacts; remove empty placeholders. No other top-level entry may
+be added until its owner and lifecycle are documented here and in `AGENTS.md`
+in the same change. Generated output, downloaded workflow artifacts, recovery
+copies, and local tool caches never justify a new root-level directory.
+
+Optional `notebooks/` and `examples/` directories exist only while they contain maintained artifacts. Do not keep empty placeholder directories.
+
+The files in `compatibility/` are intentional standalone exports for direct import in legacy Python environments. Keep each utility beside its matching requirements and validation material so the group can be copied without installing the main package. Exact-version validation environments such as `.venv-py360/` and `.venv-py373/` are disposable and must be recreated when needed; they are not part of the repository structure.
+
 The runnable environment is `<project_root>/.venv`, never a venv inside `tmp/` or a nested checkout. Recreate a venv after relocating a project; do not copy it, because launchers contain absolute paths.
-Temporary Git worktrees are not the default editing, installation, workbook or execution location. Use a different worktree only when explicitly requested. Integrate and verify its changes at the canonical root before handing off a runnable path. Existing `tmp/.codex-merge-main` is a recovery source only, not an active execution location.
+Temporary Git worktrees are not the default editing, installation, workbook or execution location. Create one only when explicitly requested, keep it outside the canonical project structure, and integrate and verify its changes at the canonical root before handoff. Remove obsolete recovery checkouts after their unique content is reconciled.
 
 ## Inputs and formats
+
+Each active case uses `cases/<case_id>/<model>/config.xlsx`; generated output stays below that model's `results/<run_name>/`. A reusable project-config template belongs at `cases/_templates/<model>/config.xlsx` only after it passes the conversion schema reader and has no case-specific provenance or channel selection. A template may intentionally leave channel S4P paths blank and is not a runnable case until the channel rows are completed. Do not keep obsolete or empty placeholder templates. Downloaded workflow artifacts must be extracted into `results/` and their duplicate ZIP files removed.
 
 178A workbooks contain `fixed_config`, `search_config`, `channels`, and `run_config`. Channel paths are defined exclusively in `config.xlsx`'s `channels` sheet and resolved relative to the workbook. S4P inputs remain in `reference_data/COM_channel_data/`; do not duplicate them under cases. Manifests record provenance; they do not override channel definitions. Legacy `config/config_178A.xlsx` and shared channel manifests are not templates for new runs.
 
@@ -49,13 +82,11 @@ Temporary Git worktrees are not the default editing, installation, workbook or e
 
 Excel I/O is versioned under `src/serdes_coding/io/`: `com_excel_common.py` owns model-neutral workbook parsing, `com_excel_io_93A.py` and `com_excel_io_178A.py` own their respective field-to-runtime mappings, and `com_excel_io.py` is the compatibility facade. Version-specific mapping must not be added to the common parser.
 
-## Manual execution
+## Runtime entry ownership
 
-The supported manual entries are `src/serdes_coding/models/com_model_93A.py` and `src/serdes_coding/models/com_model_178A.py`, executed with `%run com_model_93A.py` or `%run com_model_178A.py` from their directory. Both define case/config/output selection and RUN_MODE. RUN_MODE has only `single_run` and `search_run`; search ranges come exclusively from workbook search_config, and a smaller grid is still search_run. The 178A entry also applies EXEC_POLICY overrides for single_run, search_sweep and search_final. The 93A entry exposes the same top-level control name but rejects non-empty overrides until native 93A execution profiles are defined. Batching, top-K and timeout remain internal controls.
+This document owns runtime locations and folder placement. Execution steps and workflow behavior are maintained in:
 
-Before handoff, verify the interpreter and imported module paths, workbook channel resolution, and output write access at the canonical root. Output-path permission failures must be resolved there, not by silently redirecting to tmp or a different checkout. Record changes to folder ownership in this document and summarize them in AGENTS.md.
+- [`../operations/manual_execution.md`](../operations/manual_execution.md)
+- [`../operations/search_execution.md`](../operations/search_execution.md)
 
-
-## GitHub Actions search
-
-The workbook search workflow accepts only case_id. It reads cases/<case_id>/178A/config.xlsx. Small and full runs use separate case workbooks; fixed_config, channels and run_config remain identical. Internal workers partition all workbook candidates without downsampling, with at most 256 workers and 20 concurrent jobs. Artifacts carry the input SHA256 fingerprints, complete group CSVs, final CSV, per-candidate plot manifests and a validation summary. Finalize always exports plots. Any selected final candidate failure fails the stage after writing diagnostic CSVs. A separate job downloads the final artifact and verifies selected candidate coverage and each PNG hash.
+All supported entries resolve inputs and outputs within the canonical case layout above. Operational controls do not redefine folder ownership, workbook semantics, or model equations.

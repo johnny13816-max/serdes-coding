@@ -50,11 +50,28 @@ because the operation itself is not tied to one object instance.
 
 ## Mandatory project structure and execution location
 
-- Follow [docs/project_structure_contract.md](docs/project_structure_contract.md) before creating folders, editing case inputs, installing environments, or preparing a run. It is the authoritative project layout reference.
+The repository root is governed by an allowlist. Do not create a new top-level
+file or directory unless its ownership is first added to both this section and
+`docs/architecture/project_structure.md`. Move misplaced content to its owning
+directory or delete it when it is generated, duplicated, obsolete, or empty.
+
+Allowed top-level directories are `.git/`, `.github/`, `.venv/`, `cases/`,
+`compatibility/`, `docs/`, `reference_data/`, `scripts/`, `src/`, and `tests/`. `tmp/`,
+`notebooks/`, and `examples/` are optional and may exist only while they contain
+active disposable work, maintained notebooks, or maintained examples.
+
+Allowed top-level project files are `.gitattributes`, `.gitignore`, `AGENTS.md`,
+`README.md`, `pyproject.toml`, and `poetry.lock`. Standalone legacy-Python
+exports, requirements and validators belong in `compatibility/`; they must not
+be scattered across the repository root. Update this allowlist and the structure
+contract together before adding any other top-level entry.
+
+- Follow [docs/architecture/project_structure.md](docs/architecture/project_structure.md) before creating folders, editing case inputs, installing environments, or preparing a run. It is the authoritative project layout reference.
 - Canonical root on this machine: `C:/Users/johnn/Documents/Serdes-learn/serdes-coding`. Verify resolved paths and Git worktree; stale tool cwd is not authority.
 - Use `<project_root>/.venv`, `<project_root>/src`, and `<project_root>/cases`. Do not edit, install, or run from `tmp/.codex-merge-main` or another temporary checkout unless the user explicitly requests that location.
 - Temporary worktree changes must be integrated and verified at the canonical root before handoff. Never silently substitute a worktree for the project root or copy a venv across paths.
-- Channels are defined in each model config.xlsx channels sheet. S4P files stay in reference_data; generated results belong in cases/<case_id>/<model>/results/<run_name>/.
+- Channels are defined in each model config.xlsx channels sheet. S4P files stay in `reference_data/COM_channel_data/`; generated results belong in `cases/<case_id>/<model>/results/<run_name>/`.
+- Preserve external COM Ad Hoc workbooks under `reference_data/COM_adhoc_config/<source_id>/`, where `source_id` names the supplying source (for example, `hansel` or `ieee_matlab`). Keep parser format IDs and match status in `manifest.csv`; they do not define storage paths. Preserve original workbooks, record batch/probe/hash metadata, and do not edit copied originals.
 - Manual 93A and 178A entries expose single_run/search_run; workbook search_config alone defines search ranges. The 178A entry supports EXEC_POLICY overrides. The 93A entry rejects non-empty EXEC_POLICY until native 93A execution profiles are defined.
 
 ## Protected COM model kernel
@@ -119,3 +136,47 @@ model contract from current implementation and then use that inferred contract
 to justify the implementation. Changes to model documentation require the same
 approved Core Model Change Contract when they alter or assert mathematical
 behavior.
+
+## Documentation governance
+
+- `docs/README.md` is the documentation entry point. Read it before adding or relocating project documentation.
+- `docs/architecture/documentation_contract.md` defines the required stage-first model documentation structure.
+- `docs/architecture/software_layers.md` defines dependency direction and code ownership.
+- Model documentation is organized by version and stage. A stage owns the stable input/output and status-lifecycle contract; functional blocks explain algorithms inside that stage; individual helpers remain in docstrings or generated API references unless independently significant.
+- Changes to stage boundaries, config/status dataclasses, workbook mappings, semantic call trees, or reporting dependencies must update the corresponding authoritative document in the same change.
+- Do not treat historical plans or change contracts as current architecture unless `docs/README.md` identifies them as authoritative.
+- `docs/models/<version>/branch_behavior_registry.md` is the authoritative location for each COM version's algorithm, numerical, execution, and applicable utility branch behavior. The current 178A registry is `docs/models/178A/branch_behavior_registry.md`; create the corresponding version registry when another model gains configurable parallel behavior. Any addition, modification, rename, merge, or removal of a branch must update the applicable registry in the same change.
+- Every branch entry must identify its stage, runtime control, project default, all alternate behaviors, `align_to_ref` participation, numerical owner, responsibility boundary, quantities allowed to change, quantities that must remain unchanged, and validation evidence. Inputs, equivalent representations, common bug fixes, and single-valued controls must be explicitly classified instead of being presented as parallel algorithms.
+- Do not add a nested per-stage policy dataclass under `COMConfig.policy`. The 178A runtime branch controls stay one level deep in `COMPolicyConfig`; stage helpers receive the named values they need. A proposed exception requires an explicitly approved configuration-architecture change contract.
+- A Core Model Change Contract that adds or changes a branch is incomplete until it names the corresponding branch-registry row and the documentation/tests that will be updated.
+
+## Repository cleanup safety
+
+- Before deleting or relocating project material, classify it as source, authoritative input, external reference, generated output, scratch, or unresolved recovery data.
+- Preserve user changes and external provenance until their canonical replacement is identified and verified.
+- The retired `tmp/.codex-merge-main` worktree was removed on 2026-09-25 after its branch, binary patch, inventory, and unique inputs were preserved in `C:/Users/johnn/Documents/Serdes-learn/serdes-coding-recovery-20260925`. Do not recreate a nested checkout under this project.
+- Do not combine repository cleanup, file relocation, or documentation restructuring with a protected COM model change.
+
+## Configuration contract
+
+GUI and conversion changes must follow `docs/architecture/adhoc_mapping_contract.md`
+and the executable registry `io/conversion/mapping_rules.py`. Update the field
+table in `docs/architecture/adhoc_mapping_fields.md` with registry changes.
+Do not introduce GUI-only requiredness, hidden source defaults, or mapping rules
+in widget callbacks. User channel selection and project policies remain separate.
+
+Use [docs/architecture/configuration_architecture.md](docs/architecture/configuration_architecture.md) as the mandatory project-wide configuration contract and the version-specific `docs/models/<version>/config_tree.md` as the field inventory.
+
+- Keep three boundaries distinct: external Ad Hoc → project config, project config → runtime config, and specification-defined fallback performed inside the runtime implementation.
+- Project-config fields are version-specific. Similar workbook layout does not authorize copying a parameter or feature from 178A into 93A (or vice versa).
+- Classify fixed configuration as `intrinsic`, `policy`, or `derived`. Keep case identity/provenance in the case-config domain. Do not classify runtime-only values as project-config fields.
+- `intrinsic` means a COM Ad Hoc/spec input. Required source values must be supplied; if the source lacks one, conversion fails. An intrinsic may be blank only where the applicable specification permits omission and the versioned field contract says blank maps to `None`.
+- `policy` means a project-defined control absent from COM Ad Hoc and the specification. Every policy field has an explicit project default and is managed separately from Ad Hoc mapping.
+- `derived` fields remain in the project template when the approved version contract requires them. Their conversion formula and runtime destination must be documented; do not silently remove or relabel them as policy.
+- Distinguish an absent workbook row/schema field from a blank cell. An absent required row is a schema/configuration error. A blank cell is valid only for an explicitly optional field; it maps to `None` and leaves any specification-defined fallback to the runtime owner.
+- Never copy a specification-defined runtime fallback into a second project-config field. Keep the project field empty when the source omits that optional value; implement the accepted fallback once at its runtime owner.
+- Conversion UI status is limited to `success`, `fail`, and `empty`: successful mapping, blocked/invalid mapping, and an allowed blank. Policy editing is a separate UI area and does not appear as an Ad Hoc mapping result.
+- Keep the shared workbook presentation format aligned across 93A and 178A, including the `Parameter Class` column. Keep each version's parameter inventory native; do not add unsupported fields merely to make the lists look alike.
+- Document both mapping directions and their requiredness/default semantics in the version tree. If implementation disagrees with this contract, document it as a gap; do not silently describe the desired behavior as implemented.
+- Every parameter row in a project config must have a runtime destination or an explicit case/provenance purpose. Do not keep an orphan row merely because an older workbook contained it. Conversely, workbook inputs required to construct a supported runtime configuration must be present in that version's project schema.
+- Do not expose internal runtime/dataclass fields that are calculated, transient, or owned by execution code as project parameters unless the version contract explicitly makes them user/project configurable. `Parameter Class` and other workbook structure metadata are schema metadata, not runtime parameters.
