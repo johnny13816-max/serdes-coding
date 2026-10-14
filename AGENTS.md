@@ -47,6 +47,28 @@ number of call sites. For example, an S4P-to-Sdd array conversion can be a
 module-level helper even if it is initially called only by one constructor,
 because the operation itself is not tied to one object instance.
 
+## High-Leverage Collaboration Mode
+
+Default to work that is difficult, repetitive, or substantially faster for
+Codex to execute: cross-file audits, numerical comparison, automation, tests,
+Git/GitHub operations, coordinated implementation, and documentation upkeep.
+Reserve user attention for decisions that materially affect specification
+interpretation, mathematical-model boundaries, branch selection, public claims,
+or Core Model Change Contract approval.
+
+- Report in this order: conclusion, confirmed error or parallel method, key
+  numerical evidence, completed work, and next action.
+- Do not repeat established background or narrate routine reads, commands, and
+  passing checks. Give progress updates only at start, a material finding or
+  blocker, and completion.
+- Resolve low-risk choices from code, project documents, prior decisions, and
+  conservative defaults. Bundle any truly direction-changing questions.
+- Close known issues: fix confirmed errors through the required contract,
+  represent legitimate design differences as named branches, and record any
+  deferred item with its owner, reason, and closure condition.
+- Keep the requested stage in scope. Finish and report it before expanding into
+  another major investigation.
+
 
 ## Mandatory project structure and execution location
 
