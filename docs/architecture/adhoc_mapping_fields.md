@@ -4,7 +4,14 @@ This table follows `io/conversion/mapping_rules.py`. Read the [contract](adhoc_m
 
 Unless stated otherwise, values are required. Runtime adapters retain responsibility for typed validation; no COM calculation is performed by conversion.
 
-178A 新模板使用唯一可見的 `fixed_config.align_to_ref` 開關；它與 optional `noise_grid_num_ui` 都是 project-owned policy，**不從 Ad Hoc 映射**。舊 workbook 的 `out_of_measured`、`channel_renormalization_order`、`pre_dte_adc_clipping_convention`、`final_adc_quantization_convention` 與各 `run_config.*.pmf_dy_override` 仍可讀取，以保持既有 case 的可重現性。`align_to_ref=True` 時由 `com_excel_io_178A` 在 project→runtime 邊界展開有效具名方法與 PMF 精度值；model 不接收或判斷此開關。reference 分支只供 SiCoPR／MATLAB 4.17 比對，均非 general method。
+178A 新模板使用 `run_config.control.execution_profile`，合法值為
+`project_standard`、`sicopr_reference_v1`、`custom`。新模板不再個別露出
+`noise_grid_num_ui` 等底層 method controls；它們由 profile 展開，**不從 Ad Hoc 映射**。舊
+workbook 的 `fixed_config.align_to_ref` 與個別 method 欄位仍可讀取，以保持
+既有 case 的可重現性；新模板不再輸出 boolean。Reference profile 由
+`com_excel_io_178A` 在 project→runtime 邊界展開有效具名方法與 PMF 精度值；
+model 不接收或判斷 profile selector。Reference 分支只供 SiCoPR／MATLAB
+4.17 比對，均非 general method。
 
 ## 93A
 

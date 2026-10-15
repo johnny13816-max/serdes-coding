@@ -59,7 +59,7 @@ remaining indices        FEXT paths in workbook/config order
 | `txpkg_fext` | nested termination/package/partial-host config | FEXT TX package |
 | `rxpkg` | nested termination/package/partial-host config | shared RX package |
 
-The exact field and workbook mappings are authoritative in [Configuration tree](../config_tree.md). This stage receives resolved runtime config and does not read the workbook or its `align_to_ref` preset switch directly.
+The exact field and workbook mappings are authoritative in [Configuration tree](../config_tree.md). This stage receives resolved runtime config and does not read the workbook `execution_profile` selector directly.
 
 No `COMRunConfig` field controls path construction. Search candidates affect this stage only because search creates a copied `COMConfig.filter` with concrete TX FFE and CTF gains before calling the model.
 

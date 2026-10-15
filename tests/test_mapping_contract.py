@@ -51,11 +51,11 @@ def test_missing_source_does_not_hide_other_fields(source):
     assert d.get('fixed_config','N_qb').status is MappingStatus.MISSING
     assert d.get('fixed_config','P_qc').value==1e-7
     assert d.get('fixed_config','fb').value==106.25e9
-    noise_grid = d.get('fixed_config','noise_grid_num_ui')
-    assert noise_grid.value is None
-    assert noise_grid.status is MappingStatus.FALLBACK
-    assert noise_grid.method == 'project default'
-    assert area_for(noise_grid,'178A')=='policy'
+    missing_dc = d.get('fixed_config','missing_dc_policy')
+    assert missing_dc.value == 'skrf'
+    assert missing_dc.status is MappingStatus.FALLBACK
+    assert missing_dc.method == 'project default'
+    assert area_for(missing_dc,'178A')=='policy'
     assert area_for(d.get('fixed_config','dy_rel_As'),'178A')=='policy'
     assert area_for(d.get('fixed_config','c_m2'),'178A')=='baseline'
 

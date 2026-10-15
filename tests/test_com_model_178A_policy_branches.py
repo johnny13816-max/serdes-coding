@@ -188,7 +188,7 @@ def test_178a_final_adc_quantization_policy_rejects_unknown_method(reference_cfg
         _with_methods(reference_cfg, final_adc_quantization_convention="unknown")
 
 
-def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path):
+def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference_cfg, tmp_path):
     source = (
         Path(__file__).resolve().parents[1]
         / "cases" / "sicopr_akinwale_vendorx_22db" / "178A" / "config.xlsx"
@@ -207,12 +207,23 @@ def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path)
         name = row[1].value
         if name in raw_values:
             row[3].value = raw_values[name]
-    fixed.append(["policy", "align_to_ref", "policy", True, "boolean", "reference preset"])
+        if name == "align_to_ref":
+            row[3].value = None
+    run = book["run_config"]
+    for row in run.iter_rows(min_row=4):
+        if row[0].value == "control" and row[1].value == "execution_profile":
+            row[2].value = "sicopr_reference_v1"
+            break
+    else:
+        run.append([
+            "control", "execution_profile", "sicopr_reference_v1", "enum",
+            "Versioned project-to-runtime execution profile.",
+        ])
     book.save(workbook_path)
 
     aligned = excel_to_config_178A(str(workbook_path))
     policy = aligned.policy
-    assert aligned.policy.applied_config_profile == "sicopr_reference"
+    assert aligned.policy.applied_config_profile == "sicopr_reference_v1"
     assert policy.out_of_measured == "zero_padding"
     assert policy.channel_renormalization_order == "s4p_first"
     assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
@@ -247,37 +258,37 @@ def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path)
     assert final_grid.gaussian_n_sigma == pytest.approx(policy.gaussian_n_sigma_override)
     exported = aligned.to_export_dict()["derived"]
     assert exported["policy"]["discrete_pmf_placement"] == "nearest"
-    assert exported["policy"]["applied_config_profile"] == "sicopr_reference"
+    assert exported["policy"]["applied_config_profile"] == "sicopr_reference_v1"
     overrides = exported["policy"]["config_profile_overrides"]
     assert overrides["policy.out_of_measured"] == {
         "raw": "cosine_decay",
         "effective": "zero_padding",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.ctle_pulse_realization"] == {
         "raw": "continuous_tf",
         "effective": "bilinear_iir",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.rxffe_record_realization"] == {
         "raw": "linear_convolution",
         "effective": "finite_record_circshift",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.gaussian_pmf_method"] == {
         "raw": "bin_integral",
         "effective": "reference_sample",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.mlsd_quantization_psd"] == {
         "raw": "pre_dte_filtered",
         "effective": "main_tap_white",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["execution.search_sweep.pmf_grid_quality"] == {
         "raw": "coarse",
         "effective": "fine",
-        "overridden_by_profile": "sicopr_reference",
+        "overridden_by_profile": "sicopr_reference_v1",
     }
 
     direct = replace(
@@ -297,23 +308,43 @@ def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path)
     assert direct.execution == aligned.execution
 
 
-def test_178a_new_template_exposes_alignment_switch_and_noise_record_value():
+def test_178a_new_template_exposes_only_the_versioned_execution_profile():
     root = Path(__file__).resolve().parents[1]
     template = root / "cases" / "_templates" / "178A" / "config.xlsx"
     book = openpyxl.load_workbook(template, read_only=True, data_only=True)
     fields = {row[1].value for row in book["fixed_config"].rows if len(row) > 1}
-    assert "align_to_ref" in fields
-    value = next(row[3].value for row in book["fixed_config"].rows if len(row) > 3 and row[1].value == "align_to_ref")
-    assert value is False
-    assert "noise_grid_num_ui" in fields
-    noise_value = next(
-        row[3].value
-        for row in book["fixed_config"].rows
-        if len(row) > 3 and row[1].value == "noise_grid_num_ui"
-    )
-    assert noise_value is None
+    assert "align_to_ref" not in fields
+    run_rows = {
+        (row[0].value, row[1].value): row[2].value
+        for row in book["run_config"].rows
+        if len(row) > 2
+    }
+    assert run_rows[("control", "execution_profile")] == "project_standard"
+    assert "noise_grid_num_ui" not in fields
     for old_field in (
         "out_of_measured", "channel_renormalization_order",
         "pre_dte_adc_clipping_convention", "final_adc_quantization_convention",
     ):
         assert old_field not in fields
+
+
+def test_178a_legacy_align_to_ref_remains_a_compatible_alias(tmp_path):
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "cases" / "sicopr_akinwale_vendorx_22db" / "178A" / "config.xlsx"
+    )
+    workbook_path = tmp_path / "legacy_align_to_ref.xlsx"
+    copy2(source, workbook_path)
+    book = openpyxl.load_workbook(workbook_path)
+    run = book["run_config"]
+    for row in run.iter_rows(min_row=4):
+        if row[0].value == "control" and row[1].value == "execution_profile":
+            row[2].value = None
+    book["fixed_config"].append(
+        ["policy", "align_to_ref", "compatibility", True, "boolean", "legacy alias"]
+    )
+    book.save(workbook_path)
+
+    cfg = excel_to_config_178A(str(workbook_path))
+    assert cfg.policy.applied_config_profile == "sicopr_reference_v1"
+    assert cfg.policy.mlsd_quantization_psd == "main_tap_white"

@@ -21,6 +21,7 @@ FIXED_CONFIG
 ├── derived
 └── policy
 EXEC_POLICY
+├── control.execution_profile
 ├── single_run
 ├── search_sweep
 └── search_final
@@ -134,24 +135,25 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `tap_rel_As` | `COMPMFConfig` | 0.001 |
 | `gaussian_n_sigma` | `COMPMFConfig` | 8 |
 | `missing_dc_policy` | `COMChannelConfig` | `skrf` |
-| `align_to_ref` | `com_excel_io_178A` preset selector；不進入 `COMConfig` | `False` |
+| `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
+| `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
 | `channel_renormalization_order` | `COMConfig.policy` | `sdd_first` |
 | `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
 | `final_adc_quantization_convention` | `COMConfig.policy` | `annex_d3` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
 | `rxffe_record_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `linear_convolution` |
-| `noise_grid_num_ui` | `COMPolicyConfig` | 留白：`analysis_grid` |
 
 All listed PMF controls and `missing_dc_policy` are labeled `policy`. There is
 no `quantization_vqc_method` row in the 178A project template: it has no 178A
 runtime owner. `run_config.pre_dte_pmf_method` is the applicable execution
 control.
 
-`align_to_ref` 是新版 178A 模板唯一可見的 reference preset **開關**；模板另有
-optional 數值 policy `noise_grid_num_ui`。兩者都不從 Ad Hoc 映射；
-`noise_grid_num_ui` 留白表示沿用 analysis grid。`align_to_ref=False` 保持舊
-case 個別 policy 與 run profile；`True` 由
+`run_config.control.execution_profile` 是新版 178A 模板的 facade selector；
+合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。新模板不逐欄曝露
+`noise_grid_num_ui` 等底層 method controls；它們由 profile 展開，也不從 Ad Hoc 映射。
+`project_standard` 使用專案預設，
+`custom` 讀取 workbook 明示的 advanced/legacy method；`sicopr_reference_v1` 由
 `com_excel_io_178A` 在建構 runtime config 前展開為 SiCoPR／MATLAB 4.17
 具名方法：`zero_padding`、`s4p_first`、`bilinear_iir`、
 `finite_record_circshift`、pre-DTE/final ADC reference 分支，
@@ -164,8 +166,9 @@ relative-`As` final grid。`COMConfig` 不保留此 boolean；model 只讀上述
 pre-DTE `dy` 依 fine grid 的 `min(dy_abs_max, dy_rel_As*As)` 求得；
 final COM／MLSD 在專案未正規化的 RX FFE 電壓座標使用
 `dy_rel_As*As`，相當於 SiCoPR 主 tap 正規化後的 `dy` 乘回主 tap gain。
-舊 workbook
-的個別欄位仍可讀；開關為 `True` 時 adapter 以 reference preset 覆蓋，
+舊 workbook 的 `align_to_ref` 與個別欄位仍可讀；legacy boolean 為 `True` 時
+等價於 `sicopr_reference_v1`，為 `False` 且存在個別 method 時等價於 `custom`。
+Reference profile 以 preset 覆蓋，
 並在 `COMConfig.policy.applied_config_profile`／`config_profile_overrides` 記錄 profile 與
 raw/effective 值。此模式只供 reference 比對，不宣稱為 178A 通用方法。
 
@@ -184,7 +187,7 @@ FEXT 使用同一政策。數值操作由 `SparamModel.to_LinkSegment()` 呼叫
 矩陣。有效量測上限由 `COMChannelConfig.sparam_frequency_limit_Hz` 決定；
 `zero_padding` 從該有效上限之後生效。Akinwale case 的六個原始 S4P 都到
 100 GHz，而 Ad Hoc `flim=67 GHz` 會映射為 case-level
-`sparam_frequency_limit_GHz=67`。一般模板留白，`align_to_ref` 本身不強制
+`sparam_frequency_limit_GHz=67`。一般模板留白，execution profile 本身不強制
 任何固定頻率。
 
 `channel_renormalization_order` 在 S4P reader 選 `sdd_first` 或
@@ -233,12 +236,13 @@ Fixed baselines and search candidates are separate. The current fixed baselines 
 
 | Profile | Purpose |
 |---|---|
+| `control.execution_profile` | Workbook facade preset: `project_standard`, `sicopr_reference_v1`, or `custom` |
 | `single_run` | Manual single execution |
 | `search_sweep` | First step of `search_run`; candidate evaluation |
 | `search_final` | Second step; final evaluation of retained candidates |
 | `search` | Orchestration values `group_size` and `top_k` |
 
-Each run profile supplies `target`, `pre_dte_pmf_method`, `pmf_grid_quality`, `pmf_keep_mass`, optional `pmf_dy_override`, `floating_mode`, `pos_sweep_method`, and `pos_coarse_stride`. These are execution policy: they select computational methods and speed/accuracy tradeoffs without changing the fixed model input. When `pmf_dy_override` is set to a finite positive voltage, the resolved runtime PMF `dy` uses that value directly for ADC-input and final DFE/MLSD PMFs; `dy_rel_As` and `dy_abs_max` are bypassed. A blank override retains the prior coarse/fine derivation. Final COM still keeps all PMF mass (`keep_mass=1`) independently of the run profile.
+Each run profile supplies `target`, `pre_dte_pmf_method`, `pmf_grid_quality`, `pmf_keep_mass`, optional `pmf_dy_override`, `floating_mode`, `pos_sweep_method`, and `pos_coarse_stride`. These are execution policy: they select computational methods and speed/accuracy tradeoffs without changing the fixed model input. `sicopr_reference_v1` overrides the four PMF execution fields with the validated reference values while preserving `target`, floating/phase search, group size, and top-K. When `pmf_dy_override` is set to a finite positive voltage, the resolved runtime PMF `dy` uses that value directly for ADC-input and final DFE/MLSD PMFs; `dy_rel_As` and `dy_abs_max` are bypassed. A blank override retains the prior coarse/fine derivation. Final COM still keeps all PMF mass (`keep_mass=1`) independently of the run profile.
 
 ## Requiredness and runtime fallback
 

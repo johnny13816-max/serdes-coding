@@ -179,10 +179,10 @@ Every stored `S_*` value is a `SampledPSD`. Every stored `h_*` value is a `Sampl
 
 `pmf_grid_quality` resolves the PMF grid through `COMPMFConfig.resolve()` when `pmf_dy_override` is blank. A finite positive `pmf_dy_override` directly replaces the resolved `dy`, bypassing `dy_rel_As` and `dy_abs_max`. `pmf_keep_mass` replaces the resolved PMF retention value for this ADC-input calculation. These run controls trade runtime for numerical fidelity; the fixed `pre_dte_adc_clipping_convention` instead selects the clipping equation inputs.
 
-workbook `align_to_ref=True` 時，adapter 已將各 run profile 展開為 exact
+workbook `execution_profile=sicopr_reference_v1` 時，adapter 已將各 run profile 展開為 exact
 PMF、fine grid、`keep_mass=1`，並由 fine-grid 規則求 `dy`；同時把
 pre-DTE clipping、離散訊號最近落格及 Gaussian reference sampling 寫入
-具名 runtime methods。此 stage 與 `Pmf1D` 都不讀取 `align_to_ref`。
+具名 runtime methods。此 stage 與 `Pmf1D` 都不讀取 profile selector。
 
 For `annex_d3`, clipping uses the full-jitter `S_ga=S_rn+S_xn+S_tn+S_jn` and left-tail `P_qc/2`. `matlab_4_17_reference_only` uses random-jitter-only `S_jn_RJ` **only for the clipping Gaussian sigma** and left-tail `P_qc`. Both modes keep the full `S_jn` in `S_total=S_ga+S_qn` and therefore in MMSE `R_n`. `COMAdcInputPMF.clipping_convention` records the selected mode separately from `method` (`pmf_exact` or `gaussian_approx`). The latter mode is a reference comparison branch, not a general 178A claim. The later final-COM ADC PMF calculation does not use this pre-DTE selector.
 

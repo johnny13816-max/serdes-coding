@@ -14,6 +14,7 @@ This directory contains the maintained project documentation. Start with the arc
 6. [Model documentation](models/README.md)
    including the authoritative [178A branch behavior registry](models/178A/branch_behavior_registry.md)
 7. [Validation](validation/README.md) and [operations](operations/README.md)
+   including the authoritative [v1.0 release gate](operations/v1_0_release_gate.md)
 8. [Active contracts](planning/active_contracts.md) and [planning](planning/README.md)
 
 ## Directory ownership

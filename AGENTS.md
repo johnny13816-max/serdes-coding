@@ -250,7 +250,7 @@ behavior.
 - Changes to stage boundaries, config/status dataclasses, workbook mappings, semantic call trees, or reporting dependencies must update the corresponding authoritative document in the same change.
 - Do not treat historical plans or change contracts as current architecture unless `docs/README.md` identifies them as authoritative.
 - `docs/models/<version>/branch_behavior_registry.md` is the authoritative location for each COM version's algorithm, numerical, execution, and applicable utility branch behavior. The current 178A registry is `docs/models/178A/branch_behavior_registry.md`; create the corresponding version registry when another model gains configurable parallel behavior. Any addition, modification, rename, merge, or removal of a branch must update the applicable registry in the same change.
-- Every branch entry must identify its stage, runtime control, project default, all alternate behaviors, `align_to_ref` participation, numerical owner, responsibility boundary, quantities allowed to change, quantities that must remain unchanged, and validation evidence. Inputs, equivalent representations, common bug fixes, and single-valued controls must be explicitly classified instead of being presented as parallel algorithms.
+- Every branch entry must identify its stage, runtime control, project default, all alternate behaviors, versioned execution-profile participation, numerical owner, responsibility boundary, quantities allowed to change, quantities that must remain unchanged, and validation evidence. Inputs, equivalent representations, common bug fixes, and single-valued controls must be explicitly classified instead of being presented as parallel algorithms.
 - Do not add a nested per-stage policy dataclass under `COMConfig.policy`. The 178A runtime branch controls stay one level deep in `COMPolicyConfig`; stage helpers receive the named values they need. A proposed exception requires an explicitly approved configuration-architecture change contract.
 - A Core Model Change Contract that adds or changes a branch is incomplete until it names the corresponding branch-registry row and the documentation/tests that will be updated.
 
@@ -284,3 +284,12 @@ Use [docs/architecture/configuration_architecture.md](docs/architecture/configur
 - Document both mapping directions and their requiredness/default semantics in the version tree. If implementation disagrees with this contract, document it as a gap; do not silently describe the desired behavior as implemented.
 - Every parameter row in a project config must have a runtime destination or an explicit case/provenance purpose. Do not keep an orphan row merely because an older workbook contained it. Conversely, workbook inputs required to construct a supported runtime configuration must be present in that version's project schema.
 - Do not expose internal runtime/dataclass fields that are calculated, transient, or owned by execution code as project parameters unless the version contract explicitly makes them user/project configurable. `Parameter Class` and other workbook structure metadata are schema metadata, not runtime parameters.
+- Treat a versioned workbook `execution_profile` as a project→runtime facade. It may override named algorithm policy and numerical run settings, but it must never override intrinsic case inputs, search ranges, execution targets, or search orchestration. New templates expose the profile name; legacy boolean aliases remain parser compatibility only. Every run artifact must preserve the resolved profile name, effective settings, and raw/effective override provenance.
+
+## v1.0 release gate
+
+Do not label a commit, tag, artifact, README claim, or milestone as v1.0 until
+[`docs/operations/v1_0_release_gate.md`](docs/operations/v1_0_release_gate.md)
+shows every required gate as passed with current-commit evidence. A successful
+single case, counterfactual, or workflow run is insufficient. Open exclusions
+must be explicit in the release scope and public claim boundary.

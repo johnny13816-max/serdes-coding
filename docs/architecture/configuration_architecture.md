@@ -18,9 +18,12 @@ These are three distinct responsibilities:
 2. **Project config → typed/runtime config** is owned by the versioned `com_excel_io_XX()` adapter. It validates the workbook and constructs typed runtime dataclasses. It must not parse external Ad Hoc variants.
 3. **Runtime fallback** implements a fallback explicitly defined by the applicable specification or accepted runtime contract. It stays at the runtime owner; conversion must not copy it into another project field.
 
-Project-level presets are resolved at boundary 2. For 178A, the workbook-only
-`align_to_ref` switch is expanded by `com_excel_io_178A` into named runtime
-methods and effective execution profiles before `COMConfig` is constructed.
+Project-level presets are resolved at boundary 2. For 178A,
+`run_config.control.execution_profile` selects a versioned facade profile:
+`project_standard`, `sicopr_reference_v1`, or `custom`. The adapter expands the
+selected profile into named runtime methods and effective execution profiles
+before `COMConfig` is constructed. Legacy `fixed_config.align_to_ref` remains a
+read-only compatibility alias and is not emitted by new templates.
 The model and utilities receive those named values and never branch on the
 workbook switch. The config snapshot records the applied profile and each
 raw/effective override.
@@ -45,7 +48,14 @@ Fixed config contains values used by the selected version's run. Its `Parameter 
 
 ### Execution and search config
 
-For 178A, `RUN_MODE` selects `single_run` or `search_run`; `EXEC_POLICY` holds `single_run`, `search_sweep`, and `search_final` execution settings; `SEARCH_CONFIG` holds candidate ranges and search-run controls. These are distinct from fixed config. 93A contains only controls supported by its own runtime contract; it does not receive 178A-only fields for visual symmetry.
+For 178A, `RUN_MODE` selects `single_run` or `search_run`; `EXEC_POLICY` holds the
+cross-layer `execution_profile` selector plus `single_run`, `search_sweep`, and
+`search_final` execution settings; `SEARCH_CONFIG` holds candidate ranges and
+search-run controls. A profile may override project policy and numerical run
+settings, but never intrinsic case inputs, search ranges, execution target, or
+orchestration quantities such as group size and top-K. These remain distinct
+from fixed config. 93A contains only controls supported by its own runtime
+contract; it does not receive 178A-only fields for visual symmetry.
 
 ## Required, empty, and missing values
 

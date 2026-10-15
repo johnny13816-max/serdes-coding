@@ -8,17 +8,16 @@
 
 ## 近期優先項目
 
-0. Public GitHub Actions split search
-   - 以 `group_id` 為 GitHub Actions matrix/job unit，呼叫 178A `run_partial_group()`，產生可合併的 `group_XXX.csv`。
-   - 僅允許已確認可公開的 project config、channel S4P、search result 進入 workflow；不得放入公司名稱、內部路徑、客戶資訊或任何公司文件。
-   - final merge/top-K 可先維持本機或 Codespaces 手動執行；之後再決定是否也加入 Actions workflow。
+0. Public GitHub Actions split search — **implemented; release validation remains**
+   - `prepare → partial → finalize → verify` 已由 GitHub Actions 執行。
+   - v1.0 尚需在 current release candidate 以 `sicopr_reference_v1`、
+     `search_final.target=full` 完成正式 Akinwale full search。
 
-1. COM v1.0 search flow
-   - 完成 93A search candidate sweep。
-   - search parameters: `c_m2`, `c_m1`, `c_1`, `g_DC`, `g_DC2`。
-   - search 階段只保存 lightweight summary。
-   - best candidate 再跑完整 PMF/COM。
-   - 未來可加入 `keep_top_n_status`：只對 top N candidates 保留完整 `COMStatus`，用於 search debug，但避免保存所有 candidate 的大型 arrays。
+1. COM v1.0 release
+   - 正式 scope 與 gate 見
+     [`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
+   - 目前優先完成 versioned execution profile、local full-target smoke、
+     GitHub Akinwale full search、93A support boundary 與 durable output audit。
 
 2. Single-run full output
    - 定義 durable output 格式。

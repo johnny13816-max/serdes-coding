@@ -226,7 +226,7 @@ The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 d
 | `sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` |
 | `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
 
-`align_to_ref` 不進入 model；project Excel adapter 一次展開右欄設定。Eq. 178A-49
+`execution_profile` 不進入 model；project Excel adapter 一次展開右欄設定。Eq. 178A-49
 sign 不在此表，因為它是共同公式修正。
 
 ## Top-level flow

@@ -70,8 +70,9 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
     channel = _read_project_channels(excel_path)
     der_0 = _fixed_float(fixed, "DER_0")
     execution = _read_project_execution_config(excel_path)
+    execution_profile = _read_project_execution_profile(excel_path, fixed)
     methods, execution, applied_profile, profile_overrides = _resolve_project_profile_178A(
-        fixed, execution, der_0
+        fixed, execution, der_0, execution_profile
     )
 
     link_cfg = LinkConfig(
@@ -164,13 +165,14 @@ def _resolve_project_profile_178A(
     fixed: dict[str, object],
     execution: COMExecutionConfig,
     der_0: float,
+    execution_profile: str,
 ) -> tuple[
     COMPolicyConfig,
     COMExecutionConfig,
     str | None,
     dict[str, object],
 ]:
-    """Expand the workbook reference preset before constructing runtime config."""
+    """Expand a named workbook execution profile into typed runtime settings."""
     configured_noise_ui = _fixed_optional_int(fixed, "noise_grid_num_ui")
     general_methods = COMPolicyConfig(
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
@@ -185,16 +187,21 @@ def _resolve_project_profile_178A(
         ).strip(),
         # This branch is intentionally not exposed as an individual workbook
         # row. The general project profile uses the continuous Eq. 178A-14
-        # realization; align_to_ref expands it to the reference realization.
+        # realization; the reference execution profile expands it to the
+        # validated reference realization.
         ctle_pulse_realization="continuous_tf",
         rxffe_record_realization="linear_convolution",
         noise_grid_method="fixed_ui" if configured_noise_ui is not None else "analysis_grid",
         noise_grid_num_ui=configured_noise_ui,
     )
-    if not _coerce_bool(fixed.get("align_to_ref", False)):
-        return general_methods, execution, None, {}
+    if execution_profile == "project_standard":
+        return COMPolicyConfig(), execution, execution_profile, {}
+    if execution_profile == "custom":
+        return general_methods, execution, execution_profile, {}
+    if execution_profile != "sicopr_reference_v1":
+        raise ValueError(f"Unsupported 178A execution_profile: {execution_profile!r}.")
 
-    profile_name = "sicopr_reference"
+    profile_name = execution_profile
 
     def override_record(raw: object, effective: object) -> dict[str, object]:
         return {
@@ -262,6 +269,59 @@ def _resolve_project_profile_178A(
         profile_name,
         overrides,
     )
+
+
+def _read_project_execution_profile(
+    excel_path: Path,
+    fixed: dict[str, object],
+) -> str:
+    """Resolve the workbook facade profile, including legacy boolean input."""
+    import pandas as pd
+
+    df = pd.read_excel(excel_path, sheet_name="run_config", header=2)
+    required_cols = {"Profile", "Parameter", "Value"}
+    if not required_cols.issubset(df.columns):
+        raise ValueError("run_config must contain Profile, Parameter, and Value columns.")
+
+    profile_value: object | None = None
+    for _, row in df.iterrows():
+        if (
+            str(row.get("Profile", "")).strip() == "control"
+            and str(row.get("Parameter", "")).strip() == "execution_profile"
+        ):
+            profile_value = row.get("Value")
+            break
+
+    legacy_present = "align_to_ref" in fixed and not _is_blank(fixed.get("align_to_ref"))
+    legacy_aligned = _coerce_bool(fixed.get("align_to_ref", False))
+    if not _is_blank(profile_value):
+        profile_name = str(profile_value).strip()
+        allowed = {"project_standard", "sicopr_reference_v1", "custom"}
+        if profile_name not in allowed:
+            raise ValueError(
+                "run_config.control.execution_profile must be one of "
+                f"{sorted(allowed)}."
+            )
+        if legacy_present and legacy_aligned != (profile_name == "sicopr_reference_v1"):
+            raise ValueError(
+                "run_config.control.execution_profile conflicts with legacy "
+                "fixed_config.align_to_ref. Remove the legacy field or make them agree."
+            )
+        return profile_name
+
+    if legacy_aligned:
+        return "sicopr_reference_v1"
+
+    legacy_method_fields = {
+        "out_of_measured",
+        "channel_renormalization_order",
+        "pre_dte_adc_clipping_convention",
+        "final_adc_quantization_convention",
+        "noise_grid_num_ui",
+    }
+    if any(name in fixed for name in legacy_method_fields):
+        return "custom"
+    return "project_standard"
 
 
 def _project_excel_to_search_config_178A(excel_path: Path) -> COMSearchConfig_178A:

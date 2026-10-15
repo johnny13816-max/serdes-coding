@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-10-14
+最後核對：2026-10-15
 
 本文件是 178A model 所有平行算法、數值策略與執行策略的正式索引。新增、修改、重新命名、合併或移除分支時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
 
@@ -13,21 +13,21 @@
 - **執行分支**：改變搜尋、精度或計算成本，但不重新定義物理輸入。
 - **輸入邊界**：描述 case 實際提供的資料範圍，不是算法分支。
 - **固定行為**：目前只有一種合法值，不能宣稱為可切換分支。
-- `align_to_ref` 只在 workbook adapter 選取一組具名方法；model 不讀取這個 boolean。
+- `execution_profile` 只在 workbook adapter 選取具名 preset；model 不讀取 selector。
 - 所有 runtime 算法 policy 平放在 `COMConfig.policy: COMPolicyConfig`；不得為單一 stage 再加入 nested policy dataclass。
 
 ## Reference preset
 
-`com_excel_io_178A._resolve_project_profile_178A()` 在建立 runtime config 前展開 preset。`align_to_ref=False` 使用 project default 或 workbook 明示值；`True` 使用下表的 reference 組合，並在 `COMConfig.policy.config_profile_overrides` 記錄 raw/effective 值。
+`com_excel_io_178A._resolve_project_profile_178A()` 在建立 runtime config 前展開 preset。`project_standard` 使用專案標準方法，`custom` 讀取 workbook 明示的 legacy/advanced method，`sicopr_reference_v1` 使用下表的 reference 組合，並在 `COMConfig.policy.config_profile_overrides` 記錄 raw/effective 值。舊 `align_to_ref` 只作相容 alias。
 
-| Runtime control | Project default | `align_to_ref=True` | Preset 是否控制 |
+| Runtime control | Project default | `sicopr_reference_v1` | Preset 是否控制 |
 |---|---|---|---|
 | `policy.channel_renormalization_order` | `sdd_first` | `s4p_first` | 是 |
 | `policy.out_of_measured` | `cosine_decay` | `zero_padding` | 是 |
 | `policy.ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | 是 |
 | `policy.rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | 是 |
 | `policy.noise_grid_method` | `analysis_grid` | `fixed_ui` | 是 |
-| `policy.noise_grid_num_ui` | `None` | workbook 值，未提供時為 `4096` | 是 |
+| `policy.noise_grid_num_ui` | `None` | `4096`；`custom` 可由 legacy／advanced row 指定 | 是 |
 | `policy.pre_dte_adc_clipping_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
 | `policy.final_adc_quantization_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
 | `policy.discrete_pmf_placement` | `linear` | `nearest` | 是 |
@@ -75,7 +75,7 @@
 | B-016 | MLSD added-noise PDF | `policy.added_noise_pdf` | `gaussian_addition`：依 Annex 加入 Gaussian component | `scaled_total_pdf`：縮放完整 DFE PDF 後求 `g_an` | `solve_g_an()` orchestration 選 `_build_scaled_total_pdf_added_noise()` 或 Annex flow。不得改 `S_isi`、`S_ni` 的定義。 |
 | B-017 | MLSD sequence termination | `policy.sequence_termination` | `fixed_length_sum`：固定 `trunc_len` 的 sequence contribution sum | `matlab_relative_tail`：reference CDF 與獨立 truncation-tail realization | `calculate_der_mlsd()` 擁有 sequence recurrence/truncation。Eq. 178A-49 的 `(-1)^(j+1)` 是共同正確公式，不是分支。 |
 | B-018 | MLSD reported DER | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation`：以算得的 MLSD increment 回到 baseline DFE PDF 評估 reported DER | `calculate_COM_MLSD()` 只改報告值的形成；raw sequence DER 必須另行保存，不能覆寫。 |
-| B-019 | Missing DC handling | `channel.missing_dc_policy` | project workbook：`skrf`；dataclass constructor default：`error` | `hold` 或其他合法 reader policy | S-parameter ingestion/extrapolation 擁有 DC 缺口處理。`align_to_ref` 不控制；不得混入高頻 B-002。 |
+| B-019 | Missing DC handling | `channel.missing_dc_policy` | project workbook：`skrf`；dataclass constructor default：`error` | `hold` 或其他合法 reader policy | S-parameter ingestion/extrapolation 擁有 DC 缺口處理。Execution profile 不控制；不得混入高頻 B-002。 |
 | B-020 | Utility time-domain cascade | `cascade_ir(..., force_grid=...)` | COM 正式路徑使用 `True`：回到原 cfg，檢查 discarded tail | `False`：保留完整 linear-convolution record/grid | 屬 `LinkSegment`／`SampledResponse` utility。COM 不得偷偷 regrid；固定 grid overflow 目前依既有契約處理。 |
 | B-021 | MLSD quantization PSD | `policy.mlsd_quantization_psd` | `pre_dte_filtered`：完整 pre-DTE `S_n` 經完整 `|H_rxffe|²` | `main_tap_white`：非量化噪聲經完整 `|H_rxffe|²`，`S_qn` 保持 white 並只乘 `|w[d_w]|²` | `build_mlsd_noise()` 擁有 Eq. 178A-54 組合邊界。不得改 MMSE 的 `S_qn/R_n`、RxFFE taps、`S_an`、`S_isi` 或 DER solver。MLSD status 必須保存實際使用的 `S_qn`。 |
 
@@ -94,7 +94,7 @@
 
 | 項目 | 分類與原因 |
 |---|---|
-| `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；`align_to_ref` 不得把任意 100 GHz 檔案暗中裁成 67 GHz。B-002 只決定此邊界外如何處理。 |
+| `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。B-002 只決定此邊界外如何處理。 |
 | `policy.xtalk_pmf_accumulation` | **固定行為**。目前唯一合法值是 `pathwise_convolution`，沒有 A/B 分支能力；保留是待清理的 API 欄位。 |
 | TX FFE discrete filter 與 `LinkSegment.cascade_ir()` | **等價實作**。對 oversampled pulse 做 shift-sum／convolution，不屬 CTLE branch。 |
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
@@ -123,7 +123,7 @@
 1. 更新本文件的 preset matrix、branch row、責任邊界與驗證連結。
 2. 若 runtime field 改變，更新 `config_tree.md`；若 stage call flow 改變，更新 `call_tree.md` 與相應 stage 文件。
 3. 明確分類為算法分支、執行分支、輸入邊界或固定行為。
-4. 寫出 project default、所有合法 alternate、`align_to_ref` 是否覆蓋，以及互相依賴的欄位。
+4. 寫出 project default、所有合法 alternate、哪些 versioned execution profiles 會覆蓋，以及互相依賴的欄位。
 5. 列出會改變與不得改變的中間量，並提供 branch isolation test。
 6. 新增 reference-only 分支時保留 general method，不得用 reference 接近度取代公式正確性判定。
 7. 若發現 general method 錯誤，依 Core Model Change Contract 直接修正共同流程，不保留已知錯誤作平行分支。

@@ -6,19 +6,16 @@
 [`reference_alignment_contracts.md`](reference_alignment_contracts.md)。
 「已實作」不等於「已驗證」或「已結案」。
 
-**目前修改焦點：TC-023 已核准並實作。** MLSD Eq. 178A-49 的末項 sign 已
-依 `i=j+1` 直接修正；reference realization 由 adapter 展開具名 MLSD methods。
-MMSE noise grid 已與
-path analysis grid 分離，Akinwale 的 4096-UI `R_n`／MMSE 已對到浮點精度。
-CTLE pulse 差異 G-009 已由
-完整 `bilinear_iir` realization 與獨立 post-FFE finite-record method 收斂；
-受控 67 GHz pulse 已對到浮點精度。TC-021 已把 SiCoPR `flim=67 GHz`
-實作為明示 channel input boundary，不屬於 CTLE method。
-TC-006 原先在 `_build_path()` 對 67 GHz 後的 scalar H21 補零，已由核准的 [TC-006 邊界修訂](tc006_out_of_measured_boundary_revision.md) 取代；新分支按原始量測上限決定補零位置。歷史 67 GHz locked candidate 數字不能當作原始 100 GHz S4P 的新分支驗收值。TC-005 的 run-level dy 維持既有實作；TC-007 的 converter 修正維持既有狀態，MLSD TC-009～012
-仍由使用者 review；TC-013 的驗證仍暫緩。
+**目前修改焦點：v1.0 foundation／CFG-001／SRCH-001。** 178A 已完成
+SiCoPR reference production golden；現在將 workbook facade 收斂成 versioned
+`execution_profile`，並要求 local／GitHub search 保存 resolved config、input hashes
+與 code revision。完整 release gate 見
+[`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
 
 | ID／名稱 | 類別 | 主狀態 | 已確認 | 下一個關卡 |
 | --- | --- | --- | --- | --- |
+| CFG-001 — Versioned execution profile workbook facade | config／workbook／adapter | **實作與 regression 完成、待 commit** | 新模板與 Akinwale case 使用 `execution_profile`；legacy `align_to_ref` 保留 parser compatibility；fixed golden、local full-target search、136 tests／2 subtests 通過；不改 model equations | 獨立 commit 後解除 SRCH-001 blocker |
+| SRCH-001 — Akinwale full-target reference search | search／GitHub Actions | **blocked by CFG-001 release commit** | 2026-10-14 舊 main run 成功但 `search_final.target=dfe`，且早於 TC-024；不能代表完整 MLSD search | CFG-001 merge 後執行 232,848-candidate GitHub search，驗證 artifact |
 | [TC-024 — MLSD quantization PSD realization](tc024_mlsd_quantization_psd.md) | MLSD／core／reference policy | **closed**（2026-10-15 使用者驗收） | 正式 reference profile：pos=5、MSE=`0.0061912610245255335`、`COM_MLSD=2.895898684873246 dB`，對 SiCoPR gap=`-1.29e-14 dB`；133 passed／2 subtests passed | 無模型關卡；提交狀態由 repository workflow 管理 |
 | [TC-023 — 178A MLSD reference realization](tc023_mlsd_reference_realization.md) | MLSD／core／reference policy | 已核准、工作樹實作與回歸通過；待隔離提交 | Eq. 178A-49 `(-1)^(j+1)` 直接修正；Akinwale `COM_MLSD=2.8810510066627915 dB`，對 SiCoPR 差 `-0.0148476782 dB`，通過 0.05 dB reference gate | 若要壓到 0.01 dB，需取得 reference `p_an`／raw DER dump；不得用常數補償 |
 | [TC-022／TC-022A — MMSE noise-correlation record grid](tc022_mmse_noise_grid.md) | G-005／core／project policy | 已核准、工作樹實作與完整回歸通過；待隔離提交 | template 自動提供 optional policy 欄位；一般模式為 `analysis_grid`，reference preset 為 `fixed_ui/4096`；Akinwale total `R_n` 最大差 `3.71e-21 V²`、MSE 差 `8.63e-16`、`COM_DFE=1.5247607834259893 dB`；129 passed／2 subtests passed | 回到 MLSD stage 對齊；既有髒工作樹使專用 commit 待安全隔離 |

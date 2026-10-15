@@ -27,10 +27,10 @@ RUN_MODE
 
 `RUN_MODE` chooses the user-visible operation. The two search profiles are internal steps of one `search_run`; they are not additional run modes. Search ranges come from the workbook `search_config` sheet. The manual `EXEC_POLICY` dictionary may replace fields of the three existing execution profiles, but it does not replace fixed config or search ranges.
 
-178A `fixed_config.align_to_ref` 是 workbook-only reference preset 開關。
+178A `run_config.control.execution_profile` 是 workbook facade selector。
 `excel_to_config_178A()` 在建立 `COMConfig` 前把它展開為具名算法和三組
 有效 execution profile。`COM._effective_run_cfg()` 只回傳已解析的 profile；
-model 不判斷此 boolean。有效方法、profile 名稱及 raw/effective override
+model 不判斷 selector。有效方法、profile 名稱及 raw/effective override
 隨 config snapshot 輸出。
 `COM.__init__()` 另由 `COMPolicyConfig` 建立共享 MMSE noise grid；它不改動
 channel／pulse 使用的 `COMConfig.link`。
@@ -44,9 +44,9 @@ __main__
 ├── resolve PROJECT_ROOT / CASE_ID / 178A
 ├── validate RUN_MODE and config.xlsx
 ├── excel_to_config_178A(config.xlsx)
-│   ├── read fixed config plus all execution profiles
-│   ├── expand align_to_ref preset into named effective values
-│   └── construct COMConfig without the workbook boolean
+│   ├── read fixed config plus execution_profile and all run profiles
+│   ├── expand the versioned preset into named effective values
+│   └── construct COMConfig without the workbook selector
 ├── apply validated EXEC_POLICY overrides
 └── branch by RUN_MODE
     ├── single_run
