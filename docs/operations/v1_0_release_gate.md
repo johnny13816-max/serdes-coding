@@ -23,8 +23,8 @@ v1.0 必須同時涵蓋：
 
 | Gate | Acceptance condition | Current state (2026-10-15) |
 |---|---|---|
-| G1 Repository state | 所有納入 release 的 model/config changes 已分離提交；無未分類修改混入 | TC-024 已提交；execution-profile change 進行中 |
-| G2 Configuration UX | 新 178A template 使用 versioned `execution_profile`；legacy input 有測試；resolved profile/provenance 可匯出 | 實作完成；待 regression／commit |
+| G1 Repository state | 所有納入 release 的 model/config changes 已分離提交；無未分類修改混入 | TC-024 `335c7eb`；execution-profile `945dd2b`；search provenance 待提交 |
+| G2 Configuration UX | 新 178A template 使用 versioned `execution_profile`；legacy input 有測試；resolved profile/provenance 可匯出 | 通過：`945dd2b` |
 | G3 Fixed golden | Akinwale `sicopr_reference_v1`, `target=full` production path 在目前 commit 通過既有 intermediate/final tolerances | 通過：pos=5、MSE=`0.0061912610245255335`、COM_DFE=`1.5247607834259893 dB`、COM_MLSD=`2.895898684873246 dB` |
 | G4 Local search | 縮小 candidate set 完成 prepare→partial→finalize→verify，final target 為 `full` | 通過：2 candidates、1 full final、53 PNG hashes；evidence `%TEMP%/serdes-v1-small-search/results` |
 | G5 GitHub full search | 完整 232,848 candidates 在目前 release candidate commit 成功，artifact verify 通過 | 舊 commit/D FE-only run 成功；不計入本 gate |

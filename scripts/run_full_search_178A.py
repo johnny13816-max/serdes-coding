@@ -5,7 +5,9 @@ from dataclasses import replace
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
+import subprocess
 from serdes_coding.io.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
 from serdes_coding.search.com_search_178A import (
     _read_csv, create_search_plan, finalize_search, merge_partial_results, run_partial_group,
@@ -22,14 +24,59 @@ def _load(case_root: Path):
     return excel_to_config_178A(str(path)), excel_to_search_config_178A(str(path))
 
 
+def _input_key(path: Path, *, root: Path, fallback: str) -> str:
+    """Return a stable artifact key without requiring the case to live in Git."""
+    resolved = path.resolve()
+    try:
+        return resolved.relative_to(root).as_posix()
+    except ValueError:
+        return fallback
+
+
 def _fingerprint(case_root: Path, cfg):
     root = Path(__file__).resolve().parents[1]
-    files = [case_root / "config.xlsx"]
-    for name in ("victim_s4p_path", "next_s4p_paths", "fext_s4p_paths"):
+    files = [("case/config.xlsx", case_root / "config.xlsx")]
+    for name, label in (
+        ("victim_s4p_path", "victim"),
+        ("next_s4p_paths", "next"),
+        ("fext_s4p_paths", "fext"),
+    ):
         value = getattr(cfg.channel, name, None)
         if value:
-            files.extend(Path(x) for x in ([value] if isinstance(value, str) else value))
-    return {str(p.resolve().relative_to(root)).replace("\\", "/"): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
+            paths = [value] if isinstance(value, str) else value
+            files.extend(
+                (f"channel/{label}/{index:03d}/{Path(item).name}", Path(item))
+                for index, item in enumerate(paths)
+            )
+    fingerprints = {}
+    for fallback, path in files:
+        key = _input_key(path, root=root, fallback=fallback)
+        if key in fingerprints:
+            raise ValueError(f"Duplicate search input fingerprint key: {key}")
+        fingerprints[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return fingerprints
+
+
+def _revision(root: Path) -> dict[str, object]:
+    """Capture the code revision used to create a distributed search plan."""
+    commit = os.environ.get("GITHUB_SHA")
+    if not commit:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        commit = result.stdout.strip()
+    dirty = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return {"commit": commit, "dirty": bool(dirty)}
 
 
 def _check_inputs(case_root, cfg, output):
@@ -54,7 +101,17 @@ def prepare(case_root, output, matrix_output):
         groups_per_worker = 1
     workers = [[int(g["group_id"]) for g in groups[i:i+groups_per_worker]]
                for i in range(0, len(groups), groups_per_worker)]
-    plan = {"candidates": count, "top_k": cfg.execution.search_top_k, "workers": workers, "inputs": _fingerprint(case_root, cfg)}
+    resolved_config = cfg.to_export_dict()
+    resolved_config_path = output / "resolved_config.json"
+    resolved_config_path.write_text(json.dumps(resolved_config, indent=2), encoding="utf-8")
+    plan = {
+        "candidates": count,
+        "top_k": cfg.execution.search_top_k,
+        "workers": workers,
+        "inputs": _fingerprint(case_root, cfg),
+        "resolved_config_sha256": hashlib.sha256(resolved_config_path.read_bytes()).hexdigest(),
+        "revision": _revision(Path(__file__).resolve().parents[1]),
+    }
     (output / "execution_plan.json").write_text(json.dumps(plan, indent=2), encoding="utf-8")
     matrix_output.parent.mkdir(parents=True, exist_ok=True)
     with matrix_output.open("a", encoding="utf-8") as f:
