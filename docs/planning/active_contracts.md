@@ -19,6 +19,7 @@ TC-006 原先在 `_build_path()` 對 67 GHz 後的 scalar H21 補零，已由核
 
 | ID／名稱 | 類別 | 主狀態 | 已確認 | 下一個關卡 |
 | --- | --- | --- | --- | --- |
+| [TC-024 — MLSD quantization PSD realization](tc024_mlsd_quantization_psd.md) | MLSD／core／reference policy | **closed**（2026-10-15 使用者驗收） | 正式 reference profile：pos=5、MSE=`0.0061912610245255335`、`COM_MLSD=2.895898684873246 dB`，對 SiCoPR gap=`-1.29e-14 dB`；133 passed／2 subtests passed | 無模型關卡；提交狀態由 repository workflow 管理 |
 | [TC-023 — 178A MLSD reference realization](tc023_mlsd_reference_realization.md) | MLSD／core／reference policy | 已核准、工作樹實作與回歸通過；待隔離提交 | Eq. 178A-49 `(-1)^(j+1)` 直接修正；Akinwale `COM_MLSD=2.8810510066627915 dB`，對 SiCoPR 差 `-0.0148476782 dB`，通過 0.05 dB reference gate | 若要壓到 0.01 dB，需取得 reference `p_an`／raw DER dump；不得用常數補償 |
 | [TC-022／TC-022A — MMSE noise-correlation record grid](tc022_mmse_noise_grid.md) | G-005／core／project policy | 已核准、工作樹實作與完整回歸通過；待隔離提交 | template 自動提供 optional policy 欄位；一般模式為 `analysis_grid`，reference preset 為 `fixed_ui/4096`；Akinwale total `R_n` 最大差 `3.71e-21 V²`、MSE 差 `8.63e-16`、`COM_DFE=1.5247607834259893 dB`；129 passed／2 subtests passed | 回到 MLSD stage 對齊；既有髒工作樹使專用 commit 待安全隔離 |
 | [TC-021 — Channel measured-frequency limit](tc021_channel_frequency_limit.md) | channel ingestion／core utility／config | 已核准、工作樹實作與完整回歸通過；待隔離提交 | Akinwale 六條 raw S4P 均為 100 GHz；runtime 全部限制為 67 GHz／6701 點；正式 reference profile selected pos=5、MSE `0.006191712423925738`、`COM_DFE=1.5247607834259893 dB`；128 passed／2 subtests passed | 原 residual 已由 TC-022 noise grid 收斂 |

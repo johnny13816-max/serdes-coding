@@ -39,6 +39,7 @@
 | `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support` | 是 |
 | `policy.gaussian_n_sigma_override` | `None` | `NormalDist().inv_cdf(1-DER_0)` | 是 |
 | `policy.added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` | 是 |
+| `policy.mlsd_quantization_psd` | `pre_dte_filtered` | `main_tap_white` | 是 |
 | `policy.sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` | 是 |
 | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` | 是 |
 | `execution.*.pre_dte_pmf_method` | profile 值 | `pmf_exact` | 是 |
@@ -76,6 +77,7 @@
 | B-018 | MLSD reported DER | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation`：以算得的 MLSD increment 回到 baseline DFE PDF 評估 reported DER | `calculate_COM_MLSD()` 只改報告值的形成；raw sequence DER 必須另行保存，不能覆寫。 |
 | B-019 | Missing DC handling | `channel.missing_dc_policy` | project workbook：`skrf`；dataclass constructor default：`error` | `hold` 或其他合法 reader policy | S-parameter ingestion/extrapolation 擁有 DC 缺口處理。`align_to_ref` 不控制；不得混入高頻 B-002。 |
 | B-020 | Utility time-domain cascade | `cascade_ir(..., force_grid=...)` | COM 正式路徑使用 `True`：回到原 cfg，檢查 discarded tail | `False`：保留完整 linear-convolution record/grid | 屬 `LinkSegment`／`SampledResponse` utility。COM 不得偷偷 regrid；固定 grid overflow 目前依既有契約處理。 |
+| B-021 | MLSD quantization PSD | `policy.mlsd_quantization_psd` | `pre_dte_filtered`：完整 pre-DTE `S_n` 經完整 `|H_rxffe|²` | `main_tap_white`：非量化噪聲經完整 `|H_rxffe|²`，`S_qn` 保持 white 並只乘 `|w[d_w]|²` | `build_mlsd_noise()` 擁有 Eq. 178A-54 組合邊界。不得改 MMSE 的 `S_qn/R_n`、RxFFE taps、`S_an`、`S_isi` 或 DER solver。MLSD status 必須保存實際使用的 `S_qn`。 |
 
 ## 執行與數值分支
 

@@ -222,6 +222,7 @@ def _resolve_project_profile_178A(
         final_adc_pmf_projection="reference_support",
         gaussian_n_sigma_override=NormalDist().inv_cdf(1.0 - der_0),
         added_noise_pdf="scaled_total_pdf",
+        mlsd_quantization_psd="main_tap_white",
         sequence_termination="matlab_relative_tail",
         reported_der="baseline_pdf_re_evaluation",
     )

@@ -927,6 +927,9 @@ class COMPolicyConfig:
     final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
     gaussian_n_sigma_override: Optional[float] = None
     added_noise_pdf: Literal["gaussian_addition", "scaled_total_pdf"] = "gaussian_addition"
+    mlsd_quantization_psd: Literal[
+        "pre_dte_filtered", "main_tap_white"
+    ] = "pre_dte_filtered"
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum"
     reported_der: Literal["raw_sequence_sum", "baseline_pdf_re_evaluation"] = "raw_sequence_sum"
     applied_config_profile: Optional[str] = None
@@ -950,6 +953,7 @@ class COMPolicyConfig:
             "final_pmf_grid": {"fine", "relative_As"},
             "final_adc_pmf_projection": {"annex_d3", "reference_support"},
             "added_noise_pdf": {"gaussian_addition", "scaled_total_pdf"},
+            "mlsd_quantization_psd": {"pre_dte_filtered", "main_tap_white"},
             "sequence_termination": {"fixed_length_sum", "matlab_relative_tail"},
             "reported_der": {"raw_sequence_sum", "baseline_pdf_re_evaluation"},
         }
@@ -1153,6 +1157,8 @@ class COMMLSDNoiseStatus(_PrettyDataclass):
     S_ni: SampledPSD
     sigma_ni: float
     R_ni: np.ndarray
+    S_qn: Optional[SampledPSD] = None
+    sigma_qn: Optional[float] = None
 
 
 @dataclass(repr=False)
@@ -1161,6 +1167,8 @@ class COMMLSDStatus(_PrettyDataclass):
     added_noise: COMAddedNoiseStatus
     S_isi: Optional[SampledPSD] = None
     sigma_isi: Optional[float] = None
+    S_qn: Optional[SampledPSD] = None
+    sigma_qn: Optional[float] = None
     S_ni: Optional[SampledPSD] = None
     sigma_ni: Optional[float] = None
     R_ni: Optional[np.ndarray] = None
@@ -4408,8 +4416,46 @@ class COM(com_93A.COM):
 
         # Eq. (178A-54): S_n is the complete pre-FFE Eq. (178A-15) PSD.
         # The run-level grid is shared, so no intermediate PSD regrid is needed.
-        # Eq. (178A-54), first term: S_n * |H_rxffe|^2.
-        S_n_filtered = S_n.filtered_by(H_rxffe)
+        # The Annex path filters every component, including S_qn, by the full
+        # RxFFE response.  The reference realization keeps S_qn white and
+        # applies only the RxFFE main-tap gain; all other components still use
+        # the complete response.
+        quantization_method = self.cfg.policy.mlsd_quantization_psd
+        source_qn = pre_dte.psd.S_qn
+        if quantization_method == "pre_dte_filtered":
+            S_n_filtered = S_n.filtered_by(H_rxffe)
+            S_qn = source_qn.filtered_by(H_rxffe) if source_qn is not None else None
+        elif quantization_method == "main_tap_white":
+            if source_qn is None:
+                raise ValueError("main_tap_white requires pre-DTE S_qn.")
+            if (
+                source_qn.theta.shape != H_rxffe.theta.shape
+                or not np.isclose(source_qn.fb, H_rxffe.fb)
+                or not np.allclose(source_qn.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
+            ):
+                raise ValueError("pre-DTE S_qn must share the H_rxffe theta grid and fb.")
+            d_w = int(self.cfg.dte.d_w)
+            if d_w < 0 or d_w >= len(H_rxffe.ir):
+                raise ValueError("main_tap_white requires d_w within H_rxffe.ir.")
+            main_gain = float(H_rxffe.ir[d_w])
+            if not np.isfinite(main_gain):
+                raise ValueError("main_tap_white requires a finite RxFFE main tap.")
+            non_qn = SampledPSD(
+                theta=S_n.theta,
+                psd=S_n.psd - source_qn.psd,
+                fb=S_n.fb,
+                cfg=S_n.cfg,
+            )
+            S_n_filtered = non_qn.filtered_by(H_rxffe)
+            S_qn = SampledPSD(
+                theta=source_qn.theta,
+                psd=source_qn.psd * main_gain**2,
+                fb=source_qn.fb,
+                cfg=source_qn.cfg,
+            )
+            S_n_filtered = S_n_filtered.add(S_qn)
+        else:
+            raise ValueError(f"Unsupported MLSD quantization PSD method: {quantization_method}.")
         # Eq. (178A-54) gives a two-sided ISI density. from_constant() folds
         # interior rFFT bins into SampledPSD's one-sided representation.
         S_isi = SampledPSD.from_constant(
@@ -4434,6 +4480,8 @@ class COM(com_93A.COM):
             S_ni=S_ni,
             sigma_ni=S_ni.to_sigma(),
             R_ni=R_ni,
+            S_qn=S_qn,
+            sigma_qn=S_qn.to_sigma() if S_qn is not None else None,
         )
 
     def calculate_COM_DFE(
@@ -4719,6 +4767,8 @@ class COM(com_93A.COM):
             added_noise=added_noise,
             S_isi=noise.S_isi,
             sigma_isi=noise.sigma_isi,
+            S_qn=noise.S_qn,
+            sigma_qn=noise.sigma_qn,
             S_ni=noise.S_ni,
             sigma_ni=noise.sigma_ni,
             R_ni=noise.R_ni,

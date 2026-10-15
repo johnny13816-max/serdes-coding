@@ -227,6 +227,7 @@ def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path)
     assert policy.uniform_pmf_method == "nearest_centers"
     assert policy.pmf_scaling_method == "interpolate_ordinates"
     assert policy.added_noise_pdf == "scaled_total_pdf"
+    assert policy.mlsd_quantization_psd == "main_tap_white"
     assert policy.sequence_termination == "matlab_relative_tail"
     assert policy.reported_der == "baseline_pdf_re_evaluation"
     assert policy.gaussian_n_sigma_override == pytest.approx(3.540083799206174)
@@ -266,6 +267,11 @@ def test_178a_align_to_ref_is_expanded_by_excel_adapter(reference_cfg, tmp_path)
     assert overrides["policy.gaussian_pmf_method"] == {
         "raw": "bin_integral",
         "effective": "reference_sample",
+        "overridden_by_profile": "sicopr_reference",
+    }
+    assert overrides["policy.mlsd_quantization_psd"] == {
+        "raw": "pre_dte_filtered",
+        "effective": "main_tap_white",
         "overridden_by_profile": "sicopr_reference",
     }
     assert overrides["execution.search_sweep.pmf_grid_quality"] == {

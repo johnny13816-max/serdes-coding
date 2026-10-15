@@ -222,6 +222,7 @@ The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 d
 | Method field | Annex/general | Reference profile |
 |---|---|---|
 | `added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` |
+| `mlsd_quantization_psd` | `pre_dte_filtered`：`S_qn` 隨完整 RxFFE filtering | `main_tap_white`：`S_qn` 保持 white，只乘 RxFFE main-tap gain squared |
 | `sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` |
 | `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
 
@@ -357,6 +358,7 @@ COMMLSDStatus
 │           ├── delta_com_an_temp
 │           └── residual_dB
 ├── S_isi / sigma_isi
+├── S_qn / sigma_qn              # 本次 MLSD 實際使用的 quantization PSD
 ├── S_ni / sigma_ni
 ├── R_ni
 ├── der_by_j
@@ -419,7 +421,9 @@ Required validation remains:
 7. multiple `trunc_len`, PAM order, and valid feedback-coefficient cases;
 8. explicit numerical tolerances and a fixed golden MLSD case.
 
-TC-023 已完成固定 Akinwale reference case；跨 PAM order／跨 case 驗證仍待擴充。
+TC-024 已完成固定 Akinwale reference case：`main_tap_white` 正式 run 的
+`COM_MLSD=2.895898684873246 dB`，對 SiCoPR 差 `-1.29e-14 dB`。跨 PAM
+order／跨 case 驗證仍待擴充。
 
 ## Known limitations and unresolved questions
 

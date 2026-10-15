@@ -65,6 +65,7 @@ COMConfig
 │   ├── final_adc_pmf_projection
 │   ├── gaussian_n_sigma_override
 │   ├── added_noise_pdf
+│   ├── mlsd_quantization_psd
 │   ├── sequence_termination
 │   ├── reported_der
 │   ├── applied_config_profile           provenance only
