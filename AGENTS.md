@@ -56,8 +56,12 @@ Reserve user attention for decisions that materially affect specification
 interpretation, mathematical-model boundaries, branch selection, public claims,
 or Core Model Change Contract approval.
 
-- Report in this order: conclusion, confirmed error or parallel method, key
-  numerical evidence, completed work, and next action.
+- For technical debugging, report in this order: conclusion and required
+  action; current project algorithm and exact code owner; specification or
+  reference algorithm; classification as confirmed error, parallel method,
+  comparison-condition difference, or unresolved observation; evidence and
+  baseline; implementation status; next gate. Do not bury the action beneath
+  diagnostic detail.
 - Do not repeat established background or narrate routine reads, commands, and
   passing checks. Give progress updates only at start, a material finding or
   blocker, and completion.
@@ -69,7 +73,42 @@ or Core Model Change Contract approval.
 - Keep the requested stage in scope. Finish and report it before expanding into
   another major investigation.
 
-### Stage Gate Before Search Or Advancing The Model Flow
+### Evidence Provenance And Gap State
+
+Every numerical comparison used to justify a technical decision must identify:
+
+```text
+Baseline:
+Evidence type: current-main / working-tree / counterfactual
+Revision or artifact: commit SHA, patch ID, or saved audit path
+Execution target: mse / dfe / mlsd / full, as applicable
+Comparison boundary: case, candidate, phase, grid, and active method profile
+Implementation status: absent / implemented / committed
+Result, tolerance, and pass/fail:
+```
+
+Do not use `fixed`, `complete`, `aligned`, `validated`, `closed`, or equivalent
+wording for a counterfactual result. A counterfactual may establish isolated
+causal evidence, but it does not establish implementation. If a reproducible
+counterfactual isolates a material cause, immediately register an open gap and
+its next action before advancing the model flow. Do not leave the only record in
+chat or an unsaved temporary script.
+
+Track each material gap through one explicit lifecycle:
+
+```text
+observed -> isolated -> classified -> contract-approved -> implemented
+         -> golden-verified -> regression-passed -> committed -> closed
+```
+
+Stages may skip steps that genuinely do not apply, but the status record must
+say why. Keep one current state, one evidence link, and one next gate in
+`docs/planning/active_contracts.md`; reconcile that record with the individual
+contract, authoritative stage/branch documents, and Git before any completion
+claim. New reproducible causal evidence reopens a closed stage. An unverified
+idea or speculative note does not.
+
+### Run Gate Before Search Or Advancing The Model Flow
 
 Before starting a search run or moving to the next COM stage, audit every open
 error, contract, and reference-method difference in the stages that feed the
@@ -85,9 +124,32 @@ requested execution target.
   report its exclusion and the reason before proceeding. For example, a search
   with `search_sweep.target="mse"` and `search_final.target="dfe"` does not
   execute or depend on the MLSD stage.
-- Do not reopen a completed stage from a speculative note. Distinguish a
-  verified implementation gap from an unverified research candidate, and state
-  the evidence needed to promote a candidate into a project task.
+- Passing the Run Gate authorizes only the named execution scope. It does not
+  authorize a broader claim that later or excluded stages are aligned.
+
+### Claim Gate For Completion, Alignment, And Milestones
+
+Before describing work as complete, aligned, validated, closed, or a milestone,
+verify all of the following for the exact claimed scope:
+
+- the selected method exists in the formal runtime configuration and production
+  call path;
+- the fixed golden result came from that production path, not from a
+  counterfactual substitution;
+- focused tests and applicable regression tests passed;
+- the authoritative stage document and branch registry match the code;
+- a dedicated commit SHA exists for each protected model behavior change;
+- every acceptance tolerance named by the claim passed; and
+- every remaining gap is outside the claim scope and has an explicit status,
+  owner, reason, and closure condition.
+
+If any item is false, use the precise partial state, such as `counterfactual
+matched`, `implemented, awaiting golden validation`, or `COM_DFE aligned`; do
+not promote it to a wider completion claim. Milestone and tag names must state
+the validated version, case, and terminal stage when they do not cover the full
+flow. A release tolerance, calibration target, and causal-isolation tolerance
+are different criteria and must be named separately rather than collapsed into
+one pass/fail statement.
 
 
 ## Mandatory project structure and execution location
