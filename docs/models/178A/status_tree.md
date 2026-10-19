@@ -7,14 +7,14 @@
 The maintained sources are:
 
 - `src/serdes_coding/models/com_model_178A.py` for 178A status types and incremental assignment;
-- `src/serdes_coding/models/com_model_93A.py` for shared path and PMF status types inherited by 178A;
+- `src/serdes_coding/models/com_model_93A.py` for the temporarily shared `COMPath`, `COMPMFStatus`, and text-formatting base;
 - `src/serdes_coding/reporting/com_report_178A.py` for reporting consumers;
 - `src/serdes_coding/search/com_search_178A.py` for search consumers.
 
 ## Root tree
 
 ```text
-COMStatus                              extends the shared 93A COMStatus
+COMStatus                              standalone 178A root status
 ├── paths: list[COMPath]
 │   ├── victim path
 │   └── zero or more NEXT/FEXT paths
@@ -30,12 +30,13 @@ COMStatus                              extends the shared 93A COMStatus
 │   ├── eq_ch: COMEqChannelStatus | None
 │   └── H_rxffe: SampledResponse | None
 ├── pmf: COMPMFStatus | None
-├── mlsd: COMMLSDStatus | None
-├── dfe: COMDFEStatus | None            inherited 93A field; unused by 178A
-└── FOM: float | None                   inherited 93A field; unused by 178A
+└── mlsd: COMMLSDStatus | None
 ```
 
-The 178A selected equalizer result is `status.dte`. The inherited `status.dfe` field is not the 178A DTE result. The 178A search metric is `status.dte.mse`; inherited `status.FOM` remains `None`.
+The 178A selected equalizer result is `status.dte`, and the 178A search metric is
+`status.dte.mse`. The root status deliberately has no 93A `dfe` or `FOM` field.
+`COMStatus` does not inherit the 93A root status; shared leaf types remain explicit
+temporary dependencies until their neutral-owner migration is reviewed.
 
 `status.final_COM` returns `status.mlsd.COM_MLSD` when present, otherwise `status.pmf.COM` when the DFE PMF stage has completed.
 
@@ -59,7 +60,7 @@ A failure does not roll the root status back. Fields assigned by completed stage
 |---|---|
 | `_assign_paths(paths)` | replaces `status.paths` |
 | `_assign_run(run_status)` | replaces `status.run` |
-| `_assign_dfe(dte_status)` | assigns the selected result to `status.dte`; the helper name is legacy |
+| `_assign_dte(dte_status)` | assigns the selected result to `status.dte` |
 | `_merge_imp(imp_status)` | field-wise merge of `pre_dte`, `post_ffe`, `eq_ch`, and `H_rxffe`; non-`None` incoming fields replace the same field |
 | `_assign_pmf(pmf_status)` | replaces `status.pmf` |
 | `_assign_mlsd(mlsd_status)` | replaces `status.mlsd` |

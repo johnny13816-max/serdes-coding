@@ -3,8 +3,8 @@ IEEE 802.3 Annex 178A COM model.
 
 Public names in this module do not need a version suffix because the module
 namespace already defines the spec version. This module owns the 178A-specific
-configuration, status objects, PSD/DTE helpers, and COM pipeline. It imports
-only stable v1 primitives from ``com_model_93A.py``.
+configuration, root status, PSD/DTE helpers, and COM pipeline. Temporary shared
+leaf primitives imported from ``com_model_93A.py`` are enumerated below.
 """
 
 from __future__ import annotations
@@ -36,8 +36,9 @@ except ImportError:
     from serdes_coding.search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
     from serdes_coding.models import com_model_93A as com_93A
 
-# 178A reuses only these stable v1 data-flow/reporting primitives. Versioned
-# config, impairment status, PSD, DTE, and COM pipeline definitions live here.
+# 178A temporarily reuses these leaf data-flow and formatting primitives.
+# Versioned config, impairment status, PSD, DTE, root status, and COM pipeline
+# definitions live here; shared-leaf ownership is reviewed independently.
 _PrettyDataclass = com_93A._PrettyDataclass
 COMChannelConfig = com_93A.COMChannelConfig
 COMPMFConfig = com_93A.COMPMFConfig
@@ -1443,12 +1444,22 @@ class COMRunStatus(_PrettyDataclass):
 
 
 @dataclass(repr=False)
-class COMStatus(com_93A.COMStatus):
-    """178A COM status with selected stage outputs and runtime sweep records."""
+class COMStatus(_PrettyDataclass):
+    """Standalone 178A COM status in stage-execution order."""
+    paths: list[COMPath] = field(default_factory=list)
+    run: Optional[COMRunStatus] = None
     dte: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
-    run: Optional[COMRunStatus] = None
+    pmf: Optional[COMPMFStatus] = None
     mlsd: Optional[COMMLSDStatus] = None
+
+    @property
+    def victim(self) -> COMPath:
+        return self.paths[0]
+
+    @property
+    def xtalks(self) -> list[COMPath]:
+        return self.paths[1:]
 
     @property
     def final_COM(self) -> Optional[float]:
@@ -3545,7 +3556,7 @@ def calculate_der_mlsd(
     return DER_MLSD, der_by_j
 
 
-class COM(com_93A.COM):
+class COM:
     """
     IEEE 802.3 Annex 178A COM calculator.
 
@@ -3560,10 +3571,9 @@ class COM(com_93A.COM):
     - calculate_MMSE_DTE()
     - calculate_COM()
 
-    This class intentionally reuses com_93A.COM's shared proxy/report/search shell
-    where possible, but all spec-defined calculation steps are routed to 178A
-    method names. Path building, impairment, and MMSE-DTE are explicit 178A
-    stages; outer TXFFE/CTLE search ranks candidates by minimum DTE MSE.
+    Path building, impairment, MMSE-DTE, status ownership, and orchestration are
+    explicit 178A responsibilities. Outer TXFFE/CTLE search remains a separate
+    file-backed workflow and ranks candidates by minimum DTE MSE.
     """
 
     def __init__(self, cfg: COMConfig):
@@ -3574,6 +3584,18 @@ class COM(com_93A.COM):
     def _effective_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
         """Return the run profile already resolved by the input adapter."""
         return self.cfg.resolve_run_cfg(run_cfg)
+
+    @staticmethod
+    def _validate_victim_time_alignment(victim: COMPath) -> None:
+        """Guard the victim H21 and pulse against IFFT precursor wrap."""
+        victim.H_21.validate_causal_ir(
+            victim.H_21.ir,
+            source_name="victim H_21 causal_ir",
+        )
+        victim.pulse.validate_causal_ir(
+            victim.pulse.ir,
+            source_name="victim pulse causal_ir",
+        )
 
     def run(
         self,
@@ -3716,7 +3738,7 @@ class COM(com_93A.COM):
         if best_dte is None or best_imp_pre is None:
             raise RuntimeError("COM did not produce any valid sampling phase candidate.")
 
-        self._assign_dfe(best_dte)
+        self._assign_dte(best_dte)
         self._merge_imp(best_imp_pre)
         report(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
 
@@ -3756,7 +3778,7 @@ class COM(com_93A.COM):
             self.status = COMStatus()
         self.status.paths = paths
 
-    def _assign_dfe(self, dte_status: COMDTEStatus) -> None:
+    def _assign_dte(self, dte_status: COMDTEStatus) -> None:
         """Assign selected DTE stage output into the incremental run status."""
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
@@ -3833,6 +3855,36 @@ class COM(com_93A.COM):
         if dte is None:
             raise RuntimeError("COM.dte_status is not available. Run COM.run() first.")
         return self.h[dte.pos::self.per_ui]
+
+    @property
+    def t_dsamp_ui(self) -> np.ndarray:
+        """Discrete UI axis for h_dsamp with the selected main cursor at zero."""
+        dte = self.dte_status
+        if dte is None:
+            raise RuntimeError("COM.dte_status is not available. Run COM.run() first.")
+        num_pre = (dte.ts - dte.pos) // self.per_ui
+        return np.arange(len(self.h_dsamp), dtype=float) - float(num_pre)
+
+    @property
+    def h_XT(self) -> list[np.ndarray]:
+        """Crosstalk pulse responses h^(k)(t), k > 0."""
+        return [path.pulse.ir for path in self.xtalks]
+
+    @property
+    def dte_status(self) -> Optional[COMDTEStatus]:
+        return self._require_status().dte
+
+    @property
+    def imp_status(self) -> Optional[COMImpairmentStatus]:
+        return self._require_status().imp
+
+    @property
+    def pmf_status(self) -> Optional[COMPMFStatus]:
+        return self._require_status().pmf
+
+    @property
+    def mlsd_status(self) -> Optional[COMMLSDStatus]:
+        return self._require_status().mlsd
 
     def build_all_paths(self) -> list[COMPath]:
         """

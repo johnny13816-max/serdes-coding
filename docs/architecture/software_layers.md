@@ -65,6 +65,13 @@ There are no current root-level `link_segment.py` or `pmf_handler.py` compatibil
 - `utilities/link.py` imports PSD containers; `utilities/psd.py` accepts link-compatible objects structurally and does not import the link module at runtime.
 - `utilities/sparam.py` depends on link-domain types for conversion into scalar link responses.
 - Search and reporting may depend on versioned model types. Model modules must not depend on search workflow or interface code.
+- The 93A and 178A root `COM` orchestrators and root `COMStatus` containers are
+  version-owned standalone types. One version must not acquire another
+  version's stage methods, status fields, search helpers, or reporter through
+  class inheritance.
+- `COMPath`, `COMPMFStatus`, and the current text-formatting base remain
+  temporary shared leaves owned by the 93A module. Their ownership is a known
+  migration item, not permission to restore root-class inheritance.
 - `io/com_excel_common.py` currently imports the shared `COMChannelConfig` type from the 93A model. This is an existing coupling, not a rule to extend. A future dataclass split may remove it after an explicit migration contract.
 - The large versioned model modules currently own their config and status dataclasses. Moving those dataclasses into separate modules is future restructuring and must preserve public import identity and workbook mapping.
 

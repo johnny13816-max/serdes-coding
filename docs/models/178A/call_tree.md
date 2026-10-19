@@ -14,6 +14,11 @@ The maintained sources are:
 
 Configuration ownership is defined in [Configuration tree](config_tree.md). Produced objects and legal partial states are defined in [Status tree](status_tree.md).
 
+The 178A `COM` orchestrator is standalone and does not inherit the 93A `COM`
+class. It owns the 178A stage order, root status lifecycle, victim-alignment
+guard, and status accessors. File-backed search and reporting remain downstream
+consumers rather than inherited model methods.
+
 ## Public execution choices
 
 ```text
