@@ -40,6 +40,7 @@ Layer 6  Numerical foundation
 | `serdes_coding/__init__.py` | Public package exports; 93A base symbols are imported directly and optional 178A/report/search adapters are loaded lazily. |
 | `models/com_model_93A.py` | 93A dataclasses, orchestration, stages, model-specific helpers, and the 93A manual entry. |
 | `models/com_model_178A.py` | 178A dataclasses, orchestration, stages, model-specific helpers, and the 178A manual entry. |
+| `models/com_dataclass_text.py` | Version-neutral text-formatting mechanics; each model dataclass retains ownership of semantic fields, units, and display order. |
 | `io/com_excel_common.py` | Shared workbook table parsing and channel-row handling. |
 | `io/com_excel_io_93A.py` | Project and legacy Ad Hoc workbook mapping into 93A typed configuration. |
 | `io/com_excel_io_178A.py` | Project workbook and run-profile mapping into 178A typed configuration. |
@@ -69,9 +70,10 @@ There are no current root-level `link_segment.py` or `pmf_handler.py` compatibil
   version-owned standalone types. One version must not acquire another
   version's stage methods, status fields, search helpers, or reporter through
   class inheritance.
-- `COMPath`, `COMPMFStatus`, and the current text-formatting base remain
-  temporary shared leaves owned by the 93A module. Their ownership is a known
-  migration item, not permission to restore root-class inheritance.
+- `COMPath` and `COMPMFStatus` remain temporary shared leaves owned by the 93A
+  module. 178A-owned dataclasses use the neutral text mechanics in
+  `models/com_dataclass_text.py`; their semantic presentation stays in the
+  owning 178A class. 93A text migration remains a separate review item.
 - `io/com_excel_common.py` currently imports the shared `COMChannelConfig` type from the 93A model. This is an existing coupling, not a rule to extend. A future dataclass split may remove it after an explicit migration contract.
 - The large versioned model modules currently own their config and status dataclasses. Moving those dataclasses into separate modules is future restructuring and must preserve public import identity and workbook mapping.
 

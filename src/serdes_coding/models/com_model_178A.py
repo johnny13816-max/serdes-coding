@@ -23,6 +23,7 @@ try:
     from ..utilities.sparam import SparamModel
     from ..utilities.pmf import Pmf1D
     from ..search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
+    from .com_dataclass_text import COMDataclassText, TextField, TextSection
     from . import com_model_93A as com_93A
 except ImportError:
     # Support direct interactive execution of this canonical module.
@@ -34,12 +35,12 @@ except ImportError:
     from serdes_coding.utilities.sparam import SparamModel
     from serdes_coding.utilities.pmf import Pmf1D
     from serdes_coding.search.com_search_178A import COMSearchRow, COMSearchStatus, run_full_search
+    from serdes_coding.models.com_dataclass_text import COMDataclassText, TextField, TextSection
     from serdes_coding.models import com_model_93A as com_93A
 
-# 178A temporarily reuses these leaf data-flow and formatting primitives.
-# Versioned config, impairment status, PSD, DTE, root status, and COM pipeline
+# 178A temporarily reuses these leaf data-flow primitives. Versioned config,
+# text presentation, impairment status, PSD, DTE, root status, and COM pipeline
 # definitions live here; shared-leaf ownership is reviewed independently.
-_PrettyDataclass = com_93A._PrettyDataclass
 COMChannelConfig = com_93A.COMChannelConfig
 COMPMFConfig = com_93A.COMPMFConfig
 COMPMFRuntimeConfig = com_93A.COMPMFRuntimeConfig
@@ -276,7 +277,7 @@ class IEEECOMSparam(com_93A.IEEECOMSparam):
         return (S_0.cascade_com_93A(S_h)).cascade_com_93A(S_1)
 
 @dataclass(frozen=True, repr=False)
-class COMBilinearCTLE(_PrettyDataclass):
+class COMBilinearCTLE(COMDataclassText):
     """Two-section digital CTLE used by the 178A reference pulse branch."""
 
     b1: np.ndarray
@@ -284,6 +285,20 @@ class COMBilinearCTLE(_PrettyDataclass):
     b2: np.ndarray
     a2: np.ndarray
     Fs: float
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Digital realization", (
+                self._field("Fs", "sample rate", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("b1", "section 1 numerator", stored_unit="dimensionless"),
+                self._field("a1", "section 1 denominator", stored_unit="dimensionless"),
+                self._field("b2", "section 2 numerator", stored_unit="dimensionless"),
+                self._field("a2", "section 2 denominator", stored_unit="dimensionless"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("Fs", "sample rate", stored_unit="Hz", display_unit="GHz", scale=1e-9),)
 
     def __post_init__(self) -> None:
         for name in ("b1", "a1", "b2", "a2"):
@@ -482,20 +497,54 @@ class IEEECOMFilter(com_93A.IEEECOMFilter):
 
 
 @dataclass(repr=False)
-class COMSharedPath(com_93A.COMSharedPath):
+class COMSharedPath(COMDataclassText, com_93A.COMSharedPath):
     """178A shared path with an optional digital CTLE pulse model."""
 
     ctle_iir: Optional[COMBilinearCTLE] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Shared filters", (
+                self._field("H_ffe", "TX FFE response", stored_unit="dimensionless", summary="shape"),
+                self._field("H_ffe_next", "NEXT TX FFE response", stored_unit="dimensionless", summary="shape"),
+                self._field("H_t", "transition-time response", stored_unit="dimensionless", summary="shape"),
+                self._field("S_rx", "RX package network", stored_unit="S-parameter", summary="shape"),
+                self._field("H_r", "receiver noise filter", stored_unit="dimensionless", summary="shape"),
+                self._field("H_ctf", "CTLE response", stored_unit="dimensionless", summary="shape"),
+                self._field("ctle_iir", "bilinear CTLE realization", stored_unit="status"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("H_ffe", "TX FFE response", stored_unit="dimensionless", summary="shape"),
+            self._field("ctle_iir", "bilinear CTLE realization", stored_unit="status"),
+        )
 
 # =========================================
 # 178A configs, integrated to COMConfig
 # =========================================
 
 @dataclass(repr=False)
-class COMDeviceTermConfig(_PrettyDataclass):
+class COMDeviceTermConfig(COMDataclassText):
     C_d_seq: Sequence[float] | np.ndarray = ()     # unit: F, device termination shunt-capacitance vector
     L_s_seq: Sequence[float] | np.ndarray = ()     # unit: H, device termination series-inductance vector
     C_b: float = 0.0                               # unit: F, bump/interface capacitance
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Device termination", (
+                self._field("C_d_seq", "device shunt capacitances", stored_unit="F", display_unit="fF", scale=1e15),
+                self._field("L_s_seq", "device series inductances", stored_unit="H", display_unit="pH", scale=1e12),
+                self._field("C_b", "bump capacitance", stored_unit="F", display_unit="fF", scale=1e15),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("C_d_seq", "device shunt capacitances", stored_unit="F", display_unit="fF", scale=1e15, summary="shape"),
+            self._field("C_b", "bump capacitance", stored_unit="F", display_unit="fF", scale=1e15),
+        )
 
     def __post_init__(self) -> None:
         self.C_d_seq = np.asarray(self.C_d_seq, dtype=float)
@@ -520,7 +569,7 @@ class COMDeviceTermConfig(_PrettyDataclass):
             raise ValueError("C_b must be finite and non-negative.")
 
 @dataclass(repr=False)
-class COMDevicePackageConfig(_PrettyDataclass):
+class COMDevicePackageConfig(COMDataclassText):
     z_p_seq: Sequence[float] | np.ndarray = ()      # unit: mm, package TL stage lengths
     Z_c_seq: Sequence[float] | np.ndarray = ()      # unit: ohm, package TL stage differential impedances
     gamma_0: Sequence[float] | float = 0.0          # unit: 1/mm, package propagation coefficient term
@@ -528,6 +577,25 @@ class COMDevicePackageConfig(_PrettyDataclass):
     a2: Sequence[float] | float = float(1.455e-4)   # unit: 93A package TL model coefficient
     tau: Sequence[float] | float = float(6.141e-3)  # unit: ns/mm, package TL delay coefficient
     C_p: float = 0.0                                # unit: F, package-to-board capacitance
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Device package", (
+                self._field("z_p_seq", "transmission-line lengths", stored_unit="mm"),
+                self._field("Z_c_seq", "differential impedances", stored_unit="ohm"),
+                self._field("gamma_0", "propagation gamma coefficients", stored_unit="1/mm"),
+                self._field("a1", "loss coefficient a1", stored_unit="model coefficient"),
+                self._field("a2", "loss coefficient a2", stored_unit="model coefficient"),
+                self._field("tau", "delay coefficient", stored_unit="ns/mm"),
+                self._field("C_p", "package-to-board capacitance", stored_unit="F", display_unit="fF", scale=1e15),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("z_p_seq", "transmission-line lengths", stored_unit="mm", summary="shape"),
+            self._field("Z_c_seq", "differential impedances", stored_unit="ohm", summary="shape"),
+        )
 
     def __post_init__(self) -> None:
         self.z_p_seq = np.asarray(self.z_p_seq, dtype=float)
@@ -569,7 +637,7 @@ class COMDevicePackageConfig(_PrettyDataclass):
         self.tau = _stage_values(self.tau, "tau")
 
 @dataclass(repr=False)
-class COMPartialHostConfig(_PrettyDataclass):
+class COMPartialHostConfig(COMDataclassText):
     enable: bool = False                         # unit: boolean, include partial host channel
     C_0: float = 0.0                             # unit: F, package-to-board interface capacitance
     C_1: float = 0.0                             # unit: F, model-to-measurement interface capacitance
@@ -579,6 +647,27 @@ class COMPartialHostConfig(_PrettyDataclass):
     a1: float = float(1.734e-3)                  # unit: host transmission-line loss coefficient
     a2: float = float(1.455e-4)                  # unit: host transmission-line loss coefficient
     tau: float = float(6.141e-3)                 # unit: ns/mm, host transmission-line delay coefficient
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Partial host", (
+                self._field("enable", "enabled", stored_unit="status"),
+                self._field("C_0", "package-side capacitance", stored_unit="F", display_unit="fF", scale=1e15),
+                self._field("C_1", "measurement-side capacitance", stored_unit="F", display_unit="fF", scale=1e15),
+                self._field("z_h", "host length", stored_unit="mm"),
+                self._field("Z_h", "differential impedance", stored_unit="ohm"),
+                self._field("gamma_0", "propagation gamma coefficient", stored_unit="1/mm"),
+                self._field("a1", "loss coefficient a1", stored_unit="model coefficient"),
+                self._field("a2", "loss coefficient a2", stored_unit="model coefficient"),
+                self._field("tau", "delay coefficient", stored_unit="ns/mm"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("enable", "enabled", stored_unit="status"),
+            self._field("z_h", "host length", stored_unit="mm"),
+        )
 
     def __post_init__(self) -> None:
         self.enable = bool(self.enable)
@@ -597,7 +686,7 @@ class COMPartialHostConfig(_PrettyDataclass):
             raise ValueError("Z_h must be positive.")
 
 @dataclass(repr=False)
-class COMPkgConfig(_PrettyDataclass):
+class COMPkgConfig(COMDataclassText):
     """
     178A package configuration using internal formula units.
 
@@ -614,6 +703,21 @@ class COMPkgConfig(_PrettyDataclass):
     partial_host: COMPartialHostConfig
     R0: float = 50.0                               # unit: ohm, single-ended reference resistance
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Reference", (
+                self._field("R0", "single-ended reference resistance", stored_unit="ohm"),
+            )),
+            TextSection("Package blocks", (
+                self._field("device_term", "device termination", stored_unit="configuration"),
+                self._field("device_pkg", "device package", stored_unit="configuration"),
+                self._field("partial_host", "partial host", stored_unit="configuration"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("R0", "single-ended reference resistance", stored_unit="ohm"),)
+
     def __post_init__(self) -> None:
         if not isinstance(self.device_term, COMDeviceTermConfig):
             raise TypeError("device_term must be a COMDeviceTermConfig.")
@@ -626,7 +730,7 @@ class COMPkgConfig(_PrettyDataclass):
             raise ValueError("R0 must be finite and positive.")
 
 @dataclass(repr=False)
-class COMFilterConfig(_PrettyDataclass):
+class COMFilterConfig(COMDataclassText):
     """
     178A filter configuration using internal formula units.
 
@@ -657,6 +761,43 @@ class COMFilterConfig(_PrettyDataclass):
     c_0: float = field(init=False)   # unit: dimensionless, TX FFE main cursor tap
     txfir: np.ndarray = field(init=False) # unit: dimensionless tap vector [c(-3), c(-2), c(-1), c(0), c(1)]
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("TX FFE", (
+                self._field("c_m3", "tap c(-3)", stored_unit="dimensionless"),
+                self._field("c_m2", "tap c(-2)", stored_unit="dimensionless"),
+                self._field("c_m1", "tap c(-1)", stored_unit="dimensionless"),
+                self._field("c_1", "tap c(1)", stored_unit="dimensionless"),
+                self._field("c_0", "derived main tap c(0)", stored_unit="dimensionless"),
+                self._field("c_0_min", "minimum main tap", stored_unit="dimensionless"),
+                self._field("num_pre", "main cursor location", stored_unit="tap index"),
+                self._field("txfir", "TX FFE tap vector", stored_unit="dimensionless"),
+            )),
+            TextSection("Analog filters", (
+                self._field("Tr", "20%-80% transition time", stored_unit="s", display_unit="ps", scale=1e12),
+                self._field("fr", "receiver noise-filter bandwidth", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("g_1", "CTLE gain g1", stored_unit="dB"),
+                self._field("g_2", "CTLE gain g2", stored_unit="dB"),
+                self._field("f_z1", "CTLE zero 1", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("f_z2", "CTLE zero 2", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("f_p1", "CTLE pole 1", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("f_p2", "CTLE pole 2", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+                self._field("f_p3", "CTLE pole 3", stored_unit="Hz", display_unit="GHz", scale=1e-9),
+            )),
+            TextSection("Path amplitudes", (
+                self._field("A_v", "victim pulse amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("A_fe", "FEXT pulse amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("A_ne", "NEXT pulse amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("txfir", "TX FFE tap vector", stored_unit="dimensionless", summary="shape"),
+            self._field("g_1", "CTLE gain g1", stored_unit="dB"),
+            self._field("g_2", "CTLE gain g2", stored_unit="dB"),
+        )
+
     def __post_init__(self):
         self.c_0 = 1.0 - abs(self.c_m3) - abs(self.c_m2) - abs(self.c_m1) - abs(self.c_1)
         self.txfir = np.r_[self.c_m3, self.c_m2, self.c_m1, self.c_0, self.c_1]
@@ -677,7 +818,7 @@ class COMFilterConfig(_PrettyDataclass):
             )
 
 @dataclass(repr=False)
-class COMDTEConfig(_PrettyDataclass):
+class COMDTEConfig(COMDataclassText):
     """
     178A receiver discrete-time equalizer configuration.
 
@@ -704,6 +845,40 @@ class COMDTEConfig(_PrettyDataclass):
     # derived coefficient-limit arrays used by COM_MMSE_DTE
     w_upper: np.ndarray = field(init=False)
     w_lower: np.ndarray = field(init=False)
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Tap layout", (
+                self._field("d_w", "precursor FFE taps", stored_unit="tap count"),
+                self._field("N_fix", "fixed FFE taps", stored_unit="tap count"),
+                self._field("N_wg", "floating FFE groups", stored_unit="group count"),
+                self._field("N_wf", "taps per floating group", stored_unit="tap/group"),
+                self._field("N_max", "FFE vector length", stored_unit="tap count"),
+                self._field("N_b", "DFE taps", stored_unit="tap count"),
+            )),
+            TextSection("FFE limits", (
+                self._field("w_pre1_max", "first precursor upper limit", stored_unit="dimensionless"),
+                self._field("w_post1_max", "first postcursor upper limit", stored_unit="dimensionless"),
+                self._field("w_fixed_rest_max", "remaining fixed-tap upper limit", stored_unit="dimensionless"),
+                self._field("w_float_max", "floating-tap upper limit", stored_unit="dimensionless"),
+                self._field("w_float_min", "floating-tap lower limit", stored_unit="dimensionless"),
+                self._field("w_upper", "derived upper-limit vector", stored_unit="dimensionless"),
+                self._field("w_lower", "derived lower-limit vector", stored_unit="dimensionless"),
+            )),
+            TextSection("DFE limits", (
+                self._field("b_first_max", "first tap upper limit", stored_unit="dimensionless"),
+                self._field("b_first_min", "first tap lower limit", stored_unit="dimensionless"),
+                self._field("b_rest_max", "remaining tap upper limit", stored_unit="dimensionless"),
+                self._field("b_rest_min", "remaining tap lower limit", stored_unit="dimensionless"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("d_w", "precursor FFE taps", stored_unit="tap count"),
+            self._field("N_max", "FFE vector length", stored_unit="tap count"),
+            self._field("N_b", "DFE taps", stored_unit="tap count"),
+        )
 
     def __post_init__(self) -> None:
         for name in ("d_w", "N_fix", "N_wg", "N_wf", "N_b"):
@@ -766,7 +941,7 @@ class COMDTEConfig(_PrettyDataclass):
 
 
 @dataclass(repr=False)
-class COMRunConfig(_PrettyDataclass):
+class COMRunConfig(COMDataclassText):
     """Algorithm policy and stage target for one 178A execution profile."""
     target: Literal["mse", "dfe", "mlsd", "full"] = "dfe"
     pre_dte_pmf_method: Literal["gaussian_approx", "pmf_exact"] = "gaussian_approx"
@@ -776,6 +951,28 @@ class COMRunConfig(_PrettyDataclass):
     floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pos_sweep_method: Literal["each_phase", "coarse_fine"] = "each_phase"
     pos_coarse_stride: int = 4
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Execution target", (
+                self._field("target", "terminal calculation target", stored_unit="policy"),
+                self._field("pre_dte_pmf_method", "pre-DTE PMF method", stored_unit="policy"),
+                self._field("floating_mode", "floating-tap mode", stored_unit="policy"),
+                self._field("pos_sweep_method", "sampling-position sweep", stored_unit="policy"),
+                self._field("pos_coarse_stride", "coarse sampling stride", stored_unit="sample count"),
+            )),
+            TextSection("PMF precision", (
+                self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
+                self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
+                self._field("pmf_dy_override", "PMF voltage-grid spacing override", stored_unit="V", display_unit="mV", scale=1e3),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("target", "terminal calculation target", stored_unit="policy"),
+            self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
+        )
 
     def __post_init__(self) -> None:
         if self.target not in {"mse", "dfe", "mlsd", "full"}:
@@ -808,7 +1005,7 @@ class COMRunConfig(_PrettyDataclass):
 
 
 @dataclass(repr=False)
-class COMExecutionConfig(_PrettyDataclass):
+class COMExecutionConfig(COMDataclassText):
     """Project-owned profiles for single run and split 178A search execution."""
     single_run: COMRunConfig = field(default_factory=COMRunConfig)
     search_sweep: COMRunConfig = field(
@@ -817,6 +1014,25 @@ class COMExecutionConfig(_PrettyDataclass):
     search_final: COMRunConfig = field(default_factory=COMRunConfig)
     search_group_size: int = 100
     search_top_k: int = 10
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Run profiles", (
+                self._field("single_run", "single-run profile", stored_unit="configuration"),
+                self._field("search_sweep", "search-sweep profile", stored_unit="configuration"),
+                self._field("search_final", "search-final profile", stored_unit="configuration"),
+            )),
+            TextSection("Search orchestration", (
+                self._field("search_group_size", "candidate group size", stored_unit="candidate count"),
+                self._field("search_top_k", "finalized candidates", stored_unit="candidate count"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("search_group_size", "candidate group size", stored_unit="candidate count"),
+            self._field("search_top_k", "finalized candidates", stored_unit="candidate count"),
+        )
 
     def __post_init__(self) -> None:
         if self.search_sweep.target != "mse":
@@ -833,7 +1049,7 @@ class COMExecutionConfig(_PrettyDataclass):
 
 
 @dataclass(repr=False)
-class COMImpairmentConfig(_PrettyDataclass):
+class COMImpairmentConfig(COMDataclassText):
     """178A physical impairment parameters, excluding numerical run policy."""
     R_LM: float                     # unit: dimensionless, level separation mismatch ratio
     SNR_TX: float                   # unit: dB, transmitter signal-to-noise ratio
@@ -842,6 +1058,29 @@ class COMImpairmentConfig(_PrettyDataclass):
     eta_0: float                    # unit: V^2/Hz, one-sided noise spectral density
     N_qb: Optional[int] = None      # unit: bits, None disables quantization noise
     P_qc: Optional[float] = None    # unit: probability, None disables quantization noise
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Transmitter and receiver noise", (
+                self._field("R_LM", "level mismatch ratio", stored_unit="dimensionless"),
+                self._field("SNR_TX", "transmitter SNR", stored_unit="dB"),
+                self._field("eta_0", "receiver noise density", stored_unit="V^2/Hz"),
+            )),
+            TextSection("Jitter", (
+                self._field("sigma_RJ", "random jitter sigma", stored_unit="UI"),
+                self._field("A_DD", "deterministic jitter amplitude", stored_unit="UI"),
+            )),
+            TextSection("ADC", (
+                self._field("N_qb", "ADC resolution", stored_unit="bit count"),
+                self._field("P_qc", "clipping-tail probability", stored_unit="dimensionless probability"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("SNR_TX", "transmitter SNR", stored_unit="dB"),
+            self._field("N_qb", "ADC resolution", stored_unit="bit count"),
+        )
 
     def __post_init__(self) -> None:
         for name in ("R_LM", "SNR_TX", "sigma_RJ", "A_DD", "eta_0"):
@@ -863,12 +1102,28 @@ class COMImpairmentConfig(_PrettyDataclass):
                 raise ValueError("COMImpairmentConfig.P_qc must be in (0, 1) when provided.")
 
 @dataclass(repr=False)
-class COMMLSDConfig(_PrettyDataclass):
+class COMMLSDConfig(COMDataclassText):
     """Configuration required to enable the Annex 178A MLSD receiver."""
     enable: bool = False
     trunc_len: int = 0
     delta_com_an: Optional[float] = None
     minimum_com_limit: Optional[float] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("MLSD control", (
+                self._field("enable", "enabled", stored_unit="status"),
+                self._field("trunc_len", "sequence truncation length", stored_unit="symbol count"),
+                self._field("delta_com_an", "added-noise calibration target", stored_unit="dB"),
+                self._field("minimum_com_limit", "minimum reported COM", stored_unit="dB"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("enable", "enabled", stored_unit="status"),
+            self._field("trunc_len", "sequence truncation length", stored_unit="symbol count"),
+        )
 
     def __post_init__(self) -> None:
         self.enable = bool(self.enable)
@@ -900,8 +1155,8 @@ class COMMLSDConfig(_PrettyDataclass):
         )
 
 
-@dataclass(frozen=True)
-class COMPolicyConfig:
+@dataclass(frozen=True, repr=False)
+class COMPolicyConfig(COMDataclassText):
     """One-level collection of 178A algorithm policy and its preset provenance."""
 
     out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay"
@@ -935,6 +1190,50 @@ class COMPolicyConfig:
     reported_der: Literal["raw_sequence_sum", "baseline_pdf_re_evaluation"] = "raw_sequence_sum"
     applied_config_profile: Optional[str] = None
     config_profile_overrides: dict[str, object] = field(default_factory=dict)
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Channel and pulse", (
+                self._field("out_of_measured", "out-of-measured-band behavior", stored_unit="policy"),
+                self._field("channel_renormalization_order", "channel renormalization order", stored_unit="policy"),
+                self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
+                self._field("rxffe_record_realization", "RX FFE record realization", stored_unit="policy"),
+            )),
+            TextSection("Noise and ADC", (
+                self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
+                self._field("final_adc_quantization_convention", "final ADC quantization", stored_unit="policy"),
+                self._field("noise_grid_method", "noise grid method", stored_unit="policy"),
+                self._field("noise_grid_num_ui", "noise grid length", stored_unit="UI count"),
+                self._field("final_adc_pmf_projection", "final ADC PMF projection", stored_unit="policy"),
+            )),
+            TextSection("PMF methods", (
+                self._field("discrete_pmf_placement", "discrete placement", stored_unit="policy"),
+                self._field("interference_pmf_method", "interference PMF", stored_unit="policy"),
+                self._field("xtalk_pmf_accumulation", "crosstalk accumulation", stored_unit="policy"),
+                self._field("gaussian_pmf_method", "Gaussian PMF", stored_unit="policy"),
+                self._field("uniform_pmf_method", "uniform PMF", stored_unit="policy"),
+                self._field("pmf_scaling_method", "PMF scaling", stored_unit="policy"),
+                self._field("final_pmf_grid", "final PMF grid", stored_unit="policy"),
+                self._field("gaussian_n_sigma_override", "Gaussian support override", stored_unit="sigma count"),
+            )),
+            TextSection("MLSD methods", (
+                self._field("added_noise_pdf", "added-noise PDF", stored_unit="policy"),
+                self._field("mlsd_quantization_psd", "MLSD quantization PSD", stored_unit="policy"),
+                self._field("sequence_termination", "sequence termination", stored_unit="policy"),
+                self._field("reported_der", "reported DER", stored_unit="policy"),
+            )),
+            TextSection("Profile provenance", (
+                self._field("applied_config_profile", "applied profile", stored_unit="profile name"),
+                self._field("config_profile_overrides", "profile overrides", stored_unit="mapping"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("applied_config_profile", "applied profile", stored_unit="profile name"),
+            self._field("channel_renormalization_order", "channel renormalization order", stored_unit="policy"),
+            self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
+        )
 
     def __post_init__(self) -> None:
         allowed = {
@@ -1019,7 +1318,7 @@ class COMPolicyConfig:
 
 
 @dataclass(repr=False)
-class COMConfig(_PrettyDataclass):
+class COMConfig(COMDataclassText):
     """Top-level 178A COM configuration grouped by function."""
     L: int                            # unit: levels, PAM order
     link: LinkConfig                  # unit contract: SI grid, Hz/s
@@ -1036,6 +1335,40 @@ class COMConfig(_PrettyDataclass):
     execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
     mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
     policy: COMPolicyConfig = field(default_factory=COMPolicyConfig)
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Signal and grid", (
+                self._field("L", "PAM order", stored_unit="level count"),
+                self._field("DER_0", "target detector error ratio", stored_unit="dimensionless probability"),
+                self._field("link", "analysis grid", stored_unit="configuration"),
+            )),
+            TextSection("Channel and packages", (
+                self._field("channel", "measured channel", stored_unit="configuration"),
+                self._field("txpkg_victim", "victim TX package", stored_unit="configuration"),
+                self._field("txpkg_fext", "FEXT TX package", stored_unit="configuration"),
+                self._field("txpkg_next", "NEXT TX package", stored_unit="configuration"),
+                self._field("rxpkg", "RX package", stored_unit="configuration"),
+            )),
+            TextSection("Model stages", (
+                self._field("filter", "filters", stored_unit="configuration"),
+                self._field("dte", "discrete-time equalizer", stored_unit="configuration"),
+                self._field("imp", "impairments", stored_unit="configuration"),
+                self._field("pmf", "PMF", stored_unit="configuration"),
+                self._field("mlsd", "MLSD", stored_unit="configuration"),
+            )),
+            TextSection("Execution", (
+                self._field("execution", "execution profiles", stored_unit="configuration"),
+                self._field("policy", "algorithm policy", stored_unit="configuration"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("L", "PAM order", stored_unit="level count"),
+            self._field("DER_0", "target detector error ratio", stored_unit="dimensionless probability"),
+            self._field("policy", "algorithm policy", stored_unit="configuration"),
+        )
 
     def __post_init__(self) -> None:
         if not isinstance(self.policy, COMPolicyConfig):
@@ -1092,7 +1425,7 @@ class COMConfig(_PrettyDataclass):
 # =========================================
 
 @dataclass(repr=False)
-class COMPSDStatus(_PrettyDataclass):
+class COMPSDStatus(COMDataclassText):
     """
     178A PSD-domain status.
 
@@ -1118,9 +1451,40 @@ class COMPSDStatus(_PrettyDataclass):
     sigma_G: Optional[float] = None
     sigma_ISI: Optional[float] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Signal", (
+                self._field("As", "signal amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("sigma_X", "crosstalk sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("sigma_G", "Gaussian impairment sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("sigma_ISI", "ISI sigma", stored_unit="V", display_unit="mV", scale=1e3),
+            )),
+            TextSection("Noise components", (
+                self._field("S_rn", "receiver noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_rn", "receiver noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_xn", "crosstalk PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_xn", "crosstalk sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_tn", "transmitter noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_tn", "transmitter noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_jn", "jitter noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_jn", "jitter noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_qn", "quantization noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_qn", "quantization noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_total", "total noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_total", "total noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("R_n", "noise autocorrelation", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("As", "signal amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+            self._field("sigma_total", "total noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+        )
+
 
 @dataclass(repr=False)
-class COMAddedNoiseIterationStatus(_PrettyDataclass):
+class COMAddedNoiseIterationStatus(COMDataclassText):
     """One scalar observation from the Annex 178A added-noise solver."""
 
     iteration: int
@@ -1132,9 +1496,30 @@ class COMAddedNoiseIterationStatus(_PrettyDataclass):
     delta_com_an_temp: float
     residual_dB: float
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Iteration", (
+                self._field("iteration", "iteration", stored_unit="count"),
+                self._field("phase", "solver phase", stored_unit="status"),
+                self._field("g_an", "added-noise scale", stored_unit="dimensionless"),
+                self._field("sigma_added", "added sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("sigma_an", "total added-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("A_an", "added-noise amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("delta_com_an_temp", "temporary delta COM", stored_unit="dB"),
+                self._field("residual_dB", "calibration residual", stored_unit="dB"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("iteration", "iteration", stored_unit="count"),
+            self._field("phase", "solver phase", stored_unit="status"),
+            self._field("residual_dB", "calibration residual", stored_unit="dB"),
+        )
+
 
 @dataclass(repr=False)
-class COMAddedNoiseStatus(_PrettyDataclass):
+class COMAddedNoiseStatus(COMDataclassText):
     """178A.1.10.1 added-noise calibration result shared by MLSD stages."""
     g_an: float
     S_an: SampledPSD
@@ -1149,9 +1534,36 @@ class COMAddedNoiseStatus(_PrettyDataclass):
     A_an: Optional[float] = None
     iteration_history: list[COMAddedNoiseIterationStatus] = field(default_factory=list)
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Calibration result", (
+                self._field("g_an", "added-noise scale", stored_unit="dimensionless"),
+                self._field("sigma_an", "added-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("A_an", "added-noise amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("A_ref", "reference amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("sigma_added", "added sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("delta_com_an_temp", "achieved delta COM", stored_unit="dB"),
+                self._field("target_delta_com_an", "target delta COM", stored_unit="dB"),
+                self._field("residual_dB", "calibration residual", stored_unit="dB"),
+                self._field("iterations", "iterations", stored_unit="count"),
+            )),
+            TextSection("Distribution", (
+                self._field("S_an", "added-noise PSD", stored_unit="V^2/Hz"),
+                self._field("p_an", "added-noise PMF", stored_unit="probability mass"),
+                self._field("iteration_history", "iteration history", stored_unit="record count", summary="count"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("g_an", "added-noise scale", stored_unit="dimensionless"),
+            self._field("residual_dB", "calibration residual", stored_unit="dB"),
+            self._field("iterations", "iterations", stored_unit="count"),
+        )
+
 
 @dataclass(repr=False)
-class COMMLSDNoiseStatus(_PrettyDataclass):
+class COMMLSDNoiseStatus(COMDataclassText):
     """Eq. (178A-54) PSD and autocorrelation, before DER evaluation."""
     S_isi: SampledPSD
     sigma_isi: float
@@ -1161,9 +1573,28 @@ class COMMLSDNoiseStatus(_PrettyDataclass):
     S_qn: Optional[SampledPSD] = None
     sigma_qn: Optional[float] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("MLSD noise", (
+                self._field("S_isi", "ISI PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_isi", "ISI sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_ni", "MLSD input-noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_ni", "MLSD input-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("R_ni", "MLSD noise autocorrelation", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+                self._field("S_qn", "MLSD quantization PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_qn", "MLSD quantization sigma", stored_unit="V", display_unit="mV", scale=1e3),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("sigma_isi", "ISI sigma", stored_unit="V", display_unit="mV", scale=1e3),
+            self._field("sigma_ni", "MLSD input-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+        )
+
 
 @dataclass(repr=False)
-class COMMLSDStatus(_PrettyDataclass):
+class COMMLSDStatus(COMDataclassText):
     """MLSD-only inputs and results, separate from physical impairment stages."""
     added_noise: COMAddedNoiseStatus
     S_isi: Optional[SampledPSD] = None
@@ -1182,9 +1613,41 @@ class COMMLSDStatus(_PrettyDataclass):
     COM_MLSD_raw: Optional[float] = None
     COM_MLSD: Optional[float] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Added noise", (
+                self._field("added_noise", "added-noise calibration", stored_unit="status"),
+            )),
+            TextSection("Noise model", (
+                self._field("S_isi", "ISI PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_isi", "ISI sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_qn", "quantization PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_qn", "quantization sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("S_ni", "MLSD input-noise PSD", stored_unit="V^2/Hz"),
+                self._field("sigma_ni", "MLSD input-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("R_ni", "MLSD noise autocorrelation", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+            )),
+            TextSection("Detector result", (
+                self._field("der_by_j", "DER contribution by sequence length", stored_unit="dimensionless probability"),
+                self._field("DER_MLSD_raw_sequence", "raw sequence DER", stored_unit="dimensionless probability"),
+                self._field("DER_MLSD", "selected DER", stored_unit="dimensionless probability"),
+                self._field("DER_MLSD_reported", "reported DER", stored_unit="dimensionless probability"),
+                self._field("A_MLSD", "MLSD amplitude", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("delta_COM", "MLSD COM increment", stored_unit="dB"),
+                self._field("COM_MLSD_raw", "raw COM MLSD", stored_unit="dB"),
+                self._field("COM_MLSD", "reported COM MLSD", stored_unit="dB"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("delta_COM", "MLSD COM increment", stored_unit="dB"),
+            self._field("COM_MLSD", "reported COM MLSD", stored_unit="dB"),
+        )
+
 
 @dataclass(repr=False)
-class COMEqChannelStatus(_PrettyDataclass):
+class COMEqChannelStatus(COMDataclassText):
     """
     178A equivalent-channel status.
 
@@ -1202,10 +1665,32 @@ class COMEqChannelStatus(_PrettyDataclass):
     h_w_J: Optional[SampledResponse] = None
     h_w: Optional[SampledResponse] = None
     h_XTs_w: Optional[list[SampledResponse]] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Pre-DTE responses", (
+                self._field("h_dsamp", "sampled victim response", stored_unit="V"),
+                self._field("h_tn", "transmitter-noise response", stored_unit="V"),
+                self._field("h_J", "jitter response", stored_unit="V/UI"),
+                self._field("h_XTs_dsamp", "sampled crosstalk responses", stored_unit="V", summary="count"),
+            )),
+            TextSection("Post-FFE responses", (
+                self._field("h_ISI", "ISI response", stored_unit="V"),
+                self._field("h_w_J", "equalized jitter response", stored_unit="V/UI"),
+                self._field("h_w", "equalized victim response", stored_unit="V"),
+                self._field("h_XTs_w", "equalized crosstalk responses", stored_unit="V", summary="count"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("h_dsamp", "sampled victim response", stored_unit="V"),
+            self._field("h_w", "equalized victim response", stored_unit="V"),
+        )
     
 
 @dataclass(repr=False)
-class COMAdcInputPMF(_PrettyDataclass):
+class COMAdcInputPMF(COMDataclassText):
     """
     178A ADC-input PMF intermediate status.
 
@@ -1224,14 +1709,54 @@ class COMAdcInputPMF(_PrettyDataclass):
     method: Optional[str] = None
     clipping_convention: Optional[str] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("PMF components", (
+                self._field("p_sig", "signal PMF", stored_unit="probability mass"),
+                self._field("p_s", "signal-plus-ISI PMF", stored_unit="probability mass"),
+                self._field("p_XT", "crosstalk PMF", stored_unit="probability mass"),
+                self._field("p_DD", "deterministic-jitter PMF", stored_unit="probability mass"),
+                self._field("p_ga", "Gaussian approximation PMF", stored_unit="probability mass"),
+                self._field("p_n", "noise PMF", stored_unit="probability mass"),
+                self._field("p_sn", "combined signal-and-noise PMF", stored_unit="probability mass"),
+            )),
+            TextSection("ADC result", (
+                self._field("V_qc", "clipping voltage", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("delta", "quantization step", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("method", "PMF construction method", stored_unit="policy"),
+                self._field("clipping_convention", "clipping convention", stored_unit="policy"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("V_qc", "clipping voltage", stored_unit="V", display_unit="mV", scale=1e3),
+            self._field("delta", "quantization step", stored_unit="V", display_unit="mV", scale=1e3),
+            self._field("method", "PMF construction method", stored_unit="policy"),
+        )
+
 @dataclass(repr=False)
-class COMImpStageStatus(_PrettyDataclass):
+class COMImpStageStatus(COMDataclassText):
     """One 178A impairment stage's PSD, equivalent-channel, and ADC material."""
     psd: Optional[COMPSDStatus] = None
     adc_input: Optional[COMAdcInputPMF] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Stage outputs", (
+                self._field("psd", "PSD status", stored_unit="status"),
+                self._field("adc_input", "ADC-input PMF status", stored_unit="status"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("psd", "PSD status", stored_unit="status", summary="stage"),
+            self._field("adc_input", "ADC-input PMF status", stored_unit="status", summary="stage"),
+        )
+
 @dataclass(repr=False)
-class COMImpairmentStatus(_PrettyDataclass):
+class COMImpairmentStatus(COMDataclassText):
     """
     178A impairment status grouped by receiver-processing stage.
 
@@ -1243,6 +1768,23 @@ class COMImpairmentStatus(_PrettyDataclass):
     post_ffe: Optional[COMImpStageStatus] = None
     eq_ch: Optional[COMEqChannelStatus] = None
     H_rxffe: Optional[SampledResponse] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Stage lifecycle", (
+                self._field("pre_dte", "pre-DTE impairments", stored_unit="status"),
+                self._field("post_ffe", "post-FFE impairments", stored_unit="status"),
+                self._field("eq_ch", "equivalent-channel responses", stored_unit="status"),
+                self._field("H_rxffe", "RX FFE response", stored_unit="dimensionless"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("pre_dte", "pre-DTE impairments", stored_unit="status", summary="stage"),
+            self._field("post_ffe", "post-FFE impairments", stored_unit="status", summary="stage"),
+            self._field("eq_ch", "equivalent-channel responses", stored_unit="status", summary="stage"),
+        )
     
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
         return tuple(
@@ -1405,7 +1947,7 @@ class COMImpairmentStatus(_PrettyDataclass):
         return self._eq_attr("h_w_J")
 
 @dataclass(repr=False)
-class COMDTEStatus(_PrettyDataclass):
+class COMDTEStatus(COMDataclassText):
     """
     178A receiver discrete-time equalizer result for one sampling phase.
     """
@@ -1426,6 +1968,41 @@ class COMDTEStatus(_PrettyDataclass):
     w: np.ndarray                  # unit: dimensionless, raw zero-filled unlimited FFE taps, shape (N_max,)
     b: np.ndarray
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Sampling", (
+                self._field("pos", "sampling phase", stored_unit="sample index"),
+                self._field("ts", "main cursor location", stored_unit="sample index"),
+                self._field("d", "decision delay", stored_unit="UI"),
+            )),
+            TextSection("Limited MMSE solution", (
+                self._field("mse", "mean-square error", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+                self._field("w_lim", "FFE coefficients", stored_unit="dimensionless"),
+                self._field("b_lim", "DFE coefficients", stored_unit="dimensionless"),
+                self._field("pruned_index", "selected FFE indices", stored_unit="tap index"),
+            )),
+            TextSection("Unlimited solution", (
+                self._field("w", "unlimited FFE coefficients", stored_unit="dimensionless"),
+                self._field("b", "unlimited DFE coefficients", stored_unit="dimensionless"),
+            )),
+            TextSection("Solver matrices", (
+                self._field("H_all", "full channel matrix", stored_unit="V", summary="shape"),
+                self._field("Rnn_all", "full noise covariance", stored_unit="V^2", summary="shape"),
+                self._field("H", "selected channel matrix", stored_unit="V", summary="shape"),
+                self._field("R_nn", "selected noise covariance", stored_unit="V^2", summary="shape"),
+                self._field("H_b", "DFE channel matrix", stored_unit="V", summary="shape"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("pos", "sampling phase", stored_unit="sample index"),
+            self._field("ts", "main cursor location", stored_unit="sample index"),
+            self._field("mse", "mean-square error", stored_unit="V^2"),
+            self._field("w_lim", "FFE coefficients", stored_unit="dimensionless", summary="shape"),
+            self._field("b_lim", "DFE coefficients", stored_unit="dimensionless", summary="shape"),
+        )
+
     @property
     def dfe_coeff(self) -> np.ndarray:
         """Compatibility proxy for report code that plots feedback taps."""
@@ -1433,7 +2010,7 @@ class COMDTEStatus(_PrettyDataclass):
 
 
 @dataclass(repr=False)
-class COMRunStatus(_PrettyDataclass):
+class COMRunStatus(COMDataclassText):
     """Runtime records collected while one concrete 178A COM point is evaluated."""
     pmf_grid_quality: Optional[str] = None
     pmf_keep_mass: Optional[float] = None
@@ -1442,9 +2019,29 @@ class COMRunStatus(_PrettyDataclass):
     coarse_pos: list[int] = field(default_factory=list)
     fine_pos: list[int] = field(default_factory=list)
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Resolved precision", (
+                self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
+                self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
+            )),
+            TextSection("Sampling sweep", (
+                self._field("mse_by_pos", "MSE by phase", stored_unit="V^2"),
+                self._field("main_cursor_error_by_pos", "main-cursor errors", stored_unit="status"),
+                self._field("coarse_pos", "coarse phases", stored_unit="sample index"),
+                self._field("fine_pos", "fine phases", stored_unit="sample index"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
+            self._field("mse_by_pos", "MSE by phase", stored_unit="V^2", summary="count"),
+        )
+
 
 @dataclass(repr=False)
-class COMStatus(_PrettyDataclass):
+class COMStatus(COMDataclassText):
     """Standalone 178A COM status in stage-execution order."""
     paths: list[COMPath] = field(default_factory=list)
     run: Optional[COMRunStatus] = None
@@ -1452,6 +2049,42 @@ class COMStatus(_PrettyDataclass):
     imp: Optional[COMImpairmentStatus] = None
     pmf: Optional[COMPMFStatus] = None
     mlsd: Optional[COMMLSDStatus] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        selected = ()
+        if self.dte is not None:
+            selected += (
+                TextField("dte.pos", "sampling phase", self.dte.pos, "sample index"),
+                TextField("dte.ts", "main cursor location", self.dte.ts, "sample index"),
+                TextField("dte.mse", "mean-square error", self.dte.mse, "V^2", "mV^2", 1e6),
+            )
+        if self.pmf is not None:
+            selected += (TextField("pmf.COM", "COM DFE", self.pmf.COM, "dB"),)
+        if self.mlsd is not None:
+            selected += (
+                TextField("mlsd.delta_COM", "MLSD COM increment", self.mlsd.delta_COM, "dB"),
+                TextField("mlsd.COM_MLSD", "COM MLSD", self.mlsd.COM_MLSD, "dB"),
+            )
+        if not selected:
+            selected = (TextField("final_COM", "final COM", self.final_COM, "dB"),)
+        return (
+            TextSection("Pipeline state", (
+                self._field("paths", "channel paths", stored_unit="path count", summary="count"),
+                self._field("run", "run records", stored_unit="status", summary="stage"),
+                self._field("dte", "DTE stage", stored_unit="status", summary="stage"),
+                self._field("imp", "impairment stage", stored_unit="status", summary="stage"),
+                self._field("pmf", "PMF stage", stored_unit="status", summary="stage"),
+                self._field("mlsd", "MLSD stage", stored_unit="status", summary="stage"),
+            )),
+            TextSection("Selected result", selected),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("paths", "channel paths", stored_unit="path count", summary="count"),
+            self._field("dte", "DTE stage", stored_unit="status", summary="stage"),
+            TextField("final_COM", "final COM", self.final_COM, "dB"),
+        )
 
     @property
     def victim(self) -> COMPath:

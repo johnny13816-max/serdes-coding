@@ -8,6 +8,7 @@ This directory contains the maintained project documentation. Start with the arc
 2. [Documentation contract](architecture/documentation_contract.md)
 3. [Software layers](architecture/software_layers.md)
    and [Utility grid](architecture/utility_grid.md)
+   and [COM dataclass text contract](architecture/dataclass_text_contract.md)
    and [Reference change workflow](architecture/reference_change_workflow.md)
 4. [Configuration architecture](architecture/configuration_architecture.md)
 5. [Reporting architecture](architecture/reporting_architecture.md)

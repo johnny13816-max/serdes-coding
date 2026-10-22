@@ -33,6 +33,12 @@ SEARCH_CONFIG
 
 ## Runtime dataclass tree
 
+Every 178A-owned config dataclass defines a semantic `to_string()`/`print()`
+view with explicit engineering units and bounded array summaries. The common
+formatter owns layout only; each class owns its field selection, order, labels,
+stored/display units, and conversions. See
+[COM dataclass 文字介面契約](../../architecture/dataclass_text_contract.md).
+
 ```text
 COMConfig
 ├── L

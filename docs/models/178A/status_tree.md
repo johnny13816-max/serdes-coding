@@ -7,7 +7,8 @@
 The maintained sources are:
 
 - `src/serdes_coding/models/com_model_178A.py` for 178A status types and incremental assignment;
-- `src/serdes_coding/models/com_model_93A.py` for the temporarily shared `COMPath`, `COMPMFStatus`, and text-formatting base;
+- `src/serdes_coding/models/com_model_93A.py` for the temporarily shared `COMPath` and `COMPMFStatus`;
+- `src/serdes_coding/models/com_dataclass_text.py` for text-formatting mechanics;
 - `src/serdes_coding/reporting/com_report_178A.py` for reporting consumers;
 - `src/serdes_coding/search/com_search_178A.py` for search consumers.
 
@@ -37,6 +38,12 @@ The 178A selected equalizer result is `status.dte`, and the 178A search metric i
 `status.dte.mse`. The root status deliberately has no 93A `dfe` or `FOM` field.
 `COMStatus` does not inherit the 93A root status; shared leaf types remain explicit
 temporary dependencies until their neutral-owner migration is reviewed.
+
+Every 178A-owned status dataclass defines its own semantic sections, field
+labels, units, conversions, and bounded summaries. `to_string()` and `print()`
+use those definitions; `repr()` remains one line. This presentation contract
+does not change status lifecycle or numerical content. See
+[COM dataclass 文字介面契約](../../architecture/dataclass_text_contract.md).
 
 `status.final_COM` returns `status.mlsd.COM_MLSD` when present, otherwise `status.pmf.COM` when the DFE PMF stage has completed.
 

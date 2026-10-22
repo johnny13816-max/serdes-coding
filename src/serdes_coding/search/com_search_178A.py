@@ -15,12 +15,12 @@ from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
 import numpy as np
 
 from ..models import com_model_93A as com_93A
+from ..models.com_dataclass_text import COMDataclassText, TextField, TextSection
 from ..utilities.link import GridOverflowError
 if TYPE_CHECKING:
     from ..models.com_model_178A import COMConfig, COMStatus
 
 
-_PrettyDataclass = com_93A._PrettyDataclass
 COMSearchCandidate = com_93A.COMSearchCandidate
 COMSearchConfig = com_93A.COMSearchConfig
 
@@ -53,7 +53,7 @@ PARTIAL_RESULT_REPORT_MULTIPLIER = 10
 
 
 @dataclass(repr=False)
-class COMSearchRow(_PrettyDataclass):
+class COMSearchRow(COMDataclassText):
     """One 178A TXFFE/CTLE candidate, ranked by its minimum DTE MSE."""
 
     idx: int
@@ -64,9 +64,36 @@ class COMSearchRow(_PrettyDataclass):
     status: Literal["ok", "infeasible", "error"] = "ok"
     error: Optional[str] = None
 
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        candidate = None if self.candidate is None else (
+            f"c_m2={self.candidate.c_m2:.9g}, c_m1={self.candidate.c_m1:.9g}, "
+            f"c_1={self.candidate.c_1:.9g}, g_1={self.candidate.g_DC:.9g} dB, "
+            f"g_2={self.candidate.g_DC2:.9g} dB"
+        )
+        return (
+            TextSection("Candidate", (
+                self._field("idx", "search index", stored_unit="candidate index"),
+                TextField("candidate", "TX FFE and CTLE candidate", candidate, "configuration"),
+                self._field("status", "execution status", stored_unit="status"),
+                self._field("error", "error", stored_unit="status"),
+            )),
+            TextSection("Ranking result", (
+                self._field("mse", "minimum MSE", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+                self._field("ts", "main cursor location", stored_unit="sample index"),
+                self._field("pos", "sampling phase", stored_unit="sample index"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("idx", "search index", stored_unit="candidate index"),
+            self._field("mse", "minimum MSE", stored_unit="V^2"),
+            self._field("status", "execution status", stored_unit="status"),
+        )
+
 
 @dataclass(repr=False)
-class COMSearchStatus(_PrettyDataclass):
+class COMSearchStatus(COMDataclassText):
     """Merged 178A search result; selected candidate minimizes DTE MSE."""
 
     best: Any
@@ -77,6 +104,30 @@ class COMSearchStatus(_PrettyDataclass):
     num_infeasible: int
     num_error: int
     num_grid_overflow: int = 0
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Search totals", (
+                self._field("num_candidates", "candidates", stored_unit="candidate count"),
+                self._field("num_success", "successful candidates", stored_unit="candidate count"),
+                self._field("num_infeasible", "infeasible candidates", stored_unit="candidate count"),
+                self._field("num_error", "error candidates", stored_unit="candidate count"),
+                self._field("num_grid_overflow", "grid-overflow candidates", stored_unit="candidate count"),
+                self._field("rows", "candidate rows", stored_unit="record count", summary="count"),
+            )),
+            TextSection("Selected candidate", (
+                self._field("best_row", "best ranking row", stored_unit="status"),
+                self._field("best", "best full COM status", stored_unit="status", summary="stage"),
+                TextField("COM", "final COM", self.COM, "dB"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("num_candidates", "candidates", stored_unit="candidate count"),
+            self._field("num_success", "successful candidates", stored_unit="candidate count"),
+            TextField("COM", "final COM", self.COM, "dB"),
+        )
 
     @property
     def COM(self) -> Optional[float]:
