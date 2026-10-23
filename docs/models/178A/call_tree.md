@@ -58,6 +58,13 @@ __main__
     │   ├── COM(cfg).run(progress=True)
     │   │   └── COM._run_once(run_cfg=execution.single_run)
     │   └── COMReport178A(cfg, status).export_single_run(report_path)
+    │       └── COMReportBase.plot_single_run()
+    │           ├── plot_overview()
+    │           ├── plot_paths()
+    │           ├── plot_equalizer()
+    │           ├── plot_impairments()
+    │           ├── plot_pmf()
+    │           └── plot_mlsd()
     └── search_run
         ├── excel_to_search_config_178A(config.xlsx)
         └── COM(cfg).run(search=search_cfg, report_dir=report_path)

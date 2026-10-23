@@ -17,7 +17,9 @@ plots.
 ```text
 completed versioned status
           ↓
-shared report renderer/helper       version-specific renderer
+version adapter → direct canonical report fields
+          ↓
+shared COMReportBase stage flow     version-specific stage composition
           ↓                                  ↓
 common plot slot                    version-only plot slot
           └──────────────┬───────────────────┘
@@ -31,8 +33,12 @@ status field names into that renderer. Copying the same plotting body into both
 version reporters is not an accepted alignment mechanism.
 
 The version entry points are `reporting/com_report_93A.py::COMReport` and
-`reporting/com_report_178A.py::COMReport178A`. `models/com_model_93A.py`
-re-exports `COMReport` only for backward compatibility.
+`reporting/com_report_178A.py::COMReport178A`; both inherit
+`reporting/com_report_base.py::COMReportBase`.  The base class owns the
+`plot_<stage>()`, single-run, search-run, export, and optional-stage behavior.
+The adapters map versioned status fields directly and do not create a parallel
+report dataclass tree. `models/com_model_93A.py` re-exports `COMReport` only for
+backward compatibility.
 
 Versioned status objects own completed data and serialization. They do not own
 plot methods or accept an `include_plots` export option. Manual entry points and
@@ -71,7 +77,8 @@ plots/
 ```
 
 A stage directory is omitted when its required status is absent. Reports do not
-create empty placeholder figures.
+create empty placeholder figures.  When a stage object exists but a required
+stored input is missing, its renderer is skipped with `COMReportDataWarning`.
 
 ## Shared plot matrix
 

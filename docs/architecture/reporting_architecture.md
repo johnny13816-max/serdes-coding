@@ -16,12 +16,41 @@ validated config + completed status
 
 The model owns computed quantities and status lifecycle. Reporting owns presentation, file organization, labels, and serialization. A report must use the status produced by the run and must not silently replace a missing status value with a fresh model calculation.
 
+## Shared stage orchestrator
+
+`reporting/com_report_base.py::COMReportBase` owns the cross-version report
+lifecycle.  Both public reporters receive exactly `(config, status)` and map
+their versioned status trees onto these direct canonical attributes:
+
+```text
+paths
+equalizer
+pre_dte_impairment
+final_impairment
+pmf
+mlsd
+search
+```
+
+These attributes are a shallow adapter surface, not another typed dataclass
+tree and not a second owner of model data.  The common public flow is
+`plot_overview()` → `plot_paths()` → `plot_equalizer()` →
+`plot_impairments()` → `plot_pmf()` → `plot_mlsd()`.  `plot_search()` owns the
+search presentation path.  Version adapters implement the private stage
+composition and continue to use the shared low-level renderers in
+`com_report_common.py`.
+
+An absent optional stage is omitted.  If a stage exists but one of its stored
+inputs is incomplete, the common orchestrator emits `COMReportDataWarning` and
+skips that stage renderer.  It does not fill the gap by recalculating a model
+quantity.
+
 ## Current implementations
 
 | Version | Reporter | Model compatibility surface |
 |---|---|---|
-| 93A | `reporting/com_report_93A.py::COMReport` | `models/com_model_93A.py` re-exports `COMReport` for existing imports |
-| 178A | `reporting/com_report_178A.py::COMReport178A` | reporting is imported explicitly by run/search orchestration |
+| 93A | `reporting/com_report_93A.py::COMReport(COMReportBase)` | `models/com_model_93A.py` re-exports `COMReport` for existing imports |
+| 178A | `reporting/com_report_178A.py::COMReport178A(COMReportBase)` | reporting is imported explicitly by run/search orchestration |
 
 `COMReport` and `COMReport178A` are presentation-only: they consume versioned
 config/status objects, group figures by available pipeline stage, and do not
@@ -110,4 +139,9 @@ Titles describe the plotted quantity. A smaller subtitle carries figure-specific
 ## Artifact verification
 
 A successful plot export is more than the presence of a directory. Verification should confirm that expected PNG files are non-empty, have a valid PNG signature, and match their recorded hashes when a plot manifest exists. Workflow verification also checks final status and selected-candidate coverage; see the search runbook for lifecycle details.
+
+Any reporting refactor that can change import, status access, or execution flow
+must run fixed 93A and 178A COM value checks.  Sampling/cursor selection,
+FOM/MSE, equalizer coefficients, `A_s`, `A_ni`, COM DFE, and the 178A MLSD
+results must remain exactly unchanged for a presentation-only change.
 

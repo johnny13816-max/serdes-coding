@@ -25,8 +25,8 @@ from .com_report_common import (
     plot_pmf_components,
     plot_sparam_il,
     plot_sparam_sdd,
-    write_plot_manifest,
 )
+from .com_report_base import COMReportBase
 
 if TYPE_CHECKING:
     from ..models.com_model_93A import (
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from ..utilities.sparam import SparamModel
 
 
-class COMReport:
+class COMReport(COMReportBase):
     """
     Plot/report orchestration for COM run results.
 
@@ -51,11 +51,17 @@ class COMReport:
     spec-defined computation; COMStatus remains the data container.
     """
 
-    def __init__(self, cfg: COMConfig, status: COMStatus | COMSearchStatus):
-        self.cfg = cfg
-        is_search = all(hasattr(status, name) for name in ("best", "best_row", "rows"))
-        self.search_status = status if is_search else None
-        self.status = status.best if is_search else status
+    def _map_canonical_fields(self) -> dict[str, Any]:
+        """Map 93A status names onto the common reporting stages."""
+        return {
+            "paths": self.status.paths,
+            "equalizer": self.status.dfe,
+            "pre_dte_impairment": None,
+            "final_impairment": self.status.imp,
+            "pmf": self.status.pmf,
+            "mlsd": None,
+            "search": self.search_status,
+        }
 
     @staticmethod
     def _plt() -> Any:
@@ -897,50 +903,44 @@ class COMReport:
         )
         return axes
 
-    def plot_single_run(self, save_path: str = "", path_idx: int = 0) -> dict[str, Any]:
-        """
-        Plot detailed single-run report figures.
+    def _plot_overview_stage(self, save_path: str | Path) -> dict[str, Any]:
+        return {
+            "path_pulses": self.plot_paths_pulses(str(save_path)),
+            "path_sbr": self.plot_paths_sbr(str(save_path)),
+            "path_S_all_IL": self.plot_paths_S_all_IL(str(save_path)),
+            "path_H21_tf": self.plot_paths_H21_tf(str(save_path)),
+        }
 
-        Parameters
-        ----------
-        save_path:
-            Optional output directory.
-        path_idx:
-            Path index for the detailed COMPath plot. Default 0 is victim.
-        """
-        outputs: dict[str, Any] = {}
-        if save_path:
-            Path(save_path).mkdir(parents=True, exist_ok=True)
+    def _plot_paths_stage(
+        self,
+        path_idx: int,
+        save_path: str | Path,
+    ) -> dict[str, Any]:
+        return self.plot_COMPath(path_idx=path_idx, save_path=str(save_path))
 
-        outputs["paths_pulses"] = self.plot_paths_pulses(save_path)
-        outputs["paths_sbr"] = self.plot_paths_sbr(save_path)
-        outputs["paths_S_all_IL"] = self.plot_paths_S_all_IL(save_path)
-        outputs["paths_H21_tf"] = self.plot_paths_H21_tf(save_path)
-        outputs["COMPath"] = self.plot_COMPath(path_idx=path_idx, save_path=save_path)
-        if self.status.dfe is not None:
-            outputs["COMDFEStatus"] = self.plot_COMDFEStatus(save_path)
-        if self.status.imp is not None:
-            outputs["COMImpairmentStatus"] = self.plot_COMImpairmentStatus(save_path)
-        if self.status.pmf is not None:
-            outputs["COMPMFStatus"] = self.plot_COMPMFStatus(save_path)
-        return outputs
+    def _plot_equalizer_stage(self, save_path: str | Path) -> dict[str, Any]:
+        return self.plot_COMDFEStatus(str(save_path))
 
-    def plot_search_run(self, save_path: str = "") -> dict[str, Any]:
+    def _plot_impairments_stage(self, save_path: str | Path) -> dict[str, Any]:
+        return self.plot_COMImpairmentStatus(str(save_path))
+
+    def _plot_pmf_stage(self, save_path: str | Path) -> dict[str, Any]:
+        return self.plot_COMPMFStatus(str(save_path))
+
+    def _plot_search_stage(self, save_path: str | Path) -> dict[str, Any]:
         """
         Plot search-run report figures.
 
         The current search detail view keeps search-level summary figures and
         then plots the best candidate through the single-run report path.
         """
-        if self.search_status is None:
-            raise ValueError("COMReport was not initialized with COMSearchStatus.")
         outputs: dict[str, Any] = {}
         if save_path:
             Path(save_path).mkdir(parents=True, exist_ok=True)
-        outputs["search_fom_trace"] = self._plot_search_fom_trace(save_path)
-        outputs["search_top_candidates"] = self._plot_search_top_candidates(save_path)
+        outputs["search_fom_trace"] = self._plot_search_fom_trace(str(save_path))
+        outputs["search_top_candidates"] = self._plot_search_top_candidates(str(save_path))
         best_dir = "" if not save_path else str(Path(save_path) / "best")
-        outputs["best"] = COMReport(self.cfg, self.search_status.best).plot_single_run(best_dir)
+        outputs["best"] = type(self)(self.cfg, self.search_status.best).plot_single_run(best_dir)
         return outputs
 
     def _plot_search_fom_trace(self, save_path: str = "") -> Any:
@@ -981,30 +981,5 @@ class COMReport:
         ax.grid(True, axis="y")
         ReportFigureTools.finish(fig, output)
         return output
-
-    def export_single_run(self, artifact_root: str | Path, path_idx: int = 0) -> dict[str, str]:
-        """Write the detailed 93A plots and a validated cross-version manifest."""
-        root = Path(artifact_root)
-        plot_dir = ReportFigureTools.prepare_plot_directory(root / "plots")
-        report = self.plot_single_run(str(plot_dir), path_idx=path_idx)
-        manifest = write_plot_manifest(
-            report,
-            root,
-            discover_under=plot_dir,
-        )
-        return {"plots": str(plot_dir), "plot_manifest": manifest}
-
-    def export_search_run(self, artifact_root: str | Path) -> dict[str, str]:
-        """Write 93A search plots and a validated cross-version manifest."""
-        root = Path(artifact_root)
-        plot_dir = ReportFigureTools.prepare_plot_directory(root / "plots")
-        report = self.plot_search_run(str(plot_dir))
-        manifest = write_plot_manifest(
-            report,
-            root,
-            discover_under=plot_dir,
-        )
-        return {"plots": str(plot_dir), "plot_manifest": manifest}
-
 
 __all__ = ["COMReport"]

@@ -52,6 +52,7 @@ Layer 6  Numerical foundation
 | `search/com_search_178A.py` | File-backed 178A candidate planning, partial execution, merge, and finalization. |
 | `search/com_search_gui_178A.py` | Legacy GUI adapter over the 178A search API; its case paths are not canonical yet. |
 | `reporting/com_report_common.py` | Shared figure construction, canonical plot paths, PNG validation, and manifest writing. |
+| `reporting/com_report_base.py` | Shared canonical fields, `plot_<stage>()` orchestration, optional-stage warnings, and single/search export lifecycle. |
 | `reporting/com_report_93A.py` | 93A presentation and plots derived from config and status. |
 | `reporting/com_report_178A.py` | 178A presentation and plots derived from config and status. |
 | `utilities/link.py` | `LinkConfig`, `LinkSegment`, and `SampledResponse`. |
