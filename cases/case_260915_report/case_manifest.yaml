@@ -1,6 +1,6 @@
 case_id: case_260915_report
 purpose: 93A and 178A comparison on one C2M channel
-status: 93A_and_178A_ready_for_local_validation
+status: 93A_architecture_regression_anchor_and_178A_local_validation
 models:
   - 178A
   - 93A
@@ -13,3 +13,6 @@ channel_authority:
 results:
   178A: 178A/results
   93A: 93A/results
+validation_boundary:
+  93A: implementation_regression_only_not_reference_alignment
+  178A: project_validation_case
