@@ -56,7 +56,7 @@ def excel_to_search_config_93A(excel_path: str) -> COMSearchConfig:
 
 def _project_excel_to_config(excel_path: Path) -> COMConfig:
     fixed = _read_project_fixed_config(excel_path)
-    channel = _read_project_channels(excel_path)
+    channel = _read_project_channels(excel_path, channel_config_type=COMChannelConfig)
 
     cfg = COMConfig(
         link=LinkConfig(

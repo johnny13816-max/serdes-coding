@@ -5,8 +5,8 @@ from pathlib import Path
 from statistics import NormalDist
 
 from ..utilities.link import LinkConfig
-from ..models.com_model_93A import COMPMFConfig
-from ..models.com_model_178A import (
+from ..models.com_178a import (
+    COMChannelConfig,
     COMDevicePackageConfig,
     COMDeviceTermConfig,
     COMConfig as COMConfig_178A,
@@ -15,12 +15,13 @@ from ..models.com_model_178A import (
     COMFilterConfig as COMFilterConfig_178A,
     COMImpairmentConfig as COMImpairmentConfig_178A,
     COMMLSDConfig,
+    COMPMFConfig,
     COMPolicyConfig,
     COMPartialHostConfig,
     COMPkgConfig as COMPkgConfig_178A,
     COMRunConfig,
-    COMSearchConfig as COMSearchConfig_178A,
 )
+from ..search.com_search_178A import COMSearchConfig as COMSearchConfig_178A
 from .com_excel_common import (
     _coerce_bool,
     _excel_sheet_names,
@@ -67,7 +68,7 @@ def excel_to_search_config_178A(excel_path: str) -> COMSearchConfig:
 
 def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
     fixed = _read_project_fixed_config(excel_path)
-    channel = _read_project_channels(excel_path)
+    channel = _read_project_channels(excel_path, channel_config_type=COMChannelConfig)
     der_0 = _fixed_float(fixed, "DER_0")
     execution = _read_project_execution_config(excel_path)
     execution_profile = _read_project_execution_profile(excel_path, fixed)

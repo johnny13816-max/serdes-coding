@@ -8,21 +8,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import csv
+from itertools import product
 from pathlib import Path
 import time
-from typing import Any, Iterable, Literal, Optional, TYPE_CHECKING
+from typing import Any, Iterable, Literal, Optional, Sequence, TYPE_CHECKING
 
 import numpy as np
 
-from ..models import com_model_93A as com_93A
 from ..models.com_dataclass_text import COMDataclassText, TextField, TextSection
 from ..utilities.link import GridOverflowError
 if TYPE_CHECKING:
     from ..models.com_model_178A import COMConfig, COMStatus
-
-
-COMSearchCandidate = com_93A.COMSearchCandidate
-COMSearchConfig = com_93A.COMSearchConfig
 
 
 MANIFEST_FIELDS = ("search_index", "c_m2", "c_m1", "c_1", "g_1", "g_2")
@@ -50,6 +46,121 @@ FINAL_RESULT_FIELDS = PARTIAL_RESULT_FIELDS + (
     "post_ffe_sigma_total_V",
 )
 PARTIAL_RESULT_REPORT_MULTIPLIER = 10
+
+
+@dataclass(repr=False)
+class COMSearchCandidate(COMDataclassText):
+    """One concrete Annex 178A TX FFE and CTLE search candidate."""
+
+    c_m2: float
+    c_m1: float
+    c_1: float
+    g_DC: float
+    g_DC2: float
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("TX FFE", (
+                self._field("c_m2", "tap c(-2)", stored_unit="dimensionless"),
+                self._field("c_m1", "tap c(-1)", stored_unit="dimensionless"),
+                self._field("c_1", "tap c(1)", stored_unit="dimensionless"),
+            )),
+            TextSection("CTLE", (
+                self._field("g_DC", "gain g1", stored_unit="dB"),
+                self._field("g_DC2", "gain g2", stored_unit="dB"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return tuple(
+            self._field(name, name, stored_unit="dB" if name.startswith("g_") else "dimensionless")
+            for name in ("c_m2", "c_m1", "c_1", "g_DC", "g_DC2")
+        )
+
+
+@dataclass(repr=False)
+class COMSearchConfig(COMDataclassText):
+    """Annex 178A outer-search ranges and result-retention controls."""
+
+    c_m2_values: Optional[Sequence[float]] = None
+    c_m1_values: Optional[Sequence[float]] = None
+    c_1_values: Optional[Sequence[float]] = None
+    g_DC_values: Optional[Sequence[float]] = None
+    g_DC2_values: Optional[Sequence[float]] = None
+    keep_top_n: int = 10
+    keep_all_rows: bool = False
+    continue_on_error: bool = False
+
+    def __post_init__(self) -> None:
+        self.keep_top_n = int(self.keep_top_n)
+        if self.keep_top_n <= 0:
+            raise ValueError("COMSearchConfig.keep_top_n must be positive.")
+
+    @staticmethod
+    def _values_or_default(
+        values: Optional[Sequence[float]],
+        default: Optional[float],
+        name: str,
+    ) -> np.ndarray:
+        if values is None:
+            if default is None:
+                raise ValueError(f"{name} has no search values and no COMFilterConfig default value.")
+            values = (default,)
+        array = np.asarray(values, dtype=float)
+        if array.ndim != 1 or len(array) == 0:
+            raise ValueError(f"{name} search values must be a non-empty 1D sequence.")
+        if not np.all(np.isfinite(array)):
+            raise ValueError(f"{name} search values must be finite.")
+        return array
+
+    @staticmethod
+    def _filter_default(filter_cfg: Any, primary: str, fallback: str) -> Optional[float]:
+        value = getattr(filter_cfg, primary, None)
+        return value if value is not None else getattr(filter_cfg, fallback, None)
+
+    def candidates(self, filter_cfg: Any) -> list[COMSearchCandidate]:
+        axes = (
+            self._values_or_default(self.c_m2_values, filter_cfg.c_m2, "c_m2"),
+            self._values_or_default(self.c_m1_values, filter_cfg.c_m1, "c_m1"),
+            self._values_or_default(self.c_1_values, filter_cfg.c_1, "c_1"),
+            self._values_or_default(
+                self.g_DC_values, self._filter_default(filter_cfg, "g_DC", "g_1"), "g_DC"
+            ),
+            self._values_or_default(
+                self.g_DC2_values, self._filter_default(filter_cfg, "g_DC2", "g_2"), "g_DC2"
+            ),
+        )
+        return [
+            COMSearchCandidate(
+                c_m2=float(values[0]),
+                c_m1=float(values[1]),
+                c_1=float(values[2]),
+                g_DC=float(values[3]),
+                g_DC2=float(values[4]),
+            )
+            for values in product(*axes)
+        ]
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Search axes", tuple(
+                self._field(name, name, stored_unit="candidate values", summary="count")
+                for name in (
+                    "c_m2_values", "c_m1_values", "c_1_values", "g_DC_values", "g_DC2_values"
+                )
+            )),
+            TextSection("Retention", (
+                self._field("keep_top_n", "retained candidates", stored_unit="candidate count"),
+                self._field("keep_all_rows", "retain all rows", stored_unit="status"),
+                self._field("continue_on_error", "continue on error", stored_unit="status"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("keep_top_n", "retained candidates", stored_unit="candidate count"),
+            self._field("keep_all_rows", "retain all rows", stored_unit="status"),
+        )
 
 
 @dataclass(repr=False)

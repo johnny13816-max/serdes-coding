@@ -7,6 +7,7 @@
 The maintained sources are:
 
 - `src/serdes_coding/models/com_model_178A.py` for the manual entry and one-candidate model pipeline;
+- `src/serdes_coding/models/com_178a/config.py` and `status.py` for version-owned input/output contracts;
 - `src/serdes_coding/io/com_excel_io_178A.py` for workbook-to-config construction;
 - `src/serdes_coding/search/com_search_178A.py` for file-backed search orchestration;
 - `scripts/run_full_search_178A.py` and `.github/workflows/run_full_search_178A.yml` for distributed GitHub Actions execution;

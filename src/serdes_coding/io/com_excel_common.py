@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
-
-from ..models.com_model_93A import COMChannelConfig
 
 def _excel_sheet_names(excel_path: Path) -> set[str]:
     import pandas as pd
@@ -37,7 +35,12 @@ def _read_project_fixed_config(excel_path: Path) -> dict[str, object]:
     return fixed
 
 
-def _read_project_channels(excel_path: Path) -> COMChannelConfig:
+def _read_project_channels(
+    excel_path: Path,
+    *,
+    channel_config_type: Callable[..., Any],
+) -> Any:
+    """Parse project channel rows into the version-owned channel config type."""
     import pandas as pd
 
     df = pd.read_excel(excel_path, sheet_name="channels", header=2)
@@ -102,7 +105,7 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
     sparam_frequency_limit_Hz = (
         None if _is_blank(limit_GHz) else float(limit_GHz) * 1e9
     )
-    return COMChannelConfig(
+    return channel_config_type(
         R0=required_positive("R_0"),
         R_d_tx=required_positive("R_d_tx"),
         R_d_rx=required_positive("R_d_rx"),
@@ -115,7 +118,7 @@ def _read_project_channels(excel_path: Path) -> COMChannelConfig:
     )
 
 
-def _validate_channel_package_R0(channel: COMChannelConfig, *packages: object) -> None:
+def _validate_channel_package_R0(channel: Any, *packages: object) -> None:
     """Require every runtime package model to use the channel's COM R_0."""
     mismatches = [
         (index, float(getattr(package, "R0")))

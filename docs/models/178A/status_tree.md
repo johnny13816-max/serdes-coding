@@ -6,8 +6,8 @@
 
 The maintained sources are:
 
-- `src/serdes_coding/models/com_model_178A.py` for 178A status types and incremental assignment;
-- `src/serdes_coding/models/com_model_93A.py` for the temporarily shared `COMPath` and `COMPMFStatus`;
+- `src/serdes_coding/models/com_178a/status.py` for version-owned 178A path and calculation-state contracts;
+- `src/serdes_coding/models/com_model_178A.py` for incremental assignment and the compatibility exports;
 - `src/serdes_coding/models/com_dataclass_text.py` for text-formatting mechanics;
 - `src/serdes_coding/reporting/com_report_178A.py` for reporting consumers;
 - `src/serdes_coding/search/com_search_178A.py` for search consumers.
@@ -36,8 +36,8 @@ COMStatus                              standalone 178A root status
 
 The 178A selected equalizer result is `status.dte`, and the 178A search metric is
 `status.dte.mse`. The root status deliberately has no 93A `dfe` or `FOM` field.
-`COMStatus` does not inherit the 93A root status; shared leaf types remain explicit
-temporary dependencies until their neutral-owner migration is reviewed.
+`COMStatus`, `COMPath`, `COMSharedPath`, and `COMPMFStatus` are standalone
+178A-owned types and do not inherit or alias their 93A counterparts.
 
 Every 178A-owned status dataclass defines its own semantic sections, field
 labels, units, conversions, and bounded summaries. `to_string()` and `print()`
@@ -76,8 +76,8 @@ The phase-independent pre-DTE common calculation is a run-local cache. It is mer
 
 ## Path status
 
-`COMPath` 沿用 93A；178A `COMSharedPath` 擴充 93A shared fields，增加可選的
-`ctle_iir` candidate object。
+`COMPath` 與 `COMSharedPath` 均由 178A 擁有。`COMSharedPath` 保存共用 filter、
+RX package 與可選的 `ctle_iir` candidate object。
 
 ```text
 COMPath
@@ -206,7 +206,7 @@ Which PMF components are present depends on stage, quantization enablement, and 
 
 ## DFE PMF status
 
-`COMPMFStatus` is shared with 93A and assigned only after the 178A DFE COM stage completes.
+`COMPMFStatus` is owned by 178A and assigned only after the 178A DFE COM stage completes.
 
 | Field | Unit/type |
 |---|---|
@@ -216,7 +216,8 @@ Which PMF components are present depends on stage, quantization enablement, and 
 | `y0`, `A_ni` | optional V scalars |
 | `COM` | optional dB scalar |
 
-The stage returns a completed object, but individual PMF fields remain optional in the shared dataclass to support incremental/shared code paths.
+The stage returns a completed object, but individual PMF fields remain optional
+in the 178A dataclass to support incremental stage construction and reporting.
 
 ## MLSD status
 
