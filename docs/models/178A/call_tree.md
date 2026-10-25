@@ -8,6 +8,7 @@ The maintained sources are:
 
 - `src/serdes_coding/models/com_model_178A.py` for the manual entry and one-candidate model pipeline;
 - `src/serdes_coding/models/com_178a/config.py` and `status.py` for version-owned input/output contracts;
+- `src/serdes_coding/models/com_178a/path_stage.py` for the complete path-construction stage;
 - `src/serdes_coding/io/com_excel_io_178A.py` for workbook-to-config construction;
 - `src/serdes_coding/search/com_search_178A.py` for file-backed search orchestration;
 - `scripts/run_full_search_178A.py` and `.github/workflows/run_full_search_178A.yml` for distributed GitHub Actions execution;
@@ -82,16 +83,17 @@ The model returns status. Reporting receives the completed config and status and
 COM._run_once(run_cfg)
 ├── initialize COMStatus and target checks
 ├── build_all_paths()
-│   ├── _build_channel_under_test(channel config)
-│   ├── _build_shared_path(config, frequency grid)
-│   └── _build_paths(config, shared blocks, channels)
-│       └── _build_path(...) for victim, NEXT, and FEXT paths
-│           ├── continuous_tf: frequency-domain CTF + unit pulse
-│           └── bilinear_iir
-│               ├── _evaluate_pre_ctle_on_measured_grid(...)
-│               ├── _reference_fd_to_td_record(...)
-│               ├── _realize_ctle_response(...)
-│               └── _apply_rectangular_unit_pulse(...)
+│   └── com_178a.path_stage
+│       ├── _build_channel_under_test(channel config)
+│       ├── _build_shared_path(config, frequency grid)
+│       └── _build_paths(config, shared blocks, channels)
+│           └── _build_path(...) for victim, NEXT, and FEXT paths
+│               ├── continuous_tf: frequency-domain CTF + unit pulse
+│               └── bilinear_iir
+│                   ├── _evaluate_pre_ctle_on_measured_grid(...)
+│                   ├── _reference_fd_to_td_record(...)
+│                   ├── _realize_ctle_response(...)
+│                   └── _apply_rectangular_unit_pulse(...)
 ├── calculate_pre_dte_imp_common(victim, xtalk pulses)
 │   ├── build all common PSDs on the resolved noise grid
 │   └── return run-local common PSD/cache data

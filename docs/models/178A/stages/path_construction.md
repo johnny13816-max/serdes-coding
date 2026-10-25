@@ -6,6 +6,11 @@
 
 This stage converts workbook-derived channel, package, and filter configuration into the ordered `COMPath` objects used by every later 178A stage.
 
+The complete implementation lives in
+`src/serdes_coding/models/com_178a/path_stage.py`. `com_model_178A.py` imports
+and re-exports its established symbols for compatibility, but does not own the
+path algorithms.
+
 It owns:
 
 - loading and aligning the measured victim, NEXT, and FEXT S-parameter files;
@@ -26,7 +31,12 @@ Current source identifies these specification-facing builders:
 | partial host | IEEE 802.3 Annex 178A, Eq. 178A-10 | implementation reference recorded; equation not revalidated here |
 | augmented path transfer | Annex 178A path-transfer definition; implemented through shared `SparamModel.to_LinkSegment()` | conversion boundary confirmed from source; equation not revalidated here |
 
-The stage reuses 93A primitive constructors for a single shunt capacitance, series inductance, transmission-line section, TX FFE, transition-time filter, receiver-noise filter, and rectangular pulse. The 178A composition remains in 178A-owned builders.
+The 178A concrete `IEEECOMSparam` and `IEEECOMFilter` types directly inherit
+the neutral `SparamModel` and `LinkSegment` utilities. They own the COM
+primitive implementations used by this stage. `_93A`-named methods remain thin
+public compatibility wrappers; the 178A stage calls version-owned canonical
+methods without a version suffix. No 178A path operation imports a 93A model
+class or channel loader.
 
 ## Entry and result
 
@@ -101,8 +111,8 @@ The full types and lifecycle are defined in [Status tree](../status_tree.md). Th
 
 ```text
 _build_channel_under_test(channel_cfg, renormalization_order)
-├── sdd_first: reuse _build_channel_under_test_93A(channel_cfg)
-└── s4p_first: load each Touchstone via SparamModel.from_touchstone()
+├── sdd_first: load through 178A IEEECOMSparam.from_touchstone()
+└── s4p_first: load through neutral SparamModel.from_touchstone()
     └── SparamModel.from_network(): renormalize copied full S4P to R_0,
         apply optional measured-frequency limit, then convert to Sdd at 2R_0
 preserve victim -> NEXT -> FEXT order
@@ -254,26 +264,20 @@ Reporting reads stored `COMPath` objects. It must not recreate packages, filters
 
 ## Validation evidence and tolerance
 
-Current repository state provides:
+Dedicated ownership and numerical regression tests cover both channel-ingestion
+branches, the six-path order, and stored `S_tx`, `S_ch`, `S_all`, `H_21`,
+`H_all`, pulse, and shared-response boundaries. Production 93A/178A golden
+tests and a single-candidate production search protect the downstream result.
+The exact baseline, tolerances, commands, and results are recorded in
+[ARC-178A-004B validation](../../../validation/arc_178a_004b.md).
 
-- source-level type and length validation in package, filter, channel, and path builders;
-- end-to-end exercise through 178A single runs and searches;
-- stored path plots and exports for manual inspection.
-
-There is currently no dedicated automated unit test for the complete 178A path-construction stage, and this stage document therefore makes no numerical-equivalence or specification-tolerance claim. A complete validation should add fixed reference data for at least:
-
-1. one package network per package role;
-2. one victim-only path;
-3. victim plus NEXT and FEXT ordering;
-4. channel-grid alignment;
-5. each missing-DC policy;
-6. stored `S_all`, `H_21`, `H_all`, and `pulse` comparisons with explicit complex/frequency/time-domain tolerances.
-
-Reference-case evidence belongs in `docs/validation/`; case placement and channel ownership follow [Project structure](../../../architecture/project_structure.md).
+These tests establish behavior preservation across the ownership migration;
+they do not independently certify every equation against the specification.
+Case placement and channel ownership follow
+[Project structure](../../../architecture/project_structure.md).
 
 ## Known limitations and unresolved questions
 
-- The 178A composition calls shared 93A primitive functions; the validity of each reused primitive for the current 178A reference must be checked independently.
+- Three 93A helper dependencies remain outside this stage and are deferred to the pre-DTE／PMF ownership contract: `_find_pos_xtalk_93A`, `_build_pmf_interference_93A`, and `_build_pmf_XT_all_93A`.
 - The implementation reference annotations for the termination, package, partial-host, and augmented-transfer equations still need a spec-by-spec numerical review.
-- No stage-specific golden artifact currently establishes acceptable complex S-parameter, transfer-function, or impulse-response tolerances.
 - `isNext` is accepted by `_build_txpkg()` but does not currently select different construction inside that helper; NEXT behavior differs through `txpkg_next`, `H_ffe_next`, and `A_ne` supplied by the caller.

@@ -39,10 +39,11 @@ Layer 6  Numerical foundation
 |---|---|
 | `serdes_coding/__init__.py` | Public package exports; 93A base symbols are imported directly and optional 178A/report/search adapters are loaded lazily. |
 | `models/com_model_93A.py` | 93A dataclasses, orchestration, stages, model-specific helpers, and the 93A manual entry. |
-| `models/com_model_178A.py` | Compatibility facade, current stage implementations, orchestration, and the 178A manual entry. |
+| `models/com_model_178A.py` | Compatibility facade, non-path stage implementations, orchestration, and the 178A manual entry. |
 | `models/com_178a/config.py` | Version-owned 178A configuration contracts. |
 | `models/com_178a/status.py` | Version-owned 178A path and calculation-state contracts. Its current `COMStatus.export()` is a compatibility shim pending full reporting ownership. |
 | `models/com_178a/errors.py` | Version-owned 178A model exceptions. |
+| `models/com_178a/path_stage.py` | Complete version-owned 178A path-construction stage: COM S-parameter/filter concrete types, channel ingestion, package cascade, terminated transfer, CTLE realization, and pulse construction. |
 | `models/com_dataclass_text.py` | Version-neutral text-formatting mechanics; each model dataclass retains ownership of semantic fields, units, and display order. |
 | `io/com_excel_common.py` | Shared workbook table parsing and channel-row handling. |
 | `io/com_excel_io_93A.py` | Project and legacy Ad Hoc workbook mapping into 93A typed configuration. |
@@ -81,9 +82,13 @@ There are no current root-level `link_segment.py` or `pmf_handler.py` compatibil
 - 178A config, path/status, PMF-status, exception, and search contracts are
   version-owned. `io/com_excel_common.py` parses common channel rows and receives
   the version-owned channel-config constructor from each adapter.
+- 178A path construction directly inherits only the neutral `SparamModel` and
+  `LinkSegment` utility parents. Existing `_93A`-named primitive methods on the
+  178A concrete classes are compatibility wrappers; 178A stage code calls its
+  version-owned canonical methods.
 - Remaining 178A-to-93A dependencies are limited by an executable ratchet to
-  S-parameter/filter inheritance and four stage helpers. Later stage-migration
-  batches must reduce that allowlist; new dependencies are forbidden.
+  three deferred pre-DTE/PMF helpers. Later stage-migration batches must reduce
+  that allowlist; new dependencies are forbidden.
 
 ## Helper placement
 

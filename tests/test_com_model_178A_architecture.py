@@ -22,12 +22,24 @@ from serdes_coding.models.com_model_178A import (
     COMStatus,
 )
 from serdes_coding.search.com_search_178A import COMSearchCandidate, COMSearchConfig
+from serdes_coding.utilities.link import LinkSegment
+from serdes_coding.utilities.sparam import SparamModel
 
 
 def test_178a_root_types_do_not_inherit_93a_root_types() -> None:
     assert not issubclass(COM, com_93A.COM)
     assert not issubclass(COMStatus, com_93A.COMStatus)
     assert COM.__bases__ == (object,)
+
+
+def test_178a_path_types_have_only_neutral_utility_parents() -> None:
+    assert com_178A.IEEECOMSparam.__bases__ == (SparamModel,)
+    assert com_178A.IEEECOMFilter.__bases__ == (LinkSegment,)
+    assert com_178A.IEEECOMSparam.__module__ == "serdes_coding.models.com_178a.path_stage"
+    assert com_178A.IEEECOMFilter.__module__ == "serdes_coding.models.com_178a.path_stage"
+    assert com_178A.COMBilinearCTLE.__module__ == "serdes_coding.models.com_178a.path_stage"
+    assert not issubclass(com_178A.IEEECOMSparam, com_93A.IEEECOMSparam)
+    assert not issubclass(com_178A.IEEECOMFilter, com_93A.IEEECOMFilter)
 
 
 def test_178a_config_and_status_leaves_are_version_owned() -> None:

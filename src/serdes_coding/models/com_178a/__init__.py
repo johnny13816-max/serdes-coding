@@ -23,6 +23,7 @@ from .errors import (
     COMMainCursorError,
     COMTxfirMainCursorError,
 )
+from .path_stage import COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam
 from .status import (
     COMAdcInputPMF,
     COMAddedNoiseIterationStatus,

@@ -88,9 +88,6 @@ def test_only_178a_model_retains_an_explicit_93a_import() -> None:
 def test_178a_model_does_not_expand_temporary_93a_dependencies() -> None:
     aliases, _ = _93a_imports(MODEL)
     assert _attributes_for_aliases(MODEL, aliases) == {
-        "IEEECOMFilter",
-        "IEEECOMSparam",
-        "_build_channel_under_test_93A",
         "_build_pmf_XT_all_93A",
         "_build_pmf_interference_93A",
         "_find_pos_xtalk_93A",
