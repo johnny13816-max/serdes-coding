@@ -86,9 +86,8 @@ There are no current root-level `link_segment.py` or `pmf_handler.py` compatibil
   `LinkSegment` utility parents. Existing `_93A`-named primitive methods on the
   178A concrete classes are compatibility wrappers; 178A stage code calls its
   version-owned canonical methods.
-- Remaining 178A-to-93A dependencies are limited by an executable ratchet to
-  three deferred pre-DTE/PMF helpers. Later stage-migration batches must reduce
-  that allowlist; new dependencies are forbidden.
+- 178A production modules have no import, inheritance, or helper-call dependency
+  on the 93A model. An executable dependency test keeps this boundary closed.
 
 ## Helper placement
 

@@ -278,6 +278,5 @@ Case placement and channel ownership follow
 
 ## Known limitations and unresolved questions
 
-- Three 93A helper dependencies remain outside this stage and are deferred to the pre-DTE／PMF ownership contract: `_find_pos_xtalk_93A`, `_build_pmf_interference_93A`, and `_build_pmf_XT_all_93A`.
 - The implementation reference annotations for the termination, package, partial-host, and augmented-transfer equations still need a spec-by-spec numerical review.
 - `isNext` is accepted by `_build_txpkg()` but does not currently select different construction inside that helper; NEXT behavior differs through `txpkg_next`, `H_ffe_next`, and `A_ne` supplied by the caller.

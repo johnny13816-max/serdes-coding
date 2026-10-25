@@ -1,4 +1,4 @@
-"""Prevent expansion of the temporary 178A-to-93A dependency surface."""
+"""Forbid 178A production modules from depending on the 93A model."""
 
 import ast
 from pathlib import Path
@@ -70,25 +70,18 @@ def _attributes_for_aliases(path: Path, aliases: set[str]) -> set[str]:
     }
 
 
-def test_only_178a_model_retains_an_explicit_93a_import() -> None:
+def test_178a_production_modules_do_not_import_the_93a_model() -> None:
     imports = {path: _93a_imports(path) for path in SCANNED}
     importers = {
         path.relative_to(ROOT).as_posix(): dependency
         for path, dependency in imports.items()
         if any(dependency)
     }
-    model_key = MODEL.relative_to(ROOT).as_posix()
-    assert set(importers) == {model_key}
-    aliases, direct = importers[model_key]
-    assert aliases == {"com_93A"}
-    assert direct == set()
+    assert importers == {}
     assert all(_dynamic_93a_imports(path) == set() for path in SCANNED)
 
 
-def test_178a_model_does_not_expand_temporary_93a_dependencies() -> None:
+def test_178a_model_has_no_93a_attribute_dependencies() -> None:
     aliases, _ = _93a_imports(MODEL)
-    assert _attributes_for_aliases(MODEL, aliases) == {
-        "_build_pmf_XT_all_93A",
-        "_build_pmf_interference_93A",
-        "_find_pos_xtalk_93A",
-    }
+    assert aliases == set()
+    assert _attributes_for_aliases(MODEL, aliases) == set()

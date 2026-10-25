@@ -44,7 +44,6 @@ try:
         _build_shared_path, _build_txpkg, _evaluate_pre_ctle_on_measured_grid,
         _realize_ctle_response, _reference_fd_to_td_record,
     )
-    from . import com_model_93A as com_93A
 except ImportError:
     # Support direct interactive execution of this canonical module.
     # Package execution continues to use the relative imports above.
@@ -77,13 +76,6 @@ except ImportError:
         _build_shared_path, _build_txpkg, _evaluate_pre_ctle_on_measured_grid,
         _realize_ctle_response, _reference_fd_to_td_record,
     )
-    from serdes_coding.models import com_model_93A as com_93A
-
-# Remaining 93A implementation dependencies belong to later pre-DTE and PMF
-# ownership batches. The complete path-construction stage is version-owned.
-_build_pmf_interference_93A = com_93A._build_pmf_interference_93A
-_build_pmf_XT_all_93A = com_93A._build_pmf_XT_all_93A
-_find_pos_xtalk_93A = com_93A._find_pos_xtalk_93A
 
 
 def _validate_positive_main_cursor(h_dsamp: np.ndarray, *, source_name: str, pos: int) -> None:
@@ -132,7 +124,11 @@ def _find_pos_xtalk(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
     maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
     the victim sampling phase candidate.
     """
-    return _find_pos_xtalk_93A(h_XT, per_ui)
+    rss = np.zeros(per_ui)
+    for phase in np.arange(per_ui):
+        rss[phase] = np.sum(h_XT[phase::per_ui] ** 2)
+    pos = int(np.argmax(rss))
+    return pos, h_XT[pos::per_ui]
 
 def _build_psd_xtalk(
     h_XTs: list[np.ndarray],
@@ -961,7 +957,14 @@ def _build_pmf_interference_178A(
             unit="volt", name=name or "",
         )
     if method == "signal_fir":
-        return _build_pmf_interference_93A(p_sig, h, pmf_cfg, name=name)
+        return p_sig.copy().fir_filter(
+            fir=h,
+            keep_mass=pmf_cfg.keep_mass,
+            dx_ref=pmf_cfg.dy,
+            tap_abs_th=pmf_cfg.tap_abs_th,
+            max_taps=None,
+            name=name,
+        )
     raise ValueError("interference PMF method must be signal_fir or pam_atoms.")
 
 
@@ -991,7 +994,27 @@ def _build_pmf_w_XT_all(
             )
         return result
     if methods.interference_pmf_method == "signal_fir":
-        return _build_pmf_XT_all_93A(p_sig, responses, pmf_cfg)
+        result = Pmf1D.multi_dirac(
+            np.array([0.0]),
+            np.array([1.0]),
+            dx=pmf_cfg.dy,
+            unit="volt",
+            name="XT_all",
+        )
+        for response in responses:
+            result = result.combine(
+                _build_pmf_interference_178A(
+                    p_sig,
+                    response,
+                    pmf_cfg,
+                    L or len(p_sig.pmf),
+                    method="signal_fir",
+                    name="XT",
+                ),
+                name="XT_all",
+            )
+        result.name = "XT_all"
+        return result
     raise ValueError("Unsupported crosstalk PMF construction method.")
 
 def _build_adc_input_pmf_exact(
