@@ -1,4 +1,4 @@
-"""Equation-level validation of the measured Sdd normalization boundary."""
+"""Equation-level validation of the explicit S4P/Sdd ingestion boundary."""
 from pathlib import Path
 
 import numpy as np
@@ -26,35 +26,34 @@ def equation(s, target=92.5):
     return (s - rho * eye) @ np.linalg.inv(eye - rho * s)
 
 
-@pytest.mark.parametrize("mode", ["auto", "s4p"])
-def test_s4p_ingestion_matches_178a_equation_and_preserves_source(mode):
+@pytest.mark.parametrize("representation", ["auto", "s4p"])
+def test_sdd_first_is_explicit_and_preserves_raw_s4p(representation):
     source = measurement()
     before_s, before_z0 = source.s.copy(), source.z0.copy()
-    raw = SparamModel.from_network(source, mode="s4p", port_order=ORDER)
-    actual = m178.IEEECOMSparam.from_network(source, mode=mode, port_order=ORDER, z0=92.5)
-    np.testing.assert_allclose(actual.sdd, equation(raw.sdd), atol=1e-12, rtol=0)
+    raw = SparamModel.from_network(source, representation=representation, port_order=ORDER)
+    measured_sdd = raw.s4p_to_s2p()
+    actual = measured_sdd.renormalized(92.5)
+    assert raw.representation == "s4p" and raw.nports == 4
+    assert actual.representation == "s2p" and actual.nports == 2
+    np.testing.assert_allclose(actual.sdd, equation(measured_sdd.sdd), atol=1e-12, rtol=0)
     np.testing.assert_array_equal(source.s, before_s)
     np.testing.assert_array_equal(source.z0, before_z0)
-    np.testing.assert_array_equal(actual.freqs, source.f)
-    assert isinstance(actual, m178.IEEECOMSparam)
-    assert actual.source_type == "s4p" and actual.port_order == ORDER
     np.testing.assert_array_equal(actual.network.z0, np.full((3, 2), 92.5))
-    # Four-port normalization is a different common-mode boundary.
-    four = source.copy()
-    four.renormalize(46.25)
-    four_sdd = SparamModel.from_network(four, mode="s4p", port_order=ORDER)
-    assert np.max(abs(actual.sdd - four_sdd.sdd)) > 1e-6
 
 
-def test_equal_impedance_and_array_constructors_keep_values():
+def test_array_constructors_preserve_the_declared_representation():
     source = measurement()
     raw = SparamModel.from_network(source, port_order=ORDER)
-    matched = SparamModel.from_network(source, port_order=ORDER, z0=100.0)
-    np.testing.assert_array_equal(matched.sdd, raw.sdd)
-    assigned = SparamModel.from_s4p_array(source.f, source.s, port_order=ORDER, z0=92.5)
-    np.testing.assert_array_equal(assigned.sdd, raw.sdd)
-    assigned_sdd = SparamModel.from_network(raw.network, mode="sdd", z0=92.5)
-    np.testing.assert_array_equal(assigned_sdd.sdd, raw.sdd)
+    assigned = SparamModel.from_s4p_array(
+        source.f, source.s, port_order=ORDER, z0=source.z0,
+    )
+    np.testing.assert_array_equal(assigned.s, raw.s)
+    assert assigned.representation == "s4p"
+    with pytest.raises(ValueError, match="call s4p_to_s2p"):
+        _ = assigned.sdd
+    converted = raw.s4p_to_s2p()
+    copied = SparamModel.from_network(converted.network, representation="s2p")
+    np.testing.assert_array_equal(copied.sdd, converted.sdd)
 
 
 def test_s4p_first_matches_full_four_port_oracle_without_mutating_source():
@@ -62,86 +61,65 @@ def test_s4p_first_matches_full_four_port_oracle_without_mutating_source():
     before_s, before_z0 = source.s.copy(), source.z0.copy()
     four = source.copy()
     four.renormalize(46.25)
-    expected = SparamModel.from_network(four, mode="s4p", port_order=ORDER)
-    actual = SparamModel.from_network(
-        source, mode="s4p", port_order=ORDER, z0=92.5,
-        renormalization_order="s4p_first",
+    expected = SparamModel.from_network(four, representation="s4p", port_order=ORDER).s4p_to_s2p()
+    actual = (
+        SparamModel.from_network(source, representation="s4p", port_order=ORDER)
+        .renormalized(46.25)
+        .s4p_to_s2p()
     )
     np.testing.assert_allclose(actual.sdd, expected.sdd, atol=1e-12, rtol=0)
     np.testing.assert_array_equal(actual.network.z0, np.full((3, 2), 92.5))
     np.testing.assert_array_equal(source.s, before_s)
     np.testing.assert_array_equal(source.z0, before_z0)
-    assert actual.source_type == "s4p" and actual.port_order == ORDER
 
 
-def test_s4p_first_rejects_unsupported_impedance_and_mode():
-    source = measurement()
-    with pytest.raises(ValueError, match="scalar target"):
-        SparamModel.from_network(source, mode="s4p", renormalization_order="s4p_first")
-    with pytest.raises(ValueError, match="single-ended four-port"):
-        SparamModel.from_network(
-            SparamModel.from_network(source).network, mode="sdd", z0=92.5,
-            renormalization_order="s4p_first",
-        )
-    nonuniform = source.copy()
-    nonuniform.z0[:, 2] = 55.0
-    with pytest.raises(ValueError, match="common positive real"):
-        SparamModel.from_network(
-            nonuniform, mode="s4p", z0=92.5,
-            renormalization_order="s4p_first",
-        )
-    with pytest.raises(ValueError, match="renormalization_order"):
-        SparamModel.from_network(source, renormalization_order="unknown")
+def test_representation_operations_reject_wrong_domain():
+    raw = SparamModel.from_network(measurement(), representation="s4p", port_order=ORDER)
+    sdd = raw.s4p_to_s2p()
+    with pytest.raises(ValueError, match="does not match"):
+        SparamModel.from_network(measurement(), representation="s2p")
+    with pytest.raises(ValueError, match="requires an s4p"):
+        sdd.s4p_to_s2p()
+    with pytest.raises(ValueError, match="requires an s2p"):
+        raw.s2p_to_synthetic_s4p(port_order=ORDER, z0_diff=100.0)
 
 
 def test_frequency_limit_keeps_first_measured_point_at_or_above_limit(tmp_path):
     freqs = np.arange(5, dtype=float) * 1e9
-    s = np.zeros((len(freqs), 4, 4), dtype=complex)
-    source = rf.Network(f=freqs, s=s, z0=50.0)
+    source = rf.Network(f=freqs, s=np.zeros((len(freqs), 4, 4), complex), z0=50.0)
     source.write_touchstone(str(tmp_path / "limited"))
-
-    limited = SparamModel.from_touchstone(
-        str(tmp_path / "limited.s4p"),
-        mode="s4p",
-        frequency_limit_Hz=2.5e9,
-    )
+    raw = SparamModel.from_touchstone(tmp_path / "limited.s4p", representation="s4p")
+    limited = raw.limited_to_frequency(2.5e9)
     np.testing.assert_array_equal(limited.freqs, freqs[:4])
     assert limited.freqs[-1] == pytest.approx(3e9)
-
-    complete = SparamModel.from_touchstone(
-        str(tmp_path / "limited.s4p"),
-        mode="s4p",
-        frequency_limit_Hz=10e9,
-    )
-    np.testing.assert_array_equal(complete.freqs, freqs)
-
+    np.testing.assert_array_equal(raw.limited_to_frequency(10e9).freqs, freqs)
     with pytest.raises(ValueError, match="finite and positive"):
-        SparamModel.from_touchstone(
-            str(tmp_path / "limited.s4p"), mode="s4p", frequency_limit_Hz=0.0,
-        )
+        raw.limited_to_frequency(0.0)
 
 
 @pytest.mark.parametrize("module", [m93, m178])
-def test_both_channel_builders_apply_equation(tmp_path, module):
+def test_both_channel_builders_apply_sdd_first_equation(tmp_path, module):
     source = measurement()
     source.write_touchstone(str(tmp_path / "victim"))
-    cfg = m93.COMChannelConfig(victim_s4p_path=str(tmp_path / "victim.s4p"),
-                              port_order=ORDER, R0=46.25, R_d_tx=46.25, R_d_rx=46.25)
-    channels = (module._build_channel_under_test_93A(cfg) if module is m93
-                else module._build_channel_under_test(cfg))
-    raw = SparamModel.from_network(source, port_order=ORDER)
-    np.testing.assert_allclose(channels[0].sdd, equation(raw.sdd), atol=1e-12, rtol=0)
+    cfg = m93.COMChannelConfig(
+        victim_s4p_path=str(tmp_path / "victim.s4p"), port_order=ORDER,
+        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    )
+    channels = (
+        module._build_channel_under_test_93A(cfg)
+        if module is m93 else module._build_channel_under_test(cfg)
+    )
+    measured_sdd = SparamModel.from_network(source, port_order=ORDER).s4p_to_s2p()
+    np.testing.assert_allclose(channels[0].sdd, equation(measured_sdd.sdd), atol=1e-12, rtol=0)
 
 
 def test_fixed_sicopr_case_equation_and_vtf():
     cfg = excel_to_config_178A(str(ROOT / "cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx"))
-    assert cfg.policy.channel_renormalization_order == "s4p_first"
-    raw = SparamModel.from_touchstone(cfg.channel.victim_s4p_path,
-                                    mode="s4p", port_order=cfg.channel.port_order,
-                                    frequency_limit_Hz=cfg.channel.sparam_frequency_limit_Hz)
-    channels = m178._build_channel_under_test(cfg.channel, "sdd_first")
-    ch = channels[0]
-    np.testing.assert_allclose(ch.sdd, equation(raw.sdd), atol=1e-10, rtol=0)
+    raw = SparamModel.from_touchstone(
+        cfg.channel.victim_s4p_path, representation="s4p", port_order=cfg.channel.port_order,
+    ).limited_to_frequency(cfg.channel.sparam_frequency_limit_Hz)
+    ch = m178._build_channel_under_test(cfg.channel, "sdd_first")[0]
+    np.testing.assert_allclose(ch.sdd, equation(raw.s4p_to_s2p().sdd), atol=1e-10, rtol=0)
     f = ch.freqs
     tx = m178._build_txpkg(f, cfg.txpkg_victim)
     rx = m178._build_rxpkg(f, cfg.rxpkg)
@@ -155,22 +133,15 @@ def test_fixed_sicopr_case_equation_and_vtf():
 
 def test_fixed_sicopr_case_s4p_first_closes_all_channel_matrices():
     cfg = excel_to_config_178A(str(ROOT / "cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx"))
-    assert cfg.channel.sparam_frequency_limit_Hz == pytest.approx(67e9)
-    channels = m178._build_channel_under_test(
-        cfg.channel, cfg.policy.channel_renormalization_order,
-    )
-    paths = [
-        cfg.channel.victim_s4p_path,
-        *cfg.channel.next_s4p_paths,
-        *cfg.channel.fext_s4p_paths,
-    ]
-    assert len(channels) == len(paths) == 6
+    channels = m178._build_channel_under_test(cfg.channel, "s4p_first")
+    paths = [cfg.channel.victim_s4p_path, *cfg.channel.next_s4p_paths, *cfg.channel.fext_s4p_paths]
     for path, channel in zip(paths, channels):
-        assert len(channel.freqs) == 6701
-        assert channel.freqs[-1] == pytest.approx(67e9)
-        four = rf.Network(path)
-        four.renormalize(cfg.channel.R0)
-        expected = SparamModel.from_network(
-            four, mode="s4p", port_order=cfg.channel.port_order,
-        ).limited_to_frequency(cfg.channel.sparam_frequency_limit_Hz)
+        expected = (
+            SparamModel.from_touchstone(
+                path, representation="s4p", port_order=cfg.channel.port_order,
+            )
+            .renormalized(cfg.channel.R0)
+            .limited_to_frequency(cfg.channel.sparam_frequency_limit_Hz)
+            .s4p_to_s2p()
+        )
         np.testing.assert_allclose(channel.sdd, expected.sdd, atol=1e-12, rtol=0)

@@ -57,7 +57,7 @@
 
 | ID | Stage | Runtime control | Project default | Alternate/reference 行為 | 責任邊界與不得影響項目 |
 |---|---|---|---|---|---|
-| B-001 | Channel ingestion | `policy.channel_renormalization_order` | `sdd_first`：先取 Sdd，再 renormalize differential two-port | `s4p_first`：先將完整 single-ended four-port renormalize 至 `R_0`，再依 `port_order` 取 Sdd | 數值操作只屬 `SparamModel.from_touchstone()/from_network()`。COM orchestration 只傳選項；不得在 `_build_path()` 再交換 port 或再次 renormalize。 |
+| B-001 | Channel ingestion | `policy.channel_renormalization_order` | `sdd_first`：raw S4P → optional frequency limit → `s4p_to_s2p()` → differential `renormalized(2*R_0)` | `s4p_first`：raw S4P → full four-port `renormalized(R_0)` → optional frequency limit → `s4p_to_s2p()` | Constructor 只保存 raw representation；`_build_channel_under_test()` 顯式排列具名 utility 操作。`_build_path()` 不得交換 port 或再次 renormalize。 |
 | B-002 | S-parameter → scalar transfer | `policy.out_of_measured` | `cosine_decay`：在量測上限外做 cosine decay，phase linear extrapolation | `zero_padding`：量測上限以上的 scalar `H_21` 為零 | 屬 `SparamModel.to_LinkSegment()`／link resampling 邊界。不得修改 `S_ch`、`S_all` 或暗中改變量測上限。victim/NEXT/FEXT 共用。 |
 | B-003 | Pre-CTLE response → pulse | `policy.ctle_pulse_realization` | `continuous_tf`：連續頻域 CTF 乘入等效 transfer function | `bilinear_iir`：measured composite TF → reference grid → raw IFFT → `1e-3` peak 截尾 → bilinear IIR → unit pulse | `_realize_ctle_response()` 擁有整個 realization。TX FFE 不屬此分支；連續 VTF `H_all` 不因 pulse realization 改寫。 |
 | B-004 | Post-FFE record | `policy.rxffe_record_realization` | `linear_convolution`：固定 grid linear convolution，保留 overflow guard | `finite_record_circshift`：在既有有限 impulse record 上做 tap shift-sum | `_apply_rxffe_response()` 擁有 record 邊界。不得改變 RX FFE taps、MMSE 解或原始 pre-FFE response。 |
@@ -107,7 +107,7 @@
 | 範圍 | 主要實作入口 | 主要驗證 |
 |---|---|---|
 | Preset 展開與 provenance | `io/com_excel_io_178A.py::_resolve_project_profile_178A()` | `tests/test_com_model_178A_policy_branches.py` |
-| Channel renormalization | `utilities/sparam.py::SparamModel.from_touchstone()/from_network()` | `tests/test_channel_renormalization.py` |
+| Channel renormalization | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
 | High-frequency handling | `SparamModel.to_LinkSegment()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py` |
 | CTLE pulse realization | `_realize_ctle_response()` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `_apply_rxffe_response()` | `tests/test_com_model_178A_post_ffe.py`、CTLE pulse tests |

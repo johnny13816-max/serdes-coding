@@ -804,27 +804,26 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_ord
     if channel_cfg.victim_s4p_path is None:
         raise ValueError('channel_cfg.victim_s4p_path must be provided.')
     paths = [channel_cfg.victim_s4p_path, *channel_cfg.next_s4p_paths, *channel_cfg.fext_s4p_paths]
+
+    def limited(model: SparamModel) -> SparamModel:
+        limit = channel_cfg.sparam_frequency_limit_Hz
+        return model if limit is None else model.limited_to_frequency(limit)
+
     if renormalization_order == 'sdd_first':
         channels = [
-            IEEECOMSparam.from_touchstone(
-                path,
-                mode='s4p',
-                port_order=channel_cfg.port_order,
-                z0=2.0 * channel_cfg.R0,
-                frequency_limit_Hz=channel_cfg.sparam_frequency_limit_Hz,
-            )
+            limited(IEEECOMSparam.from_touchstone(
+                path, representation='s4p', port_order=channel_cfg.port_order,
+            ))
+            .s4p_to_s2p()
+            .renormalized(2.0 * channel_cfg.R0)
             for path in paths
         ]
     else:
         channels = [
-            SparamModel.from_touchstone(
-                path,
-                mode='s4p',
-                port_order=channel_cfg.port_order,
-                z0=2.0 * channel_cfg.R0,
-                renormalization_order='s4p_first',
-                frequency_limit_Hz=channel_cfg.sparam_frequency_limit_Hz,
-            )
+            limited(SparamModel.from_touchstone(
+                path, representation='s4p', port_order=channel_cfg.port_order,
+            ).renormalized(channel_cfg.R0))
+            .s4p_to_s2p()
             for path in paths
         ]
     common_freqs = channel_cfg.align_grid(channels)

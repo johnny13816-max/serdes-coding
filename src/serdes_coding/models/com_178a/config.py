@@ -142,9 +142,8 @@ class COMChannelConfig(_LeafConfigText):
             try:
                 channel = SparamModel.from_touchstone(
                     path,
-                    mode="s4p",
+                    representation="s4p",
                     port_order=self.port_order,
-                    z0=2.0 * self.R0,
                 )
                 raw_f_max = float(channel.freqs[-1])
                 channel = (
@@ -187,10 +186,8 @@ class COMChannelConfig(_LeafConfigText):
             channels = [
                 SparamModel.from_touchstone(
                     path,
-                    mode="s4p",
+                    representation="s4p",
                     port_order=self.port_order,
-                    z0=2.0 * self.R0,
-                    frequency_limit_Hz=self.sparam_frequency_limit_Hz,
                 )
                 for path in [
                     self.victim_s4p_path,
@@ -199,6 +196,11 @@ class COMChannelConfig(_LeafConfigText):
                 ]
                 if path is not None
             ]
+            if self.sparam_frequency_limit_Hz is not None:
+                channels = [
+                    channel.limited_to_frequency(self.sparam_frequency_limit_Hz)
+                    for channel in channels
+                ]
             freqs = self.align_grid(channels)
             return {
                 "status": "ok",

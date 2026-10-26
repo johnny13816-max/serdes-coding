@@ -22,6 +22,23 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
 
+@dataclass(frozen=True)
+class SparamOperation:
+    """One explicit, copy-returning S-parameter representation operation."""
+
+    name: str
+    parameters: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class SparamSource:
+    """Provenance for the unconverted S-parameter input network."""
+
+    source_type: Literal["s2p", "s4p", "synthetic_s4p"]
+    network: 'rf.Network'
+    path: str | None = None
+
+
 @dataclass
 class SparamProcessor:
     """
@@ -211,15 +228,16 @@ class SparamProcessor:
 
 class SparamModel:
     """
-    Generic scikit-rf Network wrapper for differential S-parameter data.
+    Generic scikit-rf Network wrapper for two-port differential or four-port
+    single-ended S-parameter data.
 
     Class boundary
     --------------
-    SparamModel is the generic container for Sdd two-port data after any required
-    input normalization. It owns:
+    SparamModel preserves the current representation until an explicit
+    conversion method is called. It owns:
     - array / Touchstone / rf.Network ingestion
     - input validation contract for frequency axes, Sdd, S4P, and port order
-    - single-ended S4P to differential-mode Sdd conversion
+    - explicit single-ended S4P to differential-mode Sdd conversion
     - generic Sdd two-port cascade operations through scikit-rf
     - conversion from Sdd to terminated voltage transfer H21(f), then LinkSegment
 
@@ -230,9 +248,10 @@ class SparamModel:
     standardized S-parameter preprocessing boundary.
 
     The object guarantees:
-    - self.network always stores a differential-mode Sdd two-port, not an S4P.
-    - S4P port ordering is handled only at construction time through
-      port_order=(tx_p, tx_n, rx_p, rx_n).
+    - self.network stores either an Sdd two-port or a single-ended S4P, named by
+      ``representation``.
+    - S4P port ordering is metadata until ``port_reordered()`` or
+      ``s4p_to_s2p()`` is called.
     - After S4P-to-Sdd conversion, z0 means differential reference impedance.
       A single-ended R0=50 ohm input should therefore become z0=100 ohm.
     - Public transformation methods do not mutate the original object, so raw
@@ -266,10 +285,8 @@ class SparamModel:
 
     Internal storage
     ----------------
-    S-parameters are stored as an rf.Network whose network.s is always
-    COM-style differential-mode Sdd:
-    - differential-mode Sdd array with shape (N, 2, 2)
-    - single-ended S4P array with shape (N, 4, 4), then converts to Sdd
+    S-parameters are stored as an rf.Network with either shape (N, 2, 2) for
+    differential Sdd or shape (N, 4, 4) for single-ended S4P.
 
     The stored Sdd matrix uses the COM-style two-port order:
         [[Sdd11, Sdd12],
@@ -284,20 +301,63 @@ class SparamModel:
     SparamModel intentionally exposes only the 4-port single-ended S4P order:
         port_order = (tx_p, tx_n, rx_p, rx_n)
 
-    Once the model is constructed, self.network stores only a 2-port Sdd
-    representation. The internal Sdd port order is fixed and is not exposed as
-    a public renumbering API.
+    The internal Sdd port order is fixed. Four-port models retain the declared
+    physical-port mapping until explicitly converted.
     """
 
     def __init__(
         self,
         network: 'rf.Network',
-        source_type: str,
+        source_type: Literal["s2p", "s4p", "synthetic_s4p"],
         port_order: tuple[int, int, int, int] | None = None,
+        *,
+        representation: Literal["s2p", "s4p"] | None = None,
+        source: SparamSource | None = None,
+        history: tuple[SparamOperation, ...] = (),
     ):
-        self.network: rf.Network = self.validate_network(network)
+        if representation is None:
+            representation = self._representation_from_network(network)
+        self.network: rf.Network = self.validate_network(network, representation)
+        self.representation = representation
         self.source_type = source_type
-        self.port_order = port_order
+        self.port_order = (
+            _validate_s4p_port_order(port_order)
+            if port_order is not None else None
+        )
+        self.source = source or SparamSource(source_type, network.copy())
+        self.history = tuple(history)
+
+    @staticmethod
+    def _representation_from_network(network: 'rf.Network') -> Literal["s2p", "s4p"]:
+        shape = np.asarray(network.s).shape[1:]
+        if shape == (2, 2):
+            return "s2p"
+        if shape == (4, 4):
+            return "s4p"
+        raise ValueError("Only differential two-port and single-ended four-port networks are supported.")
+
+    def _spawn(
+        self,
+        network: 'rf.Network',
+        *,
+        representation: Literal["s2p", "s4p"] | None = None,
+        operation: SparamOperation,
+        port_order: tuple[int, int, int, int] | None = None,
+        source_type: Literal["s2p", "s4p", "synthetic_s4p"] | None = None,
+    ) -> 'SparamModel':
+        """Build a same-class derived view while preserving input provenance."""
+        resolved_representation = representation or self._representation_from_network(network)
+        resolved_port_order = self.port_order if port_order is None else port_order
+        if resolved_representation == "s2p":
+            resolved_port_order = None
+        return type(self)(
+            network,
+            source_type=source_type or self.source_type,
+            port_order=resolved_port_order,
+            representation=resolved_representation,
+            source=self.source,
+            history=(*self.history, operation),
+        )
 
     # -------------------
     # constructors
@@ -328,7 +388,8 @@ class SparamModel:
         """
         freqs = LinkConfig.validate_freqs(freqs)
         sdd = cls.validate_sdd(sdd, freqs)
-        return cls(cls._network_from_smatrix(freqs, sdd, z0=z0), source_type="sdd")
+        network = cls._network_from_smatrix(freqs, sdd, z0=z0)
+        return cls(network, source_type="s2p", representation="s2p")
 
     @classmethod
     def from_s4p_array(
@@ -336,7 +397,7 @@ class SparamModel:
         freqs: np.ndarray,
         s4p: np.ndarray,
         port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: Union[float, np.ndarray] = 100.0,
+        z0: Union[float, np.ndarray] = 50.0,
     ) -> 'SparamModel':
         """
         Build from a single-ended 4-port S-parameter array.
@@ -346,125 +407,66 @@ class SparamModel:
         - s4p: complex array with shape (len(freqs), 4, 4)
         - port_order: old zero-based S4P ports in desired order
           (tx_p, tx_n, rx_p, rx_n)
-        - z0: differential-mode reference impedance assigned after Sdd conversion
+        - z0: single-ended reference impedance of the four physical ports
         """
         freqs = LinkConfig.validate_freqs(freqs)
         port_order = _validate_s4p_port_order(port_order)
-        sdd = _s4p_to_sdd(s4p, port_order, freqs)
-        return cls(cls._network_from_smatrix(freqs, sdd, z0=z0), source_type="s4p", port_order=port_order)
+        s4p = np.asarray(s4p, dtype=complex)
+        if s4p.shape != (len(freqs), 4, 4) or not np.all(np.isfinite(s4p)):
+            raise ValueError("s4p must be finite with shape (len(freqs), 4, 4).")
+        network = cls._network_from_smatrix(freqs, s4p, z0=z0)
+        return cls(
+            network,
+            source_type="s4p",
+            representation="s4p",
+            port_order=port_order,
+        )
 
     @classmethod
     def from_network(
         cls,
         network: 'rf.Network',
-        mode: str = "auto",
-        port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: Union[float, np.ndarray, None] = None,
-        *,
-        renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first",
-        frequency_limit_Hz: float | None = None,
+        representation: Literal["auto", "s2p", "s4p"] = "auto",
+        port_order: tuple[int, int, int, int] | None = None,
     ) -> 'SparamModel':
-        """
-        Build from an existing scikit-rf Network.
-
-        Input contract:
-        - mode="sdd": network.s must have shape (N, 2, 2)
-        - mode="s4p": network.s must have shape (N, 4, 4)
-        - mode="auto": 2-port is treated as Sdd, 4-port as single-ended S4P
-
-        mode:
-        - "auto": 2-port is treated as Sdd, 4-port as single-ended S4P
-        - "sdd": input network.s is already differential-mode Sdd
-        - "s4p": input network.s is single-ended 4-port data converted to Sdd
-
-        z0:
-        - None with mode="sdd": preserve network.z0
-        - None with mode="s4p": derive differential z0 from the single-ended
-          port pairs after applying port_order
-        - explicit value with mode="sdd": assign the internal Sdd reference
-          impedance (the supplied array already owns its normalization)
-        - explicit value with mode="s4p": first convert at the measured
-          differential impedance, then renormalize the Sdd two-port to this
-          differential impedance (178A.1.3, Eq. 178A-4). The source Network
-          remains unchanged; common-mode ports are not renormalized.
-
-        renormalization_order:
-        - "sdd_first": existing two-port Sdd renormalization (default).
-        - "s4p_first": renormalize a copy of the complete single-ended S4P
-          to z0/2, then extract Sdd. Requires a scalar positive real target
-          z0 and one common positive real measured impedance at all four ports.
-        """
-
-        if renormalization_order not in {"sdd_first", "s4p_first"}:
-            raise ValueError("renormalization_order must be sdd_first or s4p_first.")
-        if mode not in {"auto", "sdd", "s4p"}:
-            raise ValueError('mode must be "auto", "sdd", or "s4p".')
-
-        if mode == "auto":
-            if network.s.shape[1:] == (2, 2):
-                mode = "sdd"
-            elif network.s.shape[1:] == (4, 4):
-                mode = "s4p"
-            else:
-                raise ValueError("Only 2-port Sdd and 4-port single-ended networks are supported.")
-
-        if mode == "sdd":
-            if renormalization_order == "s4p_first":
-                raise ValueError("s4p_first requires a single-ended four-port network.")
-            if frequency_limit_Hz is not None:
-                network = cls._limited_network(network, frequency_limit_Hz)
-            z0_sdd = network.z0 if z0 is None else z0
-            return cls.from_sdd_array(network.f, network.s, z0=z0_sdd)
-
-        if renormalization_order == "s4p_first":
-            if z0 is None or np.asarray(z0).ndim != 0:
-                raise ValueError("s4p_first requires a scalar target differential z0.")
-            target = complex(z0)
-            if not np.isfinite(target) or target.imag != 0 or target.real <= 0:
-                raise ValueError("s4p_first target differential z0 must be positive and real.")
-            measured_z0 = np.asarray(network.z0)
-            if (measured_z0.shape != (len(network.f), 4)
-                    or not np.all(np.isfinite(measured_z0))
-                    or np.any(np.abs(measured_z0.imag) > 1e-12)
-                    or np.any(measured_z0.real <= 0)
-                    or not np.allclose(measured_z0.real, measured_z0.real[0, 0], rtol=0, atol=1e-12)):
-                raise ValueError("s4p_first requires one common positive real measured port impedance.")
-            source_copy = network.copy()
-            source_copy.renormalize(target.real / 2.0)
-            if frequency_limit_Hz is not None:
-                source_copy = cls._limited_network(source_copy, frequency_limit_Hz)
-            return cls.from_s4p_array(
-                source_copy.f, source_copy.s, port_order=port_order, z0=target.real,
+        """Preserve an existing two- or four-port Network as its own representation."""
+        if not isinstance(network, rf.Network):
+            raise TypeError("network must be an skrf.Network.")
+        inferred = cls._representation_from_network(network)
+        if representation == "auto":
+            representation = inferred
+        if representation not in {"s2p", "s4p"} or representation != inferred:
+            raise ValueError(
+                f"representation={representation!r} does not match network shape {network.s.shape[1:]}."
             )
-
-        if frequency_limit_Hz is not None:
-            network = cls._limited_network(network, frequency_limit_Hz)
-        z0_measured = _differential_z0_from_s4p_z0(network.z0, port_order)
-        model = cls.from_s4p_array(
-            network.f, network.s, port_order=port_order, z0=z0_measured,
+        if representation == "s4p":
+            port_order = _validate_s4p_port_order(port_order or (0, 1, 2, 3))
+        elif port_order is not None:
+            raise ValueError("port_order applies only to a four-port representation.")
+        source_type: Literal["s2p", "s4p"] = representation
+        return cls(
+            network.copy(),
+            source_type=source_type,
+            representation=representation,
+            port_order=port_order,
         )
-        if z0 is not None:
-            model.network.renormalize(cast(Any, z0))
-            model.network = model.validate_network(model.network)
-        return model
 
     @classmethod
     def from_touchstone(
         cls,
-        path: str,
-        mode: str = "auto",
-        port_order: tuple[int, int, int, int] = (0, 1, 2, 3),
-        z0: Union[float, np.ndarray, None] = None,
-        *,
-        renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first",
-        frequency_limit_Hz: float | None = None,
+        path: str | Path,
+        representation: Literal["auto", "s2p", "s4p"] = "auto",
+        port_order: tuple[int, int, int, int] | None = None,
     ) -> 'SparamModel':
-        ntwk = rf.Network(path)
-        return cls.from_network(
-            ntwk, mode=mode, port_order=port_order, z0=z0,
-            renormalization_order=renormalization_order,
-            frequency_limit_Hz=frequency_limit_Hz,
+        """Read Touchstone without implicit conversion, limiting, or renormalization."""
+        resolved = str(Path(path).expanduser().resolve())
+        model = cls.from_network(
+            rf.Network(resolved),
+            representation=representation,
+            port_order=port_order,
         )
+        model.source = SparamSource(model.source_type, model.network.copy(), resolved)
+        return model
 
     # --------------------
     # validation methods
@@ -501,18 +503,27 @@ class SparamModel:
         return sdd
 
     @staticmethod
-    def validate_network(network: 'rf.Network') -> 'rf.Network':
+    def validate_network(
+        network: 'rf.Network',
+        representation: Literal["s2p", "s4p"] | None = None,
+    ) -> 'rf.Network':
 
         if not isinstance(network, rf.Network):
             raise TypeError("network must be an skrf.Network.")
 
-        sdd = np.asarray(network.s, dtype=complex)
-        if sdd.ndim != 3 or sdd.shape[1:] != (2, 2):
-            raise ValueError("SparamModel.network must store Sdd with shape (N, 2, 2).")
+        smatrix = np.asarray(network.s, dtype=complex)
+        expected = (2, 2) if representation == "s2p" else (4, 4) if representation == "s4p" else None
+        if smatrix.ndim != 3 or smatrix.shape[1:] not in {(2, 2), (4, 4)}:
+            raise ValueError("SparamModel.network must store an (N,2,2) or (N,4,4) S-matrix.")
+        if expected is not None and smatrix.shape[1:] != expected:
+            raise ValueError(f"{representation} representation requires S-matrix shape (N,{expected[0]},{expected[1]}).")
+        if not np.all(np.isfinite(smatrix)):
+            raise ValueError("S-parameter matrix contains non-finite values.")
 
         freqs = np.asarray(network.f, dtype=float)
         LinkConfig.validate_freqs(freqs)
-        SparamModel.validate_sdd(sdd, freqs)
+        if smatrix.shape[1:] == (2, 2):
+            SparamModel.validate_sdd(smatrix, freqs)
 
         return network
 
@@ -520,7 +531,7 @@ class SparamModel:
         if not isinstance(other, SparamModel):
             raise TypeError("other must be an SparamModel.")
 
-        if self.sdd.shape[1:] != (2, 2) or other.sdd.shape[1:] != (2, 2):
+        if self.representation != "s2p" or other.representation != "s2p":
             raise ValueError("Both SparamModel objects must contain 2-port Sdd networks.")
 
         if self.sdd.shape[0] != other.sdd.shape[0]:
@@ -548,7 +559,21 @@ class SparamModel:
         return self.network.f
 
     @property
+    def nports(self) -> int:
+        return int(self.network.nports)
+
+    @property
+    def s(self) -> np.ndarray:
+        return self.network.s
+
+    @property
+    def z0(self) -> np.ndarray:
+        return self.network.z0
+
+    @property
     def sdd(self) -> np.ndarray:
+        if self.representation != "s2p":
+            raise ValueError("sdd is available only for an s2p representation; call s4p_to_s2p() first.")
         return self.network.s
 
     @property
@@ -1228,6 +1253,101 @@ class SparamModel:
         )
 
     # ---- immutable / copy-returning operations ----
+    def port_reordered(
+        self,
+        port_order: tuple[int, int, int, int],
+    ) -> 'SparamModel':
+        """Return an S4P whose physical ports are reordered to canonical role order."""
+        if self.representation != "s4p":
+            raise ValueError("port_reordered() requires an s4p representation.")
+        order = _validate_s4p_port_order(port_order)
+        network = self._network_from_smatrix(
+            self.freqs,
+            self.s[:, order, :][:, :, order],
+            z0=self.network.z0[:, order],
+        )
+        return self._spawn(
+            network,
+            representation="s4p",
+            port_order=(0, 1, 2, 3),
+            operation=SparamOperation("port_reordered", (("port_order", repr(order)),)),
+        )
+
+    def s4p_to_s2p(
+        self,
+        port_order: tuple[int, int, int, int] | None = None,
+    ) -> 'SparamModel':
+        """Explicitly extract differential Sdd from a single-ended four-port."""
+        if self.representation != "s4p":
+            raise ValueError("s4p_to_s2p() requires an s4p representation.")
+        order = _validate_s4p_port_order(port_order or self.port_order or (0, 1, 2, 3))
+        sdd = _s4p_to_sdd(self.s, order, self.freqs)
+        z0_diff = _differential_z0_from_s4p_z0(self.network.z0, order)
+        network = self._network_from_smatrix(self.freqs, sdd, z0=z0_diff)
+        return self._spawn(
+            network,
+            representation="s2p",
+            operation=SparamOperation("s4p_to_s2p", (("port_order", repr(order)),)),
+        )
+
+    def s2p_to_synthetic_s4p(
+        self,
+        *,
+        port_order: tuple[int, int, int, int],
+        z0_diff: float,
+    ) -> 'SparamModel':
+        """Embed Sdd in a canonical differential-only, matched-common-mode S4P.
+
+        This does not reconstruct measured common-mode or mode-conversion data.
+        It constructs Sdc=Scd=Scc=0 so a later ``s4p_to_s2p()`` using the same
+        port order recovers the original Sdd.
+        """
+        if self.representation != "s2p":
+            raise ValueError("s2p_to_synthetic_s4p() requires an s2p representation.")
+        order = _validate_s4p_port_order(port_order)
+        target = complex(z0_diff)
+        if not np.isfinite(target) or target.imag != 0.0 or target.real <= 0.0:
+            raise ValueError("z0_diff must be a finite positive real scalar.")
+        if not np.allclose(self.network.z0, target.real, rtol=0.0, atol=1e-12):
+            raise ValueError(
+                "z0_diff must match the current differential reference impedance; "
+                "call renormalized(z0_diff) explicitly first."
+            )
+
+        # Mixed-mode order is [d_tx, d_rx, c_tx, c_rx].  The common-mode block
+        # and both mode-conversion blocks are deliberately matched/zero.
+        smm = np.zeros((len(self.freqs), 4, 4), dtype=complex)
+        smm[:, :2, :2] = self.sdd
+        inv_sqrt2 = 1.0 / np.sqrt(2.0)
+        transform = inv_sqrt2 * np.asarray([
+            [1.0, -1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, -1.0],
+            [1.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 1.0],
+        ])
+        canonical = np.einsum("ij,fjk,kl->fil", transform.T, smm, transform)
+        physical = np.empty_like(canonical)
+        for canonical_i, physical_i in enumerate(order):
+            for canonical_j, physical_j in enumerate(order):
+                physical[:, physical_i, physical_j] = canonical[:, canonical_i, canonical_j]
+        network = self._network_from_smatrix(
+            self.freqs,
+            physical,
+            z0=target.real / 2.0,
+        )
+        source = SparamSource("synthetic_s4p", network.copy())
+        return type(self)(
+            network,
+            source_type="synthetic_s4p",
+            representation="s4p",
+            port_order=order,
+            source=source,
+            history=(*self.history, SparamOperation(
+                "s2p_to_synthetic_s4p",
+                (("port_order", repr(order)), ("z0_diff", repr(target.real))),
+            )),
+        )
+
     def cascade(self, other: 'SparamModel') -> 'SparamModel':
         """
         Return a new model by cascading two Sdd two-port networks.
@@ -1240,7 +1360,11 @@ class SparamModel:
         """
         self.validate_compatible_sparam(other)
         cascaded_network = self.network ** other.network
-        return type(self).from_network(cascaded_network, mode="sdd", z0=cascaded_network.z0)
+        return self._spawn(
+            cascaded_network,
+            representation="s2p",
+            operation=SparamOperation("cascade"),
+        )
 
     def reverse_ports(self) -> 'SparamModel':
         """Return a copy with differential ports 1 and 2 exchanged.
@@ -1249,10 +1373,15 @@ class SparamModel:
         exchange places, as do S12 and S21.  Per-port reference impedances
         follow their physical ports.
         """
-        return type(self).from_sdd_array(
-            self.freqs,
-            self.sdd[:, ::-1, ::-1],
-            z0=self.network.z0[:, ::-1],
+        if self.representation != "s2p":
+            raise ValueError("reverse_ports() requires an s2p representation.")
+        network = self._network_from_smatrix(
+            self.freqs, self.sdd[:, ::-1, ::-1], z0=self.network.z0[:, ::-1],
+        )
+        return self._spawn(
+            network,
+            representation="s2p",
+            operation=SparamOperation("reverse_ports"),
         )
 
     def limited_to_frequency(self, frequency_limit_Hz: float) -> 'SparamModel':
@@ -1280,14 +1409,13 @@ class SparamModel:
             )
 
         network = self._network_from_smatrix(
-            self.freqs[:end],
-            self.sdd[:end],
-            z0=self.network.z0[:end],
+            self.freqs[:end], self.s[:end], z0=self.network.z0[:end],
         )
-        return type(self)(
+        return self._spawn(
             network,
-            source_type=self.source_type,
-            port_order=self.port_order,
+            operation=SparamOperation(
+                "limited_to_frequency", (("frequency_limit_Hz", repr(limit)),)
+            ),
         )
 
     def write_touchstone_s2p(
@@ -1317,6 +1445,8 @@ class SparamModel:
         pathlib.Path
             The resolved path of the written Touchstone file.
         """
+        if self.representation != "s2p":
+            raise ValueError("write_touchstone_s2p() requires an s2p representation.")
         output_path = Path(path).expanduser()
         if output_path.suffix.lower() != ".s2p":
             raise ValueError("Differential SparamModel export path must end with '.s2p'.")
@@ -1353,6 +1483,53 @@ class SparamModel:
         )
         return output_path.resolve()
 
+    def write_touchstone_s4p(
+        self,
+        path: str | Path,
+        *,
+        form: Literal["ri", "ma", "db"] = "ri",
+    ) -> Path:
+        """Write the current single-ended four-port as Touchstone ``.s4p``."""
+        if self.representation != "s4p":
+            raise ValueError("write_touchstone_s4p() requires an s4p representation.")
+        output_path = Path(path).expanduser()
+        if output_path.suffix.lower() != ".s4p":
+            raise ValueError("Four-port SparamModel export path must end with '.s4p'.")
+        network = self.network.copy()
+        z0 = np.asarray(network.z0, dtype=complex)
+        reference_z0 = z0[0, 0]
+        if not np.allclose(z0, reference_z0) or not np.isclose(reference_z0.imag, 0.0):
+            raise ValueError(
+                "Touchstone 1.0 .s4p export requires one real single-ended "
+                "reference impedance shared by all ports and frequencies."
+            )
+        order = self.port_order or (0, 1, 2, 3)
+        comments = [
+            "Single-ended 4-port S-parameter model",
+            f"Port role order (tx_p, tx_n, rx_p, rx_n): {order}",
+            f"Reference impedance: {reference_z0.real:g} ohm single-ended",
+        ]
+        if self.source_type == "synthetic_s4p":
+            comments.extend([
+                "Synthetic differential-only S4P; not a reconstructed measured four-port",
+                "Sdc=Scd=Scc=0 (matched common-mode embedding)",
+            ])
+        network.comments = "\n".join(
+            part for part in ((network.comments or "").strip(), *comments) if part
+        )
+        network.frequency.unit = "Hz"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        network.write_touchstone(
+            filename=output_path,
+            form=form,
+            version="1.0",
+            encoding="ISO-8859-1",
+            format_spec_freq="{:.16e}",
+            format_spec_A="{:.16e}",
+            format_spec_B="{:.16e}",
+        )
+        return output_path.resolve()
+
     def renormalized(self, z0_new: Union[float, np.ndarray], s_def: SdefT | None = None) -> 'SparamModel':
         """
         Return a copy with S-parameters renormalized to a new reference impedance.
@@ -1371,9 +1548,12 @@ class SparamModel:
         s_def:
             scikit-rf wave definition: "power", "pseudo", "traveling", or None.
         """
-        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        model = self._spawn(
+            self.network.copy(),
+            operation=SparamOperation("renormalized", (("z0_new", repr(z0_new)),)),
+        )
         model.network.renormalize(cast(Any, z0_new), s_def=s_def)
-        model.network = model.validate_network(model.network)
+        model.network = model.validate_network(model.network, model.representation)
         return model
 
     def resampled(
@@ -1419,7 +1599,10 @@ class SparamModel:
         dc_coords:
             Coordinate system used by skrf DC extrapolation.
         """
-        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        model = self._spawn(
+            self.network.copy(),
+            operation=SparamOperation("resampled"),
+        )
         freqs = model.validate_resample_freqs(freqs)
 
         if freqs[0] < model.freqs[0]:
@@ -1430,7 +1613,7 @@ class SparamModel:
                 kind=dc_kind,
                 coords=dc_coords,
             )
-            model.network = model.validate_network(model.network)
+            model.network = model.validate_network(model.network, model.representation)
 
         f_stop = model.freqs[-1]
         freqs_inband = freqs[freqs <= f_stop]
@@ -1441,7 +1624,7 @@ class SparamModel:
             raise ValueError("resampled() target grid starts below the available frequency span after DC handling.")
 
         model.network = model.network.interpolate(freqs_inband, basis=basis, coords=coords, kind=kind)
-        model.network = model.validate_network(model.network)
+        model.network = model.validate_network(model.network, model.representation)
         return model
 
     def extrapolated_to_dc(
@@ -1470,7 +1653,10 @@ class SparamModel:
         coords:
             Coordinate system used by skrf.
         """
-        model = type(self).from_network(self.network.copy(), mode="sdd", z0=self.network.z0)
+        model = self._spawn(
+            self.network.copy(),
+            operation=SparamOperation("extrapolated_to_dc"),
+        )
         if np.isclose(model.freqs[0], 0.0):
             return model
 
@@ -1482,7 +1668,7 @@ class SparamModel:
             kind=kind,
             coords=coords,
         )
-        model.network = model.validate_network(model.network)
+        model.network = model.validate_network(model.network, model.representation)
         return model
 
     def voltage_transfer_function(

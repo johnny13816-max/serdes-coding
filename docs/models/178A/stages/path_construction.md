@@ -111,10 +111,11 @@ The full types and lifecycle are defined in [Status tree](../status_tree.md). Th
 
 ```text
 _build_channel_under_test(channel_cfg, renormalization_order)
-├── sdd_first: load through 178A IEEECOMSparam.from_touchstone()
-└── s4p_first: load through neutral SparamModel.from_touchstone()
-    └── SparamModel.from_network(): renormalize copied full S4P to R_0,
-        apply optional measured-frequency limit, then convert to Sdd at 2R_0
+├── read raw single-ended S4P without conversion
+├── sdd_first: optional frequency limit -> s4p_to_s2p()
+│   └── renormalized(2*R_0) in the differential two-port domain
+└── s4p_first: renormalized(R_0) on the full S4P
+    └── optional frequency limit -> s4p_to_s2p()
 preserve victim -> NEXT -> FEXT order
 align all six Sdd channels to one measured-domain intersection grid
 ```
@@ -127,6 +128,8 @@ full S4P renormalization, frequency limit, then mixed-mode Sdd conversion.
 The policy selects the ingestion order only; `_build_path()` never renormalizes
 an already constructed `S_ch`. The default `sdd_first` retains the original
 two-port path, while the SiCoPR case selects `s4p_first`.
+The representation and conversion API is defined by the
+[S-parameter model contract](../../../architecture/sparameter_model_contract.md).
 
 ### 2. Build shared responses
 

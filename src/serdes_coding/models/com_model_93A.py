@@ -710,9 +710,8 @@ class COMChannelConfig(_PrettyDataclass):
             try:
                 channel = SparamModel.from_touchstone(
                     path,
-                    mode="s4p",
+                    representation="s4p",
                     port_order=self.port_order,
-                    z0=2.0 * self.R0,
                 )
                 raw_f_max = float(channel.freqs[-1])
                 channel = (
@@ -755,10 +754,8 @@ class COMChannelConfig(_PrettyDataclass):
             channels = [
                 SparamModel.from_touchstone(
                     path,
-                    mode="s4p",
+                    representation="s4p",
                     port_order=self.port_order,
-                    z0=2.0 * self.R0,
-                    frequency_limit_Hz=self.sparam_frequency_limit_Hz,
                 )
                 for path in [
                     self.victim_s4p_path,
@@ -767,6 +764,11 @@ class COMChannelConfig(_PrettyDataclass):
                 ]
                 if path is not None
             ]
+            if self.sparam_frequency_limit_Hz is not None:
+                channels = [
+                    channel.limited_to_frequency(self.sparam_frequency_limit_Hz)
+                    for channel in channels
+                ]
             freqs = self.align_grid(channels)
             return {
                 "status": "ok",
@@ -1807,16 +1809,14 @@ def _build_channel_under_test_93A(channel_cfg: COMChannelConfig) -> list[SparamM
         *channel_cfg.fext_s4p_paths,
     ]
 
-    channel_models = [
-        IEEECOMSparam.from_touchstone(
-            path,
-            mode="s4p",
-            port_order=channel_cfg.port_order,
-            z0=2.0 * channel_cfg.R0,
-            frequency_limit_Hz=channel_cfg.sparam_frequency_limit_Hz,
+    channel_models = []
+    for path in paths:
+        raw = IEEECOMSparam.from_touchstone(
+            path, representation="s4p", port_order=channel_cfg.port_order,
         )
-        for path in paths
-    ]
+        if channel_cfg.sparam_frequency_limit_Hz is not None:
+            raw = raw.limited_to_frequency(channel_cfg.sparam_frequency_limit_Hz)
+        channel_models.append(raw.s4p_to_s2p().renormalized(2.0 * channel_cfg.R0))
 
     common_freqs = channel_cfg.align_grid(channel_models)
     return [channel.resampled(common_freqs) for channel in channel_models]
