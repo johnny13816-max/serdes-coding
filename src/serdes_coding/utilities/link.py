@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Optional, Union, cast
 from dataclasses import dataclass, field
 import skrf as rf
@@ -1698,6 +1699,106 @@ class LinkSegment:
             xlim_ui=xlim_ui,
             label=label,
         )
+
+    def eye_traces(
+        self,
+        symbols: np.ndarray,
+        *,
+        ui_span: int = 2,
+        alignment: Literal["record_start", "main_cursor"] = "main_cursor",
+        discard_ui: int = 0,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Reconstruct and fold a deterministic symbol waveform into eye traces.
+
+        ``symbols`` contains the actual transmitted amplitude levels. The
+        waveform is the linear superposition of one SBR per symbol:
+
+            y[n] = sum_k symbols[k] * sbr[n - k*per_ui]
+
+        The method assumes zero symbols outside the supplied record. It does
+        not add noise, jitter, CDR behavior, BER contours, or a hidden PRBS.
+
+        Returns
+        -------
+        time_ui:
+            Symmetric eye-window time axis in UI.
+        traces:
+            One row per retained symbol, with the main cursor or symbol launch
+            located at the center sample according to ``alignment``.
+        """
+        symbols = np.asarray(symbols, dtype=float)
+        if symbols.ndim != 1 or symbols.size == 0:
+            raise ValueError("symbols must be a nonempty one-dimensional array.")
+        if not np.all(np.isfinite(symbols)):
+            raise ValueError("symbols contains non-finite values.")
+        if isinstance(ui_span, (bool, np.bool_)) or int(ui_span) != ui_span or ui_span <= 0:
+            raise ValueError("ui_span must be a positive integer.")
+        if (isinstance(discard_ui, (bool, np.bool_))
+                or int(discard_ui) != discard_ui or discard_ui < 0):
+            raise ValueError("discard_ui must be a non-negative integer.")
+        ui_span = int(ui_span)
+        discard_ui = int(discard_ui)
+        if 2 * discard_ui >= symbols.size:
+            raise ValueError("discard_ui removes every available symbol trace.")
+        if alignment not in {"record_start", "main_cursor"}:
+            raise ValueError('alignment must be "record_start" or "main_cursor".')
+
+        per_ui = int(self.cfg.per_ui)
+        window_intervals = ui_span * per_ui
+        if window_intervals % 2 != 0:
+            raise ValueError("ui_span * cfg.per_ui must be even for centered eye traces.")
+        half_window = window_intervals // 2
+        time_ui = np.arange(-half_window, half_window + 1, dtype=float) / per_ui
+
+        drive = np.zeros(symbols.size * per_ui, dtype=float)
+        drive[::per_ui] = symbols
+        # Practical eye records contain many UI and LinkSegment SBR arrays use
+        # the full analysis grid. FFT convolution preserves the same linear
+        # operation without the prohibitive O(N*M) direct-convolution cost.
+        from scipy.signal import fftconvolve
+        waveform = fftconvolve(drive, self.sbr, mode="full")
+        waveform = np.pad(waveform, (half_window, half_window))
+        alignment_sample = (
+            int(np.argmax(np.abs(self.sbr))) if alignment == "main_cursor" else 0
+        )
+
+        retained = range(discard_ui, symbols.size - discard_ui)
+        traces = np.empty((len(retained), window_intervals + 1), dtype=float)
+        for row, symbol_index in enumerate(retained):
+            center = half_window + symbol_index * per_ui + alignment_sample
+            traces[row] = waveform[center - half_window:center + half_window + 1]
+
+        return time_ui, traces
+
+    def plot_eye(
+        self,
+        symbols: np.ndarray,
+        *,
+        ui_span: int = 2,
+        alignment: Literal["record_start", "main_cursor"] = "main_cursor",
+        discard_ui: int = 0,
+        ax: Optional[Axes] = None,
+        save_path: str | Path = "",
+        show: bool = True,
+    ) -> Axes:
+        """Plot deterministic eye traces reconstructed by :meth:`eye_traces`."""
+        time_ui, traces = self.eye_traces(
+            symbols,
+            ui_span=ui_span,
+            alignment=alignment,
+            discard_ui=discard_ui,
+        )
+        created_ax = ax is None
+        if created_ax:
+            _, ax = self._plt().subplots()
+        assert ax is not None
+        ax.plot(time_ui, traces.T, color="C0", alpha=0.25)
+        ax.set_xlabel("Time (UI)")
+        ax.set_ylabel("Amplitude")
+        ax.set_title("Deterministic Eye Diagram")
+        ax.set_xlim(float(time_ui[0]), float(time_ui[-1]))
+        ax.grid(True)
+        return self._finish_plot(ax, str(save_path), show=show if created_ax else False)
 
     def cascade_tf(self, other: 'LinkSegment') -> 'LinkSegment':
         """

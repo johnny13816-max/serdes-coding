@@ -33,3 +33,20 @@ sampling aliasing 不宣稱可逆。
 並依 MSE 順序補位。所有候選均超界時才使整個 search 因 grid 容量失敗。
 增大時間窗需從原始 channel／config 以較小 `target_df` 重跑，不得替舊 IR
 補零宣稱為新量測結果。
+
+## SBR-to-eye contract
+
+`LinkSegment.eye_traces()` 將 caller 提供的實際 symbol amplitudes 以 `cfg.per_ui`
+間隔放入 impulse train，再與 `LinkSegment.sbr` 做完整線性卷積：
+
+```text
+y[n] = sum(symbols[k] * sbr[n - k*per_ui])
+```
+
+它只負責 deterministic LTI waveform reconstruction 與 UI-window folding；不產生
+隱藏 PRBS，不加入 noise、jitter、CDR、BER contour 或 statistical eye。輸入記錄以
+零 symbol prehistory/posthistory 處理。`alignment="main_cursor"` 以
+`argmax(abs(sbr))` 對齊 eye 中央；`record_start` 以每個 symbol launch 對齊。
+`discard_ui` 由 caller 明確決定，不使用 tail threshold 猜測 channel memory。
+
+`plot_eye()` 只呼叫 `eye_traces()` 並呈現同一組資料，不重算另一條 waveform path。
