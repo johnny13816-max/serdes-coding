@@ -52,14 +52,18 @@ raw S4P -> single-ended renormalization -> optional frequency limit -> S4P-to-Sd
 
 ## Synthetic S4P
 
-`s2p_to_synthetic_s4p(port_order, z0_diff)` 建立 canonical mixed-mode matrix：
+`s2p_to_synthetic_s4p(target_z0_diff, reader_port_order)` 先在需要時將
+Sdd renormalize 到目標 differential impedance，再建立 canonical mixed-mode matrix：
 
 \[
 S_{mm}=\begin{bmatrix}S_{dd}&0\\0&0\end{bmatrix}
 \]
 
-因此 `Sdc=Scd=Scc=0`，single-ended reference impedance 為 `z0_diff/2`。它只保證
-用相同 `port_order` 重新取得相同 Sdd，不代表原始量測 S4P 的 common-mode 行為。
+因此 `Sdc=Scd=Scc=0`，single-ended reference impedance 為
+`target_z0_diff/2`。`reader_port_order` 表示下游 reader 將 raw S4P 排成
+`(tx_p, tx_n, rx_p, rx_n)` 時使用的順序；writer 使用其 inverse permutation
+預先排列 raw ports。它只保證用該 reader order 重新取得 target-z0 Sdd，不代表
+原始量測 S4P 的 common-mode 行為。
 輸出 Touchstone 必須帶有 synthetic 說明。
 
 ## Validation invariants

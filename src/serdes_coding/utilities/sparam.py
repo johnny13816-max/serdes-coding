@@ -22,6 +22,16 @@ if TYPE_CHECKING:
     from matplotlib.axes import Axes
 
 
+def _inverse_s4p_reader_order(
+    reader_port_order: tuple[int, int, int, int],
+) -> tuple[int, int, int, int]:
+    """Return the writer permutation inverted from a validated reader order."""
+    reader = np.asarray(_validate_s4p_port_order(reader_port_order), dtype=int)
+    writer = np.empty_like(reader)
+    writer[reader] = np.arange(reader.size)
+    return (int(writer[0]), int(writer[1]), int(writer[2]), int(writer[3]))
+
+
 @dataclass(frozen=True)
 class SparamOperation:
     """One explicit, copy-returning S-parameter representation operation."""
@@ -1293,31 +1303,33 @@ class SparamModel:
     def s2p_to_synthetic_s4p(
         self,
         *,
-        port_order: tuple[int, int, int, int],
-        z0_diff: float,
+        target_z0_diff: float,
+        reader_port_order: tuple[int, int, int, int],
     ) -> 'SparamModel':
-        """Embed Sdd in a canonical differential-only, matched-common-mode S4P.
+        """Build a reader-oriented differential-only, matched-common-mode S4P.
 
         This does not reconstruct measured common-mode or mode-conversion data.
-        It constructs Sdc=Scd=Scc=0 so a later ``s4p_to_s2p()`` using the same
-        port order recovers the original Sdd.
+        It first renormalizes Sdd to ``target_z0_diff`` when needed, constructs
+        Sdc=Scd=Scc=0, then applies the inverse of ``reader_port_order`` so a
+        downstream reader using that order recovers the target Sdd.
         """
         if self.representation != "s2p":
             raise ValueError("s2p_to_synthetic_s4p() requires an s2p representation.")
-        order = _validate_s4p_port_order(port_order)
-        target = complex(z0_diff)
+        reader_order = _validate_s4p_port_order(reader_port_order)
+        writer_order = _inverse_s4p_reader_order(reader_order)
+        target = complex(target_z0_diff)
         if not np.isfinite(target) or target.imag != 0.0 or target.real <= 0.0:
-            raise ValueError("z0_diff must be a finite positive real scalar.")
-        if not np.allclose(self.network.z0, target.real, rtol=0.0, atol=1e-12):
-            raise ValueError(
-                "z0_diff must match the current differential reference impedance; "
-                "call renormalized(z0_diff) explicitly first."
-            )
+            raise ValueError("target_z0_diff must be a finite positive real scalar.")
+        differential = (
+            self
+            if np.allclose(self.network.z0, target.real, rtol=0.0, atol=1e-12)
+            else self.renormalized(target.real)
+        )
 
         # Mixed-mode order is [d_tx, d_rx, c_tx, c_rx].  The common-mode block
         # and both mode-conversion blocks are deliberately matched/zero.
         smm = np.zeros((len(self.freqs), 4, 4), dtype=complex)
-        smm[:, :2, :2] = self.sdd
+        smm[:, :2, :2] = differential.sdd
         inv_sqrt2 = 1.0 / np.sqrt(2.0)
         transform = inv_sqrt2 * np.asarray([
             [1.0, -1.0, 0.0, 0.0],
@@ -1326,10 +1338,7 @@ class SparamModel:
             [0.0, 0.0, 1.0, 1.0],
         ])
         canonical = np.einsum("ij,fjk,kl->fil", transform.T, smm, transform)
-        physical = np.empty_like(canonical)
-        for canonical_i, physical_i in enumerate(order):
-            for canonical_j, physical_j in enumerate(order):
-                physical[:, physical_i, physical_j] = canonical[:, canonical_i, canonical_j]
+        physical = canonical[:, writer_order, :][:, :, writer_order]
         network = self._network_from_smatrix(
             self.freqs,
             physical,
@@ -1340,11 +1349,15 @@ class SparamModel:
             network,
             source_type="synthetic_s4p",
             representation="s4p",
-            port_order=order,
+            port_order=reader_order,
             source=source,
-            history=(*self.history, SparamOperation(
+            history=(*differential.history, SparamOperation(
                 "s2p_to_synthetic_s4p",
-                (("port_order", repr(order)), ("z0_diff", repr(target.real))),
+                (
+                    ("target_z0_diff", repr(target.real)),
+                    ("reader_port_order", repr(reader_order)),
+                    ("writer_port_order", repr(writer_order)),
+                ),
             )),
         )
 
@@ -1506,7 +1519,7 @@ class SparamModel:
         order = self.port_order or (0, 1, 2, 3)
         comments = [
             "Single-ended 4-port S-parameter model",
-            f"Port role order (tx_p, tx_n, rx_p, rx_n): {order}",
+            f"Reader port order for (tx_p, tx_n, rx_p, rx_n): {order}",
             f"Reference impedance: {reference_z0.real:g} ohm single-ended",
         ]
         if self.source_type == "synthetic_s4p":

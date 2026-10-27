@@ -81,7 +81,9 @@ def test_representation_operations_reject_wrong_domain():
     with pytest.raises(ValueError, match="requires an s4p"):
         sdd.s4p_to_s2p()
     with pytest.raises(ValueError, match="requires an s2p"):
-        raw.s2p_to_synthetic_s4p(port_order=ORDER, z0_diff=100.0)
+        raw.s2p_to_synthetic_s4p(
+            target_z0_diff=100.0, reader_port_order=ORDER,
+        )
 
 
 def test_frequency_limit_keeps_first_measured_point_at_or_above_limit(tmp_path):

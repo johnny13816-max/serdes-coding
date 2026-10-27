@@ -56,12 +56,17 @@ def _assert_sparam_matches(module) -> None:
     sdd[:, 1, 0] = [1.0, 0.8 - 0.1j, 0.6 - 0.2j]
     sdd[:, 0, 1] = sdd[:, 1, 0]
     exported = module.SparamModel.from_sdd_array(freqs, sdd, z0=92.5)
-    order = (0, 2, 1, 3)
-    export_roundtrip = exported.s2p_to_synthetic_s4p(port_order=order, z0_diff=92.5).s4p_to_s2p()
-    np.testing.assert_allclose(export_roundtrip.sdd, sdd, rtol=1e-13, atol=1e-13)
+    order = (2, 0, 3, 1)
+    export_roundtrip = exported.s2p_to_synthetic_s4p(
+        target_z0_diff=100.0, reader_port_order=order,
+    ).s4p_to_s2p()
+    expected = exported.renormalized(100.0)
+    np.testing.assert_allclose(export_roundtrip.sdd, expected.sdd, rtol=1e-13, atol=1e-13)
     if SourceSparamModel is not None:
         source = SourceSparamModel.from_sdd_array(freqs, sdd, z0=92.5)
-        source_roundtrip = source.s2p_to_synthetic_s4p(port_order=order, z0_diff=92.5).s4p_to_s2p()
+        source_roundtrip = source.s2p_to_synthetic_s4p(
+            target_z0_diff=100.0, reader_port_order=order,
+        ).s4p_to_s2p()
         np.testing.assert_allclose(export_roundtrip.sdd, source_roundtrip.sdd, rtol=0.0, atol=0.0)
 
 

@@ -13,7 +13,7 @@ SECTIONS = (
     ("psd.py", "def _freqs_equal"),
     ("pmf.py", "def _convolve_probability_mass"),
     ("link.py", "SdefT ="),
-    ("sparam.py", "@dataclass(frozen=True)\nclass SparamOperation"),
+    ("sparam.py", "def _inverse_s4p_reader_order"),
 )
 
 HEADER = '''"""Python 3.7.3-compatible single-file copy of serdes_coding.utilities.
