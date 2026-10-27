@@ -4,6 +4,8 @@ This directory contains active change contracts and unresolved future work. Plan
 
 ## Active planning documents
 
+- [Toward v1.0 change tracker](open_issues.xlsx): concise status, dependency,
+  boundary, dates, next step, and closure evidence for proposed and active work.
 - [當前契約狀態](active_contracts.md): each named contract's current gate and next action.
 - [Reference 驗證待結案 Contracts](reference_alignment_contracts.md): E/G/T issue log and detailed TC history.
 - [Future ideas](future_ideas.md): deferred improvements and unresolved design work.

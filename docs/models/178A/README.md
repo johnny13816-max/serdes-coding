@@ -11,6 +11,7 @@ It follows the stage-first rules in
 3. [Call tree](call_tree.md) — implemented manual entry, single run, local search, distributed search, execution-policy boundaries, and semantic model-stage calls.
 4. [Branch behavior registry](branch_behavior_registry.md) — authoritative project defaults, alternate/reference methods, stage ownership, responsibility boundaries, and validation evidence.
 5. [Stage documentation](stages/README.md) — stage-by-stage input/output, ownership, controls, failure boundaries, validation evidence, and unresolved review items.
+6. [Design review](design_review.md) — v1.0 前的逐章審查順序、結論、證據與待決事項。
 
 ## Stage order
 

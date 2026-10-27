@@ -5,18 +5,19 @@ This directory contains the maintained project documentation. Start with the arc
 ## Reading order
 
 1. [Project structure](architecture/project_structure.md)
-2. [Documentation contract](architecture/documentation_contract.md)
-3. [Software layers](architecture/software_layers.md)
+2. [Project evolution and extension framework](architecture/evolution_strategy.md)
+3. [Documentation contract](architecture/documentation_contract.md)
+4. [Software layers](architecture/software_layers.md)
    and [Utility grid](architecture/utility_grid.md)
    and [COM dataclass text contract](architecture/dataclass_text_contract.md)
    and [Reference change workflow](architecture/reference_change_workflow.md)
-4. [Configuration architecture](architecture/configuration_architecture.md)
-5. [Reporting architecture](architecture/reporting_architecture.md)
-6. [Model documentation](models/README.md)
+5. [Configuration architecture](architecture/configuration_architecture.md)
+6. [Reporting architecture](architecture/reporting_architecture.md)
+7. [Model documentation](models/README.md)
    including the authoritative [178A branch behavior registry](models/178A/branch_behavior_registry.md)
-7. [Validation](validation/README.md) and [operations](operations/README.md)
+8. [Validation](validation/README.md) and [operations](operations/README.md)
    including the authoritative [v1.0 release gate](operations/v1_0_release_gate.md)
-8. [Active contracts](planning/active_contracts.md) and [planning](planning/README.md)
+9. [Active contracts](planning/active_contracts.md) and [planning](planning/README.md)
 
 ## Directory ownership
 

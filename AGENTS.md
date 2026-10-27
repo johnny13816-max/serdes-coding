@@ -178,6 +178,53 @@ contract together before adding any other top-level entry.
 - Preserve external COM Ad Hoc workbooks under `reference_data/COM_adhoc_config/<source_id>/`, where `source_id` names the supplying source (for example, `hansel` or `ieee_matlab`). Keep parser format IDs and match status in `manifest.csv`; they do not define storage paths. Preserve original workbooks, record batch/probe/hash metadata, and do not edit copied originals.
 - Manual 93A and 178A entries expose single_run/search_run; workbook search_config alone defines search ranges. The 178A entry supports EXEC_POLICY overrides. The 93A entry rejects non-empty EXEC_POLICY until native 93A execution profiles are defined.
 
+## Toward v1.0 change tracking
+
+Use `docs/planning/open_issues.xlsx` as the concise tracker for proposed and
+active v1.0 changes. Record a new idea there without requiring immediate
+implementation. Each item must state its reason, change boundary, dependency,
+next step, open date, and closure evidence; set the close date only after the
+implementation, validation, and required documentation are complete.
+
+Keep only one item in `Approved` or `Implemented` state at a time. When a new
+idea appears during active work, classify it immediately: merge it into the
+active contract when it has the same responsibility boundary, revise and
+reapprove the active contract when it invalidates that boundary, or queue it as
+a separate item and finish the active contract first. A design discussion,
+counterfactual result, or drafted contract is not an implementation.
+
+### Workflow integrity gate
+
+The active contract remains the execution priority when the user proposes,
+discusses, or approves another idea. A new suggestion does not silently cancel,
+pause, or supersede the active contract.
+
+Before starting a different contract, stage, utility, or design topic, reconcile
+the active item against its stated acceptance boundary. Codex must report:
+
+- the active item and its current lifecycle state;
+- the remaining implementation, validation, documentation, commit, or push
+  steps;
+- whether the new suggestion belongs inside the active boundary, requires a
+  revised contract, or is queued as a separate item; and
+- the exact point at which the queued suggestion will resume.
+
+If the active item has unfinished closure work, explicitly defer the new
+suggestion and finish the active item first. Do not begin the queued work merely
+because the conversation has moved to it. The only exceptions are an explicit
+user instruction to cancel or pause the active item, or a blocker that prevents
+meaningful progress. In either case, record the state, reason, preserved
+evidence, and next resumption gate before switching.
+
+An implementation item may advance to `Closed` only after its scoped code,
+focused validation, applicable regression, required contract documentation,
+tracker reconciliation, and an isolated Git commit are complete. Push that
+commit before beginning the next approved implementation item when the current
+workflow includes GitHub synchronization. Use one commit per independently
+reviewable responsibility boundary; do not mix unrelated contracts merely to
+reduce commit count. A documentation-only closure pass may use one commit when
+all included files reconcile the same completed responsibility boundary.
+
 ## Protected COM model kernel
 
 The COM mathematical kernel is read-only by default. Treat the following as
@@ -245,6 +292,7 @@ behavior.
 
 - `docs/README.md` is the documentation entry point. Read it before adding or relocating project documentation.
 - `docs/architecture/documentation_contract.md` defines the required stage-first model documentation structure.
+- `docs/architecture/evolution_strategy.md` defines how the public baseline, internal product fork, and research extensions share the project foundation. New stage or utility methods must follow its ownership, lifecycle, and validation checklists.
 - `docs/architecture/software_layers.md` defines dependency direction and code ownership.
 - Model documentation is organized by version and stage. A stage owns the stable input/output and status-lifecycle contract; functional blocks explain algorithms inside that stage; individual helpers remain in docstrings or generated API references unless independently significant.
 - Changes to stage boundaries, config/status dataclasses, workbook mappings, semantic call trees, or reporting dependencies must update the corresponding authoritative document in the same change.
@@ -253,6 +301,8 @@ behavior.
 - Every branch entry must identify its stage, runtime control, project default, all alternate behaviors, versioned execution-profile participation, numerical owner, responsibility boundary, quantities allowed to change, quantities that must remain unchanged, and validation evidence. Inputs, equivalent representations, common bug fixes, and single-valued controls must be explicitly classified instead of being presented as parallel algorithms.
 - Do not add a nested per-stage policy dataclass under `COMConfig.policy`. The 178A runtime branch controls stay one level deep in `COMPolicyConfig`; stage helpers receive the named values they need. A proposed exception requires an explicitly approved configuration-architecture change contract.
 - A Core Model Change Contract that adds or changes a branch is incomplete until it names the corresponding branch-registry row and the documentation/tests that will be updated.
+- Classify a new method as an experiment, named parallel method, default candidate, or confirmed-error fix before integrating it. An experiment must not change the production default; a named method must identify its owner, divergence/rejoin boundary, typed control, invariants, and evidence before it enters a versioned execution profile.
+- Keep company-only data, adapters, reports, and claims outside the public repository. Internal products extend the public typed interfaces; generic verified improvements may flow back only after private dependencies and evidence are removed.
 
 ## Repository cleanup safety
 

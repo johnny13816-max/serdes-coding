@@ -98,7 +98,8 @@ COMSearchConfig                 separate search-run input
 | `source_config` | External workbook provenance | None |
 | `source_note` | Human-readable conversion note | None |
 
-The current template labels these rows `intrinsic`; that is incorrect. They belong to case config.
+The template leaves `Parameter Class` blank for these rows and identifies them by
+the `case` domain. They belong to case metadata and do not enter `COMConfig`.
 
 ## Fixed config tree
 
