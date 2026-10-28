@@ -7,9 +7,9 @@ v1.0 release 狀態見
 
 ## Workflow state
 
-本規則維護 session 的執行邊界為 [RC-20261028-001](rule_changes.md#rc-20261028-001--建立規則提案流程)：
-使用者已明確授權本對話維護規則；目前 Implemented，下一關為文件驗證與獨立 commit。
-此項不執行 technical queue；下列「沒有 Approved 或 Implemented」僅指 technical items。
+規則維護 [RC-20261028-001](rule_changes.md#rc-20261028-001--建立規則提案流程) 已 Closed，
+規則 commit 為 `d02cee3`；目前沒有 active rule change。RC-20261028-002–004 仍為 Proposed，
+不自動啟動。使用者授予本對話的規則維護權限不延伸至新 session；technical queue 保持如下。
 
 `GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在
 2026-10-28 重新審查後判定過度擴張。P1/P2 保持完成，P3–P9 依

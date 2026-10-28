@@ -8,20 +8,19 @@
 Handoff state: READY
 Generated at: 2026-10-28 Asia/Taipei
 Source branch: main
-Source revision: HEAD containing the handoff-rule update and this snapshot
-Active task: project-governance rule validation through user Q&A
-Current phase: handoff mechanism implemented; current session must stop after verification
-Collaboration mode: Full-Agent for governance documentation
-Approved boundary: governance/rule documents only; no code or COM-model changes
-Completed: layered governance, task/model taxonomy, collaboration modes, structure-first communication,
-           active-item document lifecycle, and explicit /handoff write/new-session read behavior
-In progress: none after this snapshot
+Source revision: rule boundary d02cee3; snapshot included in subsequent closure commit
+Active task: none; RC-20261028-001 closed
+Current phase: rule_change workflow committed and verified; awaiting user selection
+Collaboration mode: Full-Agent for authorized rule maintenance in the current conversation
+Approved boundary: current conversation only; new sessions need explicit rule-change authorization
+Completed: authorized rule maintenance gate and centralized rule_change lifecycle
+In progress: none
 Blocked: none
-Next recommended action: continue project-rule Q&A in a new conversation; alternatively resume 178A P3 review
-Next action owner: user selects the next question or task in the new conversation
-Stop point: do not begin 93A work, protected COM changes, or another task in this session
+Next recommended action: authorized session evaluates RC-20261028-002; technical queue remains 178A P3
+Next action owner: user selects next proposal; unauthorized sessions may only submit proposals
+Stop point: no automatic proposal execution, 93A work, or protected COM changes
 Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
-                docs/architecture/collaboration_contract.md; docs/planning/v1_0_roadmap.md
+                docs/planning/rule_changes.md; docs/planning/active_contracts.md
 Dirty-state summary: pre-existing reference_data deletions/additions and results/ remain outside governance scope
 ```
 

@@ -6,7 +6,7 @@
 ## RC-20261028-001 — 建立規則提案流程
 
 - 日期：2026-10-28
-- 狀態：Implemented；待獨立 commit 與 active state 收斂，尚未 Closed。
+- 狀態：Closed。
 - 問題：未授權 session 能提出 rule_change，但缺少集中保存、評估與結案流程。
 - 規則位置：AGENTS.md 的 Change authorization；project_workflow.md 的 Cross-session loop。
 - 情境／證據：本對話 rule integrity review 發現提案跨 session 可能遺失、評估權限不明。
@@ -16,8 +16,8 @@
 - 修改範圍：AGENTS.md、project_workflow.md、planning/README.md、active_contracts.md 與本文件。
 - 驗證：diff whitespace、本地檔案連結檢查通過；人工情境檢查確認未授權者僅能提案、Accepted
   不轉移 session 授權、未 commit 不得 Closed；新增 heading anchors 已與標題核對。
-- Commit evidence：尚未提交。
-- 下一個關卡：完成文件驗證；獨立 commit 後才可 Closed。
+- Commit evidence：`d02cee394df010ea253d0b7f7979a3e22a44555b`；active state 與 HANDOFF 於後續 closure commit 收斂。
+- 下一個關卡：無；其他提案各自等待評估，不自動啟動。
 
 ## RC-20261028-002 — NOTES 維護權限
 
