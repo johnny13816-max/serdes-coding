@@ -124,15 +124,9 @@ production COM baseline 的穩定性。
 
 ## Workflow integrity gate
 
-同一時間只執行一個 approved/implemented responsibility boundary。討論中新提出的
-想法必須被分類為：併入現有 boundary、修訂並重新核准，或排入下一項；它不會因為
-對話移轉而自動取代目前工作。切換前必須列出 active item、剩餘 closure steps、
-新想法的排程位置與恢復條件。
-
-實作項目只有在 scoped implementation、validation、required documentation、tracker
-reconciliation 與 isolated commit 完成後才能關閉；當 workflow 包含 GitHub 同步時，
-也必須先 push。若使用者明確暫停／取消，或實際 blocker 阻止工作，則先記錄原因、
-現有 evidence 與恢復 gate，再切換題目。
+Workflow integrity、interruption、closure、Git 與跨對話規則統一由
+[`project_workflow.md`](project_workflow.md) 管理。本文件只增加方法生命週期、stage/utility extension
+與 public/internal/research 分流的技術限制；不得在此建立第二套一般任務流程。
 
 ## Repository 文件與實作筆記的分工
 

@@ -8,6 +8,21 @@ Project documentation must explain the software at three stable levels:
 2. each stage contract and its data ownership;
 3. the functional blocks that implement each stage.
 
+Governance documents use a separate authority hierarchy:
+
+```text
+AGENTS.md                              minimal always-on gates
+architecture/project_workflow.md       how work is classified and completed
+architecture/collaboration_contract.md how Agent and user divide work
+architecture/<technical contract>.md   durable software boundaries
+planning/v1_0_roadmap.md               platform direction and chapter status
+planning/active_contracts.md            executable current boundary
+planning/HANDOFF.md / NOTES.md          temporary context / candidate lessons
+```
+
+Do not duplicate detailed workflows in `AGENTS.md`. Do not promote HANDOFF, NOTES, planning drafts, chat text,
+or a counterfactual result into a software contract without review and incorporation into the owning document.
+
 A raw Python call graph is not an architecture document. Calls to validation,
 array conversion, plotting helpers, NumPy, SciPy, and trivial accessors are
 omitted unless they change data ownership or mathematical behavior.
@@ -98,3 +113,6 @@ mapping, semantic call tree, or reporting dependency updates its authoritative
 document in the same change. Mathematical documentation is subject to the Core
 Model Change Contract in `AGENTS.md` when it changes or asserts protected model
 behavior.
+
+Governance rules follow the same single-owner principle. Update links and summaries in index files, but keep the
+normative wording in one owning document. Periodically remove superseded, duplicated and stale material.

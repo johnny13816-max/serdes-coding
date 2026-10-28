@@ -1,10 +1,13 @@
 # Reference 對齊與設計修改 workflow
 
-本文件定義從發現差異到結案的流程。`AGENTS.md` 的 protected COM model
-規則優先；本流程不授權任何尚未獲批准的核心修改。當前項目與下一個關卡
+本文件是 [`project_workflow.md`](project_workflow.md) 的 COM/reference 專門流程，定義從發現差異到
+結案的附加規則。`AGENTS.md` 的 protected COM model 規則優先；本流程不授權任何尚未獲批准的核心修改。當前項目與下一個關卡
 記在 [`../planning/active_contracts.md`](../planning/active_contracts.md)；
 各 TC 的完整證據與決策保留在所連結的契約中。不要用聊天中的「同意繼續」
 推定另一份契約已獲批准。
+
+Task classification、模型等級、全代理／半代理、一般 failure handling、Git closure 與跨對話規則
+由 general workflow 管理；本文件只增加 E/G/T 分類、Core Model evidence 與 reference alignment gates。
 
 同一時間只設**一個執行焦點**。新發現先登記為 E/G/T 或待辦，除非它阻斷
 目前驗收，否則不切換實作。每次回報先說焦點 TC、所在關卡、下一個動作，
@@ -44,7 +47,8 @@ spec 或 reference 算法 → 可重現證據 → 修改方案與驗收**。每�
 4. **預計修改檔案與函式清單**，分列 model／utility、search／GUI、測試、文件；各檔案說明改什麼。新增檔案也要列出，禁止籠統寫「相關檔案」。同時列出每項算法的責任層級、呼叫鏈、設定傳遞層與真正執行數值操作的層級；若提議在高層直接改低層結果，須說明理由。
 5. 不在範圍內的行為；93A、178A、single run、search run、公開 API／GUI 的影響。
 6. 會變及必須不變的中間量；固定 case、預期數值、容差、測試及結案標準。
-7. 回退邊界與提交切分；對 protected kernel 滿足 `AGENTS.md` 的十項 Core Model Change Contract 要求。
+7. 回退邊界與提交切分；對 protected kernel 滿足
+   [`project_workflow.md`](project_workflow.md) 的十項 Core Model Change Contract 要求。
 
 一般非核心錯誤可在列出範圍後直接修正；protected kernel 的行為和數學文件
 只能在該具體契約獲明確批准後編輯。批准只適用該契約明列的範圍。
@@ -64,7 +68,7 @@ spec／reference／policy 依據：
 提交切分與回退邊界：
 ```
 
-若是 Core Model Change Contract，仍須逐項滿足 `AGENTS.md` 的十項要求；
+若是 Core Model Change Contract，仍須逐項滿足 `project_workflow.md` 的十項要求；
 此顯示順序不省略任何一項。
 
 ## 3. 實作與驗證關卡

@@ -2,6 +2,8 @@
 
 This directory owns stable, project-wide boundaries. Documents here explain where files belong, how configuration moves through the system, and which layer owns each responsibility.
 
+- [Project workflow](project_workflow.md): task classification, model grading, execution, failure, claim, and closure gates.
+- [Agent collaboration contract](collaboration_contract.md): full-agent/co-build modes, structure-first communication, response and ownership rules.
 - [Project structure](project_structure.md): canonical repository and case layout.
 - [Documentation contract](documentation_contract.md): documentation hierarchy, ownership, and update rules.
 - [Software layers](software_layers.md): source-code layer boundaries and dependency direction.
@@ -15,3 +17,9 @@ This directory owns stable, project-wide boundaries. Documents here explain wher
 
 Version-specific fields, call trees, status trees, equations, and stage contracts belong under `docs/models/<version>/`. Concrete case values and dataset-specific facts do not belong here.
 - [Cross-version reporting](cross_version_reporting.md): shared 93A/178A plot slots, version extensions, artifact layout, and renderer reuse.
+
+## Governance boundary
+
+`project_workflow.md` defines how work is performed; technical documents define what the software contract is.
+When they conflict, stop and reconcile the owning documents rather than hiding the conflict in a task-specific plan.
+Planning records and HANDOFF do not override architecture.

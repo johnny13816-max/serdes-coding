@@ -1,8 +1,8 @@
 # 178A v1.0 平台設計審查
 
-狀態：**PASS（2026-10-27）**。178A architecture foundation 已通過；v1.0 release
-仍受 93A golden boundary、report presentation、release-candidate regression 與
-package/tag gates 約束。
+狀態：**IN PROGRESS（2026-10-28 重開）**。P2 version ownership／decoupling 已通過，但先前
+將該成果擴張成九章全面 PASS，缺少逐章 review evidence。現在依
+[`../../planning/v1_0_roadmap.md`](../../planning/v1_0_roadmap.md) 從 P3 繼續；178A 通過後才修改 93A。
 
 本審查不再逐式重做已完成的 178A COM 演算法校準。既有 fixed-case golden、
 SiCoPR 對齊結果與 full-search artifact 是 regression anchor；除非 regression、
@@ -34,13 +34,13 @@ COM 的模型。平台必須能同時支援：
 |---|---|---|---|
 | P1 | 產品邊界與演進模型 | public baseline、internal fork、research extension 的依賴規則 | **pass** — `evolution_strategy.md` 定義三條產品路徑與回饋邊界 |
 | P2 | software layers 與 function call tree | entry/adaptor/orchestrator/stage/utility/reporting 的 owner 與合法依賴 | **pass** — 178A 不再依賴 93A concrete implementation |
-| P3 | Workbook 與設定映射門面 | Ad Hoc → project → runtime mapping、profile、validation、provenance、UX | **pass for 178A** — versioned execution profile 與 resolved provenance 已落地；93A 為獨立後續項目 |
-| P4 | config/status dataclass trees | 分層、生命週期、可選欄位、重複欄位、過度分支與 serialization | **pass** — 178A-owned config/status tree、semantic text 與 lifecycle 文件一致 |
-| P5 | stage extension framework | 新 CDR、equalizer、noise、MLSD 等 stage method 的加入流程 | **pass** — stage checklist、version ownership 與 call direction 已定義 |
-| P6 | utility extension framework | S4P、grid、PSD、PMF 等底層方法的介面與不變量 | **pass** — utility checklist、explicit S2P/S4P representation 與 round-trip boundary 已建立 |
-| P7 | execution/search/reporting | single run、search、resume、artifact、status-only reporting | **pass with queued presentation work** — full search/artifact 與 shared report orchestration 通過；`ARC-REPORT-001` 不改數值模型 |
-| P8 | 文件與治理 | 文件 authority、同步規則、change classification、review/closure gate | **pass** — tracker、claim/run gates 與 workflow integrity gate 已建立 |
-| P9 | public API、packaging 與 v1.0 release | 相容性、deprecation、範例、效能、公開 claim boundary | **architecture pass; release pending** — public claim boundary 已定義，G7/G9/G10/G11 尚未全數通過 |
+| P3 | Workbook 與設定映射門面 | Ad Hoc → project → runtime mapping、profile、validation、provenance、UX | **next / not reviewed as a whole** — 已有實作與局部證據，尚缺使用者門面及完整 mapping review |
+| P4 | config/status dataclass trees | 分層、生命週期、可選欄位、重複欄位、過度分支與 serialization | **partial** — 已完成 version ownership 與 semantic text，尚缺完整 tree review |
+| P5 | stage extension framework | 新 CDR、equalizer、noise、MLSD 等 stage method 的加入流程 | **partial** — checklist 已定義，尚未逐 stage 驗證 extension seam |
+| P6 | utility extension framework | S4P、grid、PSD、PMF 等底層方法的介面與不變量 | **partial** — 已有多項 utility contract，尚缺整體 invariant/API review |
+| P7 | execution/search/reporting | single run、search、resume、artifact、status-only reporting | **partial** — full search/artifact 與 shared orchestration 有證據；presentation issue 尚未結案 |
+| P8 | 文件與治理 | 文件 authority、同步規則、change classification、review/closure gate | **partial** — 新 governance 已建立，仍需用後續 task 驗證與瘦身 |
+| P9 | public API、packaging 與 v1.0 release | 相容性、deprecation、範例、效能、公開 claim boundary | **not complete** — G7/G9/G10/G11 尚未通過 |
 
 ## 既有演算法基線
 
@@ -86,22 +86,21 @@ v1.0 release gate。這些文件已覆蓋「現在如何運作」，但尚未完
 P8 同時包含 Notion implementation notes review：依 stage 整理 spec 未描述的工程細節與
 branch rationale，但 repository branch registry 與 code contract 仍是實作行為的權威來源。
 
-## Review conclusion
+## Current review conclusion
 
-178A 的 numerical production baseline、version ownership、extension seam、configuration
-boundary、status lifecycle、search artifact 與 documentation authority 已具備可維護的
-共同地基。後續可以開始 93A foundation 工作，不需要再以 93A concrete classes 作為
-178A parent，也不得在 93A migration 中回復該依賴。
+178A 的 numerical production baseline 與 version ownership 已有強證據；P3–P9 仍需以使用者門面、
+dataclass/call tree、extension seam、reporting、documentation 與 release readiness 為主逐章審查。
+目前不得開始 93A foundation 修改，也不得在後續工作中恢復 178A 對 93A concrete classes 的依賴。
 
-此 PASS 的範圍是 **178A architecture foundation**，不代表：
+已通過的範圍限於 **P1 product boundary 與 P2 version ownership/decoupling**，不代表：
 
 - v1.0 package/tag 已可發布；
 - 93A current-schema production path 已有 golden；
 - report presentation issue 已完成；
 - 所有未來 research methods 已經實作。
 
-剩餘事項均已移出本審查 boundary：`ARC-CROSS-001` 負責 93A golden，
-`ARC-REPORT-001` 負責 plot presentation，release gate 負責 final regression、版本與 tag。
+`ARC-CROSS-001` 與 93A 修改排在 178A review 完成後；`ARC-REPORT-001` 由 P7 追蹤，release gate
+負責 final regression、版本與 tag。
 
 ## P2 implementation record
 

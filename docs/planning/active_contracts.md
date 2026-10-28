@@ -7,19 +7,20 @@ v1.0 release 狀態見
 
 ## Workflow state
 
-`GOV-V1-002` 已完成 178A design-review closure：實作提交、驗證證據、架構文件、
-tracker 與 release gate 已重新核對。178A architecture review 結論為 **PASS**；這不等於
-整個 v1.0 release 已完成。現在沒有 `Approved` 或 `Implemented` 中的項目。
+`GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在
+2026-10-28 重新審查後判定過度擴張。P1/P2 保持完成，P3–P9 依
+[`v1_0_roadmap.md`](v1_0_roadmap.md) 重開。現在沒有 `Approved` 或 `Implemented` 中的項目。
 
-依 workflow integrity gate，下一項不得直接進入實作。應先為
-`ARC-CROSS-001` 提出並核准獨立 contract，再建立 current-schema 93A golden case。
+依 workflow integrity gate，下一項不得直接進入 93A 或實作。應先以 read-only、半代理 review
+完成 178A P3 workbook/config interface；若發現修改需求，再依責任邊界提出 contract。
 
 ## Current queue
 
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
-| GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed** | 只整理 governance、architecture、validation 與 release 文件；不改模型或數值流程 | 無；本文件、design review、tracker 與 release gate 為 closure evidence |
-| ARC-CROSS-001 — Current-schema 93A golden case | Open／next proposed | 新增或遷移一個可維護的 93A workbook 與數值 baseline；不改 93A equations | 先確認 canonical source case 與 schema migration，提出正式 contract |
+| GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
+| 178A P3 — Workbook/config interface review | Open／next review | Read-only 檢查 Ad Hoc → project → runtime、profile、UX 與 provenance | 新對話先展示完整 mapping tree；不修改 code |
+| ARC-CROSS-001 — Current-schema 93A golden case | Open／queued after 178A | 新增或遷移一個可維護的 93A workbook 與數值 baseline；不改 93A equations | 等 178A review 通過後再提出正式 contract |
 | ARC-REPORT-001 — Cross-version report plot refinement | Open／non-blocking | 收集並修正 presentation 問題；共用 renderer 與 version composition 分開處理 | 在 G9 documentation/report quality 結案前完成；不阻擋 93A golden-case foundation |
 
 ## Recently closed boundaries

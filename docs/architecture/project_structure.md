@@ -52,7 +52,7 @@ serdes-coding/
   tests/                      automated validation
   .gitattributes              Git attribute rules
   .gitignore                  generated/local artifact exclusions
-  AGENTS.md                   mandatory operating rules
+  AGENTS.md                   minimal mandatory gates and authority links
   README.md                   repository entry and overview
   pyproject.toml              Python package and dependency definition
   poetry.lock                 resolved dependency lock

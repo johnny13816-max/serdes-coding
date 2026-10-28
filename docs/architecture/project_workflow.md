@@ -1,0 +1,167 @@
+# Project workflow
+
+## 權責與目的
+
+本文件是一般任務執行的權威 workflow。COM/reference gap 使用更專門的
+[`reference_change_workflow.md`](reference_change_workflow.md)；protected kernel 仍受
+`AGENTS.md` 的 approval gate 約束。
+
+```text
+User goal
+└─ classify task / complexity / risk / collaboration mode
+   └─ inspect and establish baseline
+      └─ design or contract when needed
+         └─ execute approved boundary
+            └─ verify → document → commit → close
+```
+
+## 自動分類器
+
+開始工作前，在內部判定以下欄位；只有模型切換、approval、active-item 衝突、protected model、
+release 或使用者要求時才完整顯示，避免輸出浪費。
+
+```text
+Task type:
+Read-only or modifying:
+Complexity: low / medium / high
+Risk: low / medium / high
+Active-item impact:
+Workflow:
+Recommended model level:
+Collaboration mode:
+Approval gate:
+Stop point:
+```
+
+風險與複雜度獨立。更強模型不能取代使用者核准、destructive-action approval 或 protected contract。
+
+## 模型等級
+
+| 等級 | 適用範圍 | 目前建議映射 |
+|---|---|---|
+| Fast | 狀態、文件、清楚的小型例行工作 | GPT-6 Luna low/medium |
+| Standard | 一般 coding、code review、contract 執行 | GPT-6.1 Sol medium/high |
+| Deep | 算法、架構、spec/reference、複雜 root cause | GPT-6.1 Sol xhigh 或 Astra high |
+| Critical Review | release、重大架構與獨立複核 | Astra xhigh |
+
+實際模型名稱可能改版；workflow 使用抽象等級，Agent runtime/skill 維護當期映射。優先使用能穩定達到
+品質門檻的最輕模型。
+
+下列情況至少升一級：protected equation/numerical flow、spec/reference 衝突、跨版本架構、
+public API/workbook schema/serialization、兩個以上合理 root cause、證據互相矛盾、兩次差異化嘗試
+仍失敗、release independent audit。檔案多、測試久或已核准的例行執行本身不構成升級理由。
+
+## Task taxonomy
+
+| 任務 | 固定 workflow | 等級 | 預設模式 | Stop point |
+|---|---|---|---|---|
+| 專案狀態 | Git → tracker → active item → evidence → 結論 | Fast | 全代理 | 狀態已判定或資料互相矛盾 |
+| 程式結構 | 問題 → owner → call tree → dependency → finding | Standard | 全代理 | 回答問題；重構前停止 |
+| Bug／數值 gap | baseline → reproduce → first mismatch → root cause → proposal | Deep | 追查全代理；核心修正半代理 | 第一個可操作原因；修改模型前停止 |
+| 算法審查 | spec → equation → code → intermediate → reference → verdict | Deep | 審查全代理；新算法半代理 | 每式已判定；權威來源衝突時停止 |
+| 架構／API | scenario → owner → responsibility → tree → alternatives → decision | Deep | 半代理 | 可 review 的設計完成；實作前停止 |
+| Change Contract | evidence → boundary → files/functions → invariants → validation | Standard/Deep | Agent 起草；User 審核 | contract 完整，等待核准 |
+| Contract 執行 | preflight → edit → focused test → regression → docs → commit | Standard/Deep | 已核准範圍全代理 | 完成或出現 scope expansion |
+| 文件 | authority → owner doc → update → consistency check | Fast/Standard | 全代理 | 文件與實作一致；技術規則改變前停止 |
+| 測試／驗證 | boundary → run → diagnose → evidence | Standard | 全代理 | acceptance 已判定或需要新修改 |
+| Release | gate → clean candidate → regression → artifact → review → publish | Critical Review | 全代理至發布 gate | tag/publish/merge 前停止 |
+
+## 一般執行流程
+
+### 1. Preflight
+
+1. 核對 canonical cwd、Git root、`AGENTS.md`、branch 與 `git status`。
+2. 保護既有修改；辨認 active item、approved boundary、next gate。
+3. 只讀取與任務相關的 authority、code 與 evidence。
+4. 使用 task header；非平凡修改先給 scope tree／before-after tree。
+
+### 2. Read-only work
+
+Read-only 可以持續到明確結論，不因「可能需要修改」而只報 gap。找到問題時必須同時提出 owner、
+修改層級、方案與驗證；若修改需要 approval，保存證據並停在 contract gate。
+
+### 3. Non-trivial change brief
+
+public API、architecture、config/status/workbook schema、超過兩個 ownership files、numerical behavior、
+migration/compatibility 都屬 non-trivial。編輯前至少說明 scope、approach、risk、affected files 與 validation。
+只有使用者明確要求 contract，或 protected/core 規則要求時，才啟用正式 contract approval protocol。
+
+正式一般 contract 固定使用：
+
+```text
+Goal:
+Allowed changes:
+Forbidden changes:
+Top-level flow to preserve:
+Validation:
+Open questions:
+```
+
+### 4. Core Model Change Contract
+
+修改 protected behavior 前，契約必須逐項包含：
+
+1. 修改原因；
+2. governing specification equation、Ad Hoc reference 或其他已接受來源；
+3. 現行 equation 與 data flow；
+4. 提議 equation 與 data flow；
+5. 精確 files/functions；
+6. 預期改變的 intermediate quantities；
+7. 必須保持不變的 intermediate quantities 與 behavior；
+8. validation case、expected intermediates、numerical tolerances 與 final acceptance；
+9. 93A、178A、single run 與 search run 影響；
+10. rollback commit 或其他精確 rollback boundary。
+
+核准只涵蓋列出的內容；新發現需修訂並重新核准。
+
+### 5. Implementation
+
+- 限定在批准範圍；dependency search/read 可批次並行，mutation、approval 與 dependent steps 依序執行。
+- confirmed error 修正 baseline；合法 design diff 使用具核心概念的 named parallel method；experiment 不改 default。
+- 不在高層直接修補低層結果。選擇策略的層、傳遞設定的層與執行數值操作的 owner 必須分清。
+- 同一責任邊界同步 code、tests、authoritative docs 與 tracker。
+
+### 6. Verification
+
+依序做最小 invariant/focused test、fixed golden intermediate/final value、affected regression，必要時才做
+small/full search。已通過的檢查不因形式而重跑；只有新變更、failure 或未解風險才擴大驗證。
+
+### 7. Git and closure
+
+- 每個可獨立 review/rollback 的責任邊界一個 commit；protected behavior 必須獨立 commit。
+- 不提交無法安全歸屬的既有 dirty changes。需要 GitHub sync 的 workflow 在切換下一項前先 push。
+- `Closed` 需要 implementation、focused/applicable regression、required docs、tracker reconciliation、
+  isolated commit，以及工作流要求時的 push。討論、draft、counterfactual 或 passing test 都不是 closure。
+
+## Workflow integrity and interruption
+
+新想法依序處理：同 boundary 則併入；使 boundary 失效則修訂並重審；獨立想法則記入 tracker 並完成
+active item。只有使用者明確 pause/cancel，或 blocker 使工作無法前進，才能切換；切換前記錄狀態、原因、
+evidence、next owner 與 resumption gate。
+
+## Failure handling
+
+- 先診斷再 retry。相同原因／策略最多兩次 corrective attempt；第二次必須基於新證據改變方法。
+- 新權限、destructive action、scope expansion 或新設計決策需要停止並取得核准。
+- 停止時保留 recoverable state，說明已做、未做、失敗證據與最安全的下一步。
+
+## Claim gates
+
+`observed → isolated → classified → approved → implemented → golden-verified → regression-passed → committed → closed`
+
+每個 claim 只涵蓋實際通過的 boundary。使用精確狀態，例如 `counterfactual matched`、
+`implemented, awaiting golden validation`、`COM_DFE aligned`。alignment tolerance、release tolerance 與
+causal-isolation tolerance 必須分開命名。
+
+## Cross-session loop
+
+```text
+工作經驗
+└─ candidate lesson → 使用者同意寫入 NOTES
+   └─ 重複驗證 → 提議升格
+      └─ 使用者 review → 更新權威規則／workflow／skill
+         └─ 移除 NOTES 中重複或過時內容
+```
+
+[`../planning/HANDOFF.md`](../planning/HANDOFF.md) 只保存當前狀態，恢復工作時必須與 Git/tracker 重新核對；
+[`../planning/NOTES.md`](../planning/NOTES.md) 只保存尚未升格的可重用經驗。Agent 不得自行演化永久規則。

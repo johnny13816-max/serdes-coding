@@ -31,7 +31,7 @@ v1.0 必須同時涵蓋：
 | G6 178A reference result | Full-search best candidate 記錄 MSE、COM_DFE、ΔCOM、COM_MLSD，並說明與 reference 的比較邊界 | 通過：best index 28969；sweep/final MSE=`0.006361523694460796`/`0.006204188571809303`，COM_DFE=`1.514414278762367 dB`，ΔCOM=`1.3488568555276164 dB`，COM_MLSD=`2.8632711342899833 dB`；固定 reference candidate 仍另行精確對齊 |
 | G7 93A support boundary | 至少一個正式 93A case 通過 single/search smoke；文件明示 validation level 與未驗證範圍 | **未通過**：`ARC-CROSS-001` 尚需建立 current-schema 93A golden case；這是下一個 proposed contract |
 | G8 Output durability | Results 保存 resolved config、input hashes、revision、candidate coverage、status summary 與 plot manifest | 通過：clean revision、7 input hashes、resolved-config hash、coverage、status、top-K 與 plot manifests 均由下載 artifact 複核 |
-| G9 Documentation | README、architecture、178A stage/branch docs、operations 與 public claim boundary 對齊程式 | 178A architecture review 已通過；`ARC-REPORT-001` presentation review 與 93A validation boundary 尚未結案 |
+| G9 Documentation | README、architecture、178A stage/branch docs、operations 與 public claim boundary 對齊程式 | **未通過**：P1/P2 完成；178A P3–P9 review 重開，`ARC-REPORT-001` 與 93A boundary 尚未結案 |
 | G10 Regression | 完整 test suite 在 release candidate commit 通過；GUI/Tcl exclusion 若存在須具名記錄 | governance working tree：184 passed、2 subtests passed，使用 `%TEMP%/serdes-gov-v1-002/pytest`；release-candidate commit/CI 仍待 G7/G9 完成後執行 |
 | G11 Package/release | `pyproject.toml` 版本、release notes、tag 與 GitHub main 指向同一 verified commit | **未通過**：package 目前仍為 `0.1.0`，尚無 v1.0 release notes、verified tag 或對應 release commit |
 
@@ -68,8 +68,6 @@ full-target integration；完整 candidate coverage 只能由 GitHub full search
 
 ## 178A architecture review gate
 
-`docs/models/178A/design_review.md` 在 2026-10-27 判定 178A architecture
-foundation 為 PASS。判定包含 standalone version ownership、function/config/status
-boundaries、workbook/profile mapping、stage/utility extension framework、search artifact、
-reporting orchestration 與 governance rules。這項判定解除「先完成 178A review，再進入
-93A foundation」的程序 blocker，但不會自動通過 G7、G9、G10 或 G11。
+`docs/models/178A/design_review.md` 在 2026-10-28 重開。P1 product boundary 與 P2 standalone
+version ownership/decoupling 保持通過；P3–P9 尚缺逐章 review evidence。完成 178A review 仍是進入
+93A foundation 的程序 gate，且不會自動通過 G7、G9、G10 或 G11。
