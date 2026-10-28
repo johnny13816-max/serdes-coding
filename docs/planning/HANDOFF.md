@@ -8,20 +8,20 @@
 Handoff state: READY
 Generated at: 2026-10-28 Asia/Taipei
 Source branch: main
-Source revision: rule boundary 2a841b8; snapshot included in subsequent closure commit
-Active task: none; RC-001 and RC-002 Closed
-Current phase: NOTES cleanup authority committed and verified; awaiting user selection
+Source revision: HEAD 54a7d5c plus uncommitted RC-20261028-005 rule documents
+Active task: RC-20261028-005 read truncation recovery
+Current phase: Implemented; awaiting validation and isolated commit; RC-001/002 Closed
 Collaboration mode: Full-Agent for authorized rule maintenance in the current conversation
 Approved boundary: current conversation only; new sessions need explicit rule-change authorization
 Completed: authorized rule maintenance gate and centralized rule_change lifecycle
-In progress: none
+In progress: RC-005 governance documentation only
 Blocked: none
-Next recommended action: user selects next rule proposal; technical queue remains 178A P3
+Next recommended action: verify and commit RC-005; technical queue remains 178A P3
 Next action owner: user selects next proposal; unauthorized sessions may only submit proposals
 Stop point: no automatic proposal execution, 93A work, or protected COM changes
 Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
                 docs/planning/rule_changes.md; docs/planning/active_contracts.md
-Dirty-state summary: existing reference_data deletions/additions and results/ untouched and outside governance scope
+Dirty-state summary: RC-005 rule docs uncommitted; existing reference_data/results changes untouched
 ```
 
 ## New-session resume checklist

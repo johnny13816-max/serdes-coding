@@ -128,6 +128,9 @@ Evidence：
 - 不重述已建立背景，不逐項敘述 routine command；只在開始、重大發現／阻塞與完成時更新。
 - 結論先行，技術細節依證據順序排列；新名詞若非必要不引入。
 - 先 targeted search/read，再讀大型文件。節省 token 不得犧牲正確性、學習價值或安全 gate。
+- 讀取結果若出現截斷提示、缺頁或內容不完整，必須以分段、縮小範圍或調整輸出量補讀本次任務
+  所需內容，並確認缺漏已補齊；不得將截斷結果當作完整文件或完整搜尋結果。無需設定固定行數上限。
+  若仍無法完整取得，須明示未讀範圍與對結論的限制，不得宣稱已完整閱讀或審查。
 - 明確區分 verified fact、assumption、inference 與 recommendation。
 
 ## Ownership handoff
