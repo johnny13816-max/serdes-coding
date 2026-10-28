@@ -23,6 +23,32 @@ planning/HANDOFF.md / NOTES.md          temporary context / candidate lessons
 Do not duplicate detailed workflows in `AGENTS.md`. Do not promote HANDOFF, NOTES, planning drafts, chat text,
 or a counterfactual result into a software contract without review and incorporation into the owning document.
 
+## Document classes
+
+```text
+Project documents
+├─ Rule documents
+│  ├─ AGENTS.md
+│  ├─ architecture/project_workflow.md
+│  ├─ architecture/collaboration_contract.md
+│  └─ architecture/documentation_contract.md
+├─ Authoritative technical documents
+│  ├─ architecture/   project-wide software contracts
+│  ├─ models/         version/stage/config/status/equation contracts
+│  ├─ validation/     reproducible evidence and tolerances
+│  └─ operations/     supported execution and artifact procedures
+└─ Temporary working documents
+   ├─ planning/open_issues.xlsx
+   ├─ planning/active_contracts.md
+   ├─ planning/<ITEM_ID>_<short_name>.md
+   ├─ planning/HANDOFF.md
+   └─ planning/NOTES.md
+```
+
+Rule documents constrain how the project is changed. Technical documents define the implemented software. Temporary
+documents help work progress but cannot redefine either class. A completed item promotes durable content into the
+appropriate technical owner before its issue is closed; copying a temp contract verbatim is not promotion.
+
 A raw Python call graph is not an architecture document. Calls to validation,
 array conversion, plotting helpers, NumPy, SciPy, and trivial accessors are
 omitted unless they change data ownership or mathematical behavior.
@@ -116,3 +142,7 @@ behavior.
 
 Governance rules follow the same single-owner principle. Update links and summaries in index files, but keep the
 normative wording in one owning document. Periodically remove superseded, duplicated and stale material.
+
+At active-item closure, apply the lifecycle in `project_workflow.md`: promote durable content, reconcile trackers,
+dispose of the temp contract, then slim HANDOFF and NOTES. Protected contracts or ADR-like decisions may remain only
+as clearly marked historical evidence with a link to the current technical authority.

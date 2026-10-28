@@ -17,11 +17,24 @@ This directory contains active change contracts and unresolved future work. Plan
 When a plan is completed:
 
 1. move its durable rules into the appropriate architecture, model, validation, or operations document;
-2. record a lasting design decision as an ADR when the reasoning must remain available;
-3. delete superseded planning drafts after their useful content has been incorporated;
-   retain named TC decision/evidence history with a clear link to the current contract.
+2. complete validation and create the boundary commit/evidence;
+3. close the tracker row and reconcile `active_contracts.md`;
+4. delete the superseded temp contract, or mark retained protected/ADR evidence as historical and link its current owner;
+5. remove completed detail from HANDOFF and promote/delete/deduplicate NOTES candidates;
+6. create a small closure commit when the actual boundary SHA must be recorded after the implementation commit.
 
 Do not keep completed plans as a second source of project behavior.
+
+## Temporary contract rule
+
+Every non-trivial modifying item selected as active owns
+`docs/planning/<ITEM_ID>_<short_name>.md`. `active_contracts.md` must link it and show one current lifecycle state,
+evidence link, next gate, and owner. Routine metadata/docs upkeep and pure read-only questions may omit a separate file
+when their full boundary fits in `active_contracts.md`.
+
+The temp contract may evolve during approved work, but it cannot silently expand scope. Durable content is rewritten
+into its technical owner; the temp file is not renamed into an architecture/model document and is not cited as current
+behavior after closure.
 
 ## State ownership
 

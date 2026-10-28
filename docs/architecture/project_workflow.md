@@ -133,6 +133,40 @@ small/full search。已通過的檢查不因形式而重跑；只有新變更、
 - `Closed` 需要 implementation、focused/applicable regression、required docs、tracker reconciliation、
   isolated commit，以及工作流要求時的 push。討論、draft、counterfactual 或 passing test 都不是 closure。
 
+## Active-item document lifecycle
+
+每個 non-trivial modifying item 進入 active state 時，必須有一份暫存 contract；routine metadata/docs
+maintenance 與純 read-only inquiry 可只在 `active_contracts.md` 記 boundary。暫存 contract 位於
+`docs/planning/<ITEM_ID>_<short_name>.md`，並由 `active_contracts.md` 連結。它記錄問題、scope、
+tree/call boundary、決策、驗證與尚未完成的 gate，不是正式技術權威。
+
+```text
+Open issue
+→ Active item + temp contract
+→ Implementation + validation
+→ Durable knowledge promoted into authoritative technical documents
+→ Boundary commit and evidence
+→ Close open issue / reconcile active_contracts
+→ Delete or archive the temp contract
+→ Slim HANDOFF and NOTES
+→ Closure commit when a separate status commit is needed
+```
+
+順序不可顛倒：authoritative technical documentation 必須在 issue 關閉前完成。若 closure evidence 需要
+實際 commit SHA，先提交 code/tests/technical docs 的 boundary commit，再用小型 closure commit 更新 tracker、
+temp-contract disposition、HANDOFF 與 NOTES。若不需要 post-commit SHA，一個 isolated commit 可同時完成兩階段。
+
+Temp contract 的 durable 內容依 owner 分流：API/architecture 進 `docs/architecture/`；version/stage/equation
+進 `docs/models/`；驗收方法與數值進 `docs/validation/`；執行方式進 `docs/operations/`。合併完成後：
+
+- 一般 temporary plan 刪除，避免形成第二份權威來源；
+- protected model contract、重要 ADR 或 reference decision 可保留為 historical evidence，但 header 必須標明
+  `Historical / non-authoritative` 並連回目前 owner；
+- open question 若仍有效，移到新 issue 或 `NOTES.md` candidate，不得靠保留整份 temp contract 逃避分類。
+
+每次 closure 都執行 memory slimming：`HANDOFF.md` 移除已完成細節，只保留下一個 active context；
+`NOTES.md` 刪除已升格、重複、失效或沒有證據的候選。兩者都不能累積歷史日誌。
+
 ## Workflow integrity and interruption
 
 新想法依序處理：同 boundary 則併入；使 boundary 失效則修訂並重審；獨立想法則記入 tracker 並完成

@@ -19,3 +19,8 @@ Stop point: do not start 93A work or protected COM changes before 178A platform 
 3. Reconcile `open_issues.xlsx`, `active_contracts.md`, `v1_0_roadmap.md`, and current Git history.
 4. Classify task/model/mode and show the scope tree before modification.
 5. Replace this handoff block when the active task changes.
+
+## Closure slimming
+
+After an item closes, remove its implementation history from this file. Keep only the next active task, phase, mode,
+approved boundary, next owner and stop point. Commit history, closed contracts and validation documents preserve history.
