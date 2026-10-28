@@ -21,11 +21,16 @@
 
 ## RC-20261028-002 — NOTES 維護權限
 
-- 日期／狀態：2026-10-28／Proposed。
+- 日期／狀態：2026-10-28／Implemented；待獨立 commit，尚未 Closed。
 - 問題／位置：NOTES.md 要求修改前取得同意；project_workflow.md 的 closure slimming 要求結案時移除內容。
 - 情境／證據：一般 project session 結案可能同時遇到兩項不同要求。
 - 建議／影響：區分候選內容變更與已升格、重複內容清理，明確指定權限。
-- 評估者／授權依據、決策理由、修改範圍、驗證、commit evidence：待評估；尚未核准或修改。
+- 評估者／授權依據：本規則維護 session；使用者已授權規則維護，並同意定義可自行清理的精確範圍。
+- 決策理由：接受；允許有可核對證據的機械性清理，保留內容判斷與正式規則變更的 gate。
+- 修改範圍：NOTES.md Maintenance、project_workflow.md closure slimming、active_contracts.md 與本紀錄。
+- 驗證：人工情境檢查通過：有升格證據且無剩餘問題可清理；完全重複可刪副本；部分重複、
+  失效判斷或證據不足須保留並取得同意；正式規則仍受授權 gate 約束。diff 與本地連結檢查通過。
+- Commit evidence：尚未提交。
 
 ## RC-20261028-003 — Artifact 輸出位置
 

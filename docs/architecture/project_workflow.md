@@ -165,7 +165,8 @@ Temp contract 的 durable 內容依 owner 分流：API/architecture 進 `docs/ar
 - open question 若仍有效，移到新 issue 或 `NOTES.md` candidate，不得靠保留整份 temp contract 逃避分類。
 
 每次 closure 都執行 memory slimming：`HANDOFF.md` 移除已完成細節，只保留下一個 active context；
-`NOTES.md` 刪除已升格、重複、失效或沒有證據的候選。兩者都不能累積歷史日誌。
+`NOTES.md` 依其 Maintenance 權限檢查候選，只直接執行符合條件的機械性清理；其他內容保留並提出
+待決事項，不因 closure 要求繞過同意或規則修改 gate。兩者都不能累積歷史日誌。
 
 ## Workflow integrity and interruption
 
@@ -194,7 +195,7 @@ causal-isolation tolerance 必須分開命名。
 └─ candidate lesson → 使用者同意寫入 NOTES
    └─ 重複驗證 → 提議升格
       └─ 涉及專案規則時提出 rule_change → 已授權 session 評估與執行
-         └─ 移除 NOTES 中重複或過時內容
+         └─ 依 NOTES Maintenance 權限清理；需同意的內容先保留
 ```
 
 [`../planning/HANDOFF.md`](../planning/HANDOFF.md) 只保存當前狀態，恢復工作時必須與 Git/tracker 重新核對；
