@@ -8,20 +8,20 @@
 Handoff state: READY
 Generated at: 2026-10-28 Asia/Taipei
 Source branch: main
-Source revision: HEAD b0551ff plus uncommitted RC-20261028-002 documentation changes
-Active task: RC-20261028-002 NOTES maintenance authority
-Current phase: Implemented; awaiting isolated commit; RC-001 remains Closed
+Source revision: rule boundary 2a841b8; snapshot included in subsequent closure commit
+Active task: none; RC-001 and RC-002 Closed
+Current phase: NOTES cleanup authority committed and verified; awaiting user selection
 Collaboration mode: Full-Agent for authorized rule maintenance in the current conversation
 Approved boundary: current conversation only; new sessions need explicit rule-change authorization
 Completed: authorized rule maintenance gate and centralized rule_change lifecycle
-In progress: RC-002 rule documents and decision evidence; no project code changes
+In progress: none
 Blocked: none
-Next recommended action: commit and close RC-002; technical queue remains 178A P3
+Next recommended action: user selects next rule proposal; technical queue remains 178A P3
 Next action owner: user selects next proposal; unauthorized sessions may only submit proposals
 Stop point: no automatic proposal execution, 93A work, or protected COM changes
 Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
                 docs/planning/rule_changes.md; docs/planning/active_contracts.md
-Dirty-state summary: RC-002 governance docs uncommitted; existing reference_data/results changes untouched
+Dirty-state summary: existing reference_data deletions/additions and results/ untouched and outside governance scope
 ```
 
 ## New-session resume checklist
