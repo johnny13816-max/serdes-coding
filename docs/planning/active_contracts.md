@@ -9,14 +9,15 @@ v1.0 release 狀態見
 
 本輪規則維護已結案，沒有 active rule change；決策與 commit evidence 見
 [rule_changes.md](rule_changes.md)。RC-004 保留 Proposed，由規則專用對話另行評估，
-不阻擋 technical queue，也不交由專案更新對話處理。新專案對話的下一項為下列 178A P3 review。
+不阻擋 technical queue，也不交由專案更新對話處理。使用者指定新專案對話先唯讀評估歷史遺留錯誤，
+完成 evidence、impact、disposition 與未解項目記錄後，再恢復下列未完成的 v1.0 review；不直接授權修正。
 
 `GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在
 2026-10-28 重新審查後判定過度擴張。P1/P2 保持完成，P3–P9 依
 [`v1_0_roadmap.md`](v1_0_roadmap.md) 重開。現在沒有 `Approved` 或 `Implemented` 中的項目。
 
-依 workflow integrity gate，下一項不得直接進入 93A 或實作。應先以 read-only、半代理 review
-完成 178A P3 workbook/config interface；若發現修改需求，再依責任邊界提出 contract。
+歷史評估可唯讀檢查 93A legacy 問題，但不啟動 93A 實作。評估後依 workflow integrity gate，
+以 read-only、半代理 review 恢復 178A P3 workbook/config interface；發現修改需求後另依責任邊界提出 contract。
 
 ## Current queue
 
