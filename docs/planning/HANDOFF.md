@@ -8,20 +8,20 @@
 Handoff state: READY
 Generated at: 2026-10-28 Asia/Taipei
 Source branch: main
-Source revision: HEAD 59720ed plus uncommitted RC-003 rule documents
-Active task: RC-20261028-003 artifact output location
-Current phase: Implemented; awaiting document validation and isolated commit
+Source revision: rule boundary e7a7c4a; snapshot included in subsequent closure commit
+Active task: none; RC-001/002/003/005 Closed
+Current phase: artifact location rules committed and verified; awaiting user selection
 Collaboration mode: Full-Agent for authorized rule maintenance in the current conversation
 Approved boundary: current conversation only; new sessions need explicit rule-change authorization
 Completed: authorized rule maintenance gate and centralized rule_change lifecycle
-In progress: RC-003 governance documentation only; no data moved or deleted
+In progress: none
 Blocked: none
-Next recommended action: verify and commit RC-003; technical queue remains 178A P3
+Next recommended action: user selects RC-004 for evaluation; technical queue remains 178A P3
 Next action owner: user selects next proposal; unauthorized sessions may only submit proposals
 Stop point: no automatic proposal execution, 93A work, or protected COM changes
 Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
                 docs/planning/rule_changes.md; docs/planning/active_contracts.md
-Dirty-state summary: RC-003 docs uncommitted; existing reference_data/results changes untouched
+Dirty-state summary: existing reference_data deletions/additions and results/ untouched and outside governance scope
 ```
 
 ## New-session resume checklist
