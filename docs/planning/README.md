@@ -47,4 +47,6 @@ NOTES.md           candidate lessons, not permanent rules
 ```
 
 Only `active_contracts.md` may identify an executable active boundary. A HANDOFF entry cannot authorize work.
+The write trigger is the project-level `/handoff` command defined in `project_workflow.md`; the read trigger is the
+first repository-related turn of every new conversation, enforced by `AGENTS.md`.
 

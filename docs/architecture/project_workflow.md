@@ -199,3 +199,39 @@ causal-isolation tolerance 必須分開命名。
 
 [`../planning/HANDOFF.md`](../planning/HANDOFF.md) 只保存當前狀態，恢復工作時必須與 Git/tracker 重新核對；
 [`../planning/NOTES.md`](../planning/NOTES.md) 只保存尚未升格的可重用經驗。Agent 不得自行演化永久規則。
+
+## `/handoff` command
+
+`/handoff` 是本專案定義的對話命令，不是用來取代 Git 或 tracker 的原生 Codex 指令。使用者輸入
+`/handoff` 後，Agent 必須完成下列動作並停止本 session：
+
+```text
+/handoff
+├─ verify cwd / Git root / branch / status
+├─ reconcile roadmap / active_contracts / temp contract / current evidence
+├─ write one compact HANDOFF snapshot
+├─ record pre-existing or task-owned dirty state without modifying it
+├─ run link/format check when governance docs changed
+└─ report handoff complete; do not start another task
+```
+
+HANDOFF snapshot 固定包含：state、source branch/revision、active task、current phase、collaboration mode、
+approved boundary、completed、in progress、blocked、next recommended action、next owner、stop point、evidence links
+與 dirty-state summary。無內容的欄位寫 `none`，不得省略到讓新 session 猜測。
+
+`/handoff` 不會自行授權 commit、push、stash、reset 或清除工作樹。若既有 workflow 已授權 closure commit，
+HANDOFF 可包含在該 commit；否則保留為明確的 working-tree update，並在 snapshot 記錄。不得為了得到 clean
+status 而混入、還原或移動其他人的修改。
+
+### New-session auto-read
+
+每個新對話第一次處理本 repository 時，在規劃或執行前自動：
+
+1. 讀取 `AGENTS.md` 與 `HANDOFF.md`；
+2. 核對 canonical cwd、Git root、branch、HEAD 與 dirty state；
+3. 核對 `active_contracts.md`、相關 temp contract、`open_issues.xlsx` 與 roadmap；
+4. 回報三項：可恢復的 active task、任何 stale/conflict、建議 next gate；
+5. 只有在使用者的新要求與 handoff 一致且具備既有授權時才繼續執行，否則先依 workflow integrity 分類。
+
+若 HANDOFF 與 Git/tracker 衝突，以 Git 和 authoritative tracker 為準，修正 HANDOFF 後再工作。讀取本身
+不會將 snapshot 標為完成；task 切換或結案時以新的 snapshot 取代舊內容。

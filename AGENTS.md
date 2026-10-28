@@ -20,6 +20,9 @@ AGENTS.md
 
 - 正式 root 固定為 `C:/Users/johnn/Documents/Serdes-learn/serdes-coding`；不得使用
   `C:/Users/johnn/OneDrive/文件/Serdes-learn`。
+- 每個新對話第一次處理本 repository 時，完成 cwd/Git/status preflight 後，自動讀取
+  [`docs/planning/HANDOFF.md`](docs/planning/HANDOFF.md)，並與 Git、`active_contracts.md`、
+  `open_issues.xlsx` 及 roadmap 核對。HANDOFF 只提供恢復上下文，不授權未核准的修改。
 - 編輯前核對 cwd、Git root、`AGENTS.md` 與 `git status`。不得覆蓋、還原、提交或
   混入既有未提交修改。
 - Python、tests、scripts 與 simulation 一律使用專案 `.venv`；執行前核對
@@ -40,6 +43,8 @@ AGENTS.md
   未走 production path 的 counterfactual 不得稱為已修正或已完成。
 - 超出核准範圍、遇到相互衝突的權威來源、需要新架構決策，或同一失敗以兩種不同方法
   仍無法排除時，停止並回報證據與下一個決策點。
+- 使用者輸入 `/handoff` 時，立即依 `project_workflow.md` 的 handoff command 更新跨對話快照；
+  完成 snapshot 與必要驗證後停止本 session，不再開始下一項工作。
 
 ## 3. Change authorization
 
