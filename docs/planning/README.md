@@ -4,6 +4,7 @@ This directory contains active change contracts and unresolved future work. Plan
 
 ## Active planning documents
 
+- [rule_change 提案與決策](rule_changes.md)：規則提案的集中狀態與評估結果；不授權修改規則。
 - [v1.0 platform roadmap](v1_0_roadmap.md): the platform review sequence and current chapter-level completion state.
 - [Toward v1.0 change tracker](open_issues.xlsx): concise status, dependency,
   boundary, dates, next step, and closure evidence for proposed and active work.

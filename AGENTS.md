@@ -48,6 +48,18 @@ AGENTS.md
 
 ## 3. Change authorization
 
+- 專案規則不得在未取得使用者明確授權下修改；涵蓋 `AGENTS.md` 與其引用的權威文件中的
+  workflow、合作模式、approval gate、驗證及文件治理規則。一般 coding、review、文件維護、
+  tracker 更新或任務結案授權，不自動包含修改專案規則的權限。
+- 使用者可明確授權單次規則修改，或授權本對話持續維護專案規則；已授權範圍內不需逐次重問，
+  超出範圍須重新取得授權。對話層級授權不得自動延伸至其他對話，也不授權 project code 修改。
+- 未明確取得規則修改授權的 session，發現規則漏洞、衝突或改善需求時，只能提出
+  `rule_change` 建議，不得直接修改規則，也不得藉由修改被引用文件或例外條款繞過此限制。
+  建議應列出問題、涉及的規則位置、具體情境或證據、提議修改及預期影響；一律交由已授權的
+  session 評估是否執行修改。提出建議不代表已核准；評估完成前維持現行規則，若衝突使任務
+  無法繼續，則回報阻塞與待決事項，不自行新增例外。
+- `rule_change` 集中保存在 [`docs/planning/rule_changes.md`](docs/planning/rule_changes.md)；
+  提案、評估與結案依 [`project_workflow.md`](docs/architecture/project_workflow.md#rule_change-流程)。
 - 一般非平凡修改先提出 scope、approach、risk 與 validation；只有在已核准範圍內執行。
 - 使用者明確要求「列 change contract」時，先使用
   `Goal / Allowed changes / Forbidden changes / Top-level flow to preserve / Validation / Open questions`

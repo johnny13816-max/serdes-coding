@@ -193,12 +193,39 @@ causal-isolation tolerance 必須分開命名。
 工作經驗
 └─ candidate lesson → 使用者同意寫入 NOTES
    └─ 重複驗證 → 提議升格
-      └─ 使用者 review → 更新權威規則／workflow／skill
+      └─ 涉及專案規則時提出 rule_change → 已授權 session 評估與執行
          └─ 移除 NOTES 中重複或過時內容
 ```
 
 [`../planning/HANDOFF.md`](../planning/HANDOFF.md) 只保存當前狀態，恢復工作時必須與 Git/tracker 重新核對；
 [`../planning/NOTES.md`](../planning/NOTES.md) 只保存尚未升格的可重用經驗。Agent 不得自行演化永久規則。
+
+## rule_change 流程
+
+本節是規則提案流程的唯一權威；修改授權仍由 `AGENTS.md` 管理。
+提案集中記在 [`../planning/rule_changes.md`](../planning/rule_changes.md)，不以 NOTES 或聊天取代。
+
+```text
+Proposed → Accepted → Implemented → Closed
+         ├─ Deferred → Proposed（補齊證據或恢復條件後重審）
+         └─ Rejected
+```
+
+- 任何 session 都可新增 `Proposed`，或為既有提案補充證據；這是提案記錄權，不是規則修改權。
+  不需為登記提案另外取得規則修改授權，不自動中斷目前 project task。
+- 每項使用唯一 `RC-YYYYMMDD-NNN` ID，記錄日期、問題、規則位置、情境／證據、建議、影響、
+  狀態、評估者／授權依據、決策理由、修改範圍、驗證與 commit evidence；未知欄位明記待評估。
+- 只有已取得使用者明確規則修改授權的 session，可寫入評估決策並將提案轉為 Accepted、Deferred
+  或 Rejected。評估須檢查必要性、權威 owner、既有衝突及授權範圍；Accepted 不把授權轉給其他 session。
+- Accepted 項目進入實作前，在 `active_contracts.md` 連結提案作為該規則維護項目的暫存 contract，
+  記錄當前 boundary、next gate 與授權。仍遵守單一 active responsibility boundary；不得自動接管
+  或修改另一 session 的 project task。既有 technical queue 保留。
+- 僅在授權範圍修改唯一權威文件，並同步必要索引；完成修改標 Implemented。至少驗證 diff、
+  Markdown 本地連結、規則交叉一致性及原問題情境，不以程式測試冒充規則驗證。
+- Closed 須有決策理由、實際修改範圍、驗證結果、獨立 commit evidence 及 active state 收斂；
+  尚未 commit 保持 Implemented。Deferred 記恢復條件，Rejected 記拒絕理由，兩者均不得執行修改。
+- 提案不得成為新規則的權威來源。結案後只保留短版決策與 evidence，刪除重複草稿；不刪除 ID 或
+  未解提案，不強制再登記至 `open_issues.xlsx` 或 NOTES，以免形成多份狀態來源。
 
 ## `/handoff` command
 

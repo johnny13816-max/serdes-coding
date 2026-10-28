@@ -1,0 +1,44 @@
+# rule_change 提案與決策
+
+本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
+流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
+
+## RC-20261028-001 — 建立規則提案流程
+
+- 日期：2026-10-28
+- 狀態：Implemented；待獨立 commit 與 active state 收斂，尚未 Closed。
+- 問題：未授權 session 能提出 rule_change，但缺少集中保存、評估與結案流程。
+- 規則位置：AGENTS.md 的 Change authorization；project_workflow.md 的 Cross-session loop。
+- 情境／證據：本對話 rule integrity review 發現提案跨 session 可能遺失、評估權限不明。
+- 建議／影響：建立集中清單與權限分工；project task 可登記提案，規則維護由已授權 session 處理。
+- 評估者／授權依據：本規則維護 session；使用者明確授權本對話修改規則，並選擇建立此流程。
+- 決策理由：接受；使提案有可追蹤紀錄，並保留規則修改 gate。
+- 修改範圍：AGENTS.md、project_workflow.md、planning/README.md、active_contracts.md 與本文件。
+- 驗證：diff whitespace、本地檔案連結檢查通過；人工情境檢查確認未授權者僅能提案、Accepted
+  不轉移 session 授權、未 commit 不得 Closed；新增 heading anchors 已與標題核對。
+- Commit evidence：尚未提交。
+- 下一個關卡：完成文件驗證；獨立 commit 後才可 Closed。
+
+## RC-20261028-002 — NOTES 維護權限
+
+- 日期／狀態：2026-10-28／Proposed。
+- 問題／位置：NOTES.md 要求修改前取得同意；project_workflow.md 的 closure slimming 要求結案時移除內容。
+- 情境／證據：一般 project session 結案可能同時遇到兩項不同要求。
+- 建議／影響：區分候選內容變更與已升格、重複內容清理，明確指定權限。
+- 評估者／授權依據、決策理由、修改範圍、驗證、commit evidence：待評估；尚未核准或修改。
+
+## RC-20261028-003 — Artifact 輸出位置
+
+- 日期／狀態：2026-10-28／Proposed。
+- 問題／位置：project_structure.md 的 case output、下載 artifact 的 results/ 與頂層 allowlist 定義不一致。
+- 情境／證據：下載 artifact 解壓指令可能被解讀為新增未允許的頂層 results/。
+- 建議／影響：明確指定 artifact 保存位置與 lifecycle，避免各 session 自行選擇。
+- 評估者／授權依據、決策理由、修改範圍、驗證、commit evidence：待評估；尚未核准或修改。
+
+## RC-20261028-004 — Release evidence 時效
+
+- 日期／狀態：2026-10-28／Proposed。
+- 問題／位置：v1_0_release_gate.md 的 G3/G5 要求目前 candidate 通過，但狀態引用歷史驗證。
+- 情境／證據：歷史 pass 容易被讀成目前 release candidate 已通過。
+- 建議／影響：區分 historical evidence 與 current candidate acceptance；不改數值或重跑結果。
+- 評估者／授權依據、決策理由、修改範圍、驗證、commit evidence：待評估；尚未核准或修改。
