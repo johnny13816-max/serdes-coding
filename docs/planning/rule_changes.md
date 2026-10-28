@@ -5,7 +5,7 @@
 
 ## RC-20261028-006 — 規則與專案對話分工
 
-- 日期／狀態：2026-10-28／Implemented；尚未 commit 或 Closed。
+- 日期／狀態：2026-10-28／Closed。
 - 問題／位置：AGENTS.md 原允許單次規則修改授權，未要求規則與專案更新分屬不同對話。
 - 情境／證據：使用者明確要求只有規則專用對話參與規則更新，專案對話不參與。
 - 建議／影響：規則專用對話處理評估至結案；專案對話僅提案與交付事實證據，繼續依現行規則工作。
@@ -14,7 +14,8 @@
 - 修改範圍：AGENTS.md、project_workflow.md、active_contracts.md、HANDOFF.md 與本紀錄。
 - 驗證：diff 與本地連結檢查通過；heading anchor 已核對。人工情境檢查確認專案對話可提案、
   不能評估或提交規則；新對話不能繼承授權；技術文件更新不等於規範修改；本對話只維護規則。
-- Commit evidence：尚未提交；RC-004 維持 Proposed，本次不執行。
+- Commit evidence：`b6dee0fc9de13e6544476dcd0a4780e67a062cbb`；後續 closure commit 收斂交接狀態。
+  RC-004 維持 Proposed，不阻擋專案對話，也不由專案對話接手。
 
 ## RC-20261028-005 — 讀取截斷補讀要求
 

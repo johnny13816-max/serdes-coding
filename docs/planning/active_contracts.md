@@ -7,17 +7,9 @@ v1.0 release 狀態見
 
 ## Workflow state
 
-規則維護 [RC-20261028-001](rule_changes.md#rc-20261028-001--建立規則提案流程) 已 Closed，
-規則 commit 為 `d02cee3`。
-[RC-20261028-002](rule_changes.md#rc-20261028-002--notes-維護權限) 已 Closed，規則 commit 為
-`2a841b8`。
-[RC-20261028-005](rule_changes.md#rc-20261028-005--讀取截斷補讀要求) 已 Closed，規則 commit 為
-`a1f592c`。
-[RC-20261028-003](rule_changes.md#rc-20261028-003--artifact-輸出位置) 已 Closed，規則 commit 為
-`e7a7c4a`；目前規則專用對話執行
-[RC-20261028-006](rule_changes.md#rc-20261028-006--規則與專案對話分工)，狀態 Implemented，
-下一關為文件驗證與獨立 commit。RC-004 仍為 Proposed，不自動啟動。
-使用者授予本對話的規則維護權限不延伸至新 session；technical queue 保持如下。
+本輪規則維護已結案，沒有 active rule change；決策與 commit evidence 見
+[rule_changes.md](rule_changes.md)。RC-004 保留 Proposed，由規則專用對話另行評估，
+不阻擋 technical queue，也不交由專案更新對話處理。新專案對話的下一項為下列 178A P3 review。
 
 `GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在
 2026-10-28 重新審查後判定過度擴張。P1/P2 保持完成，P3–P9 依

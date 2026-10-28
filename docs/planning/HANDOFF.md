@@ -8,20 +8,20 @@
 Handoff state: READY
 Generated at: 2026-10-28 Asia/Taipei
 Source branch: main
-Source revision: HEAD dd716ac plus uncommitted RC-006 rule documents
-Active task: RC-20261028-006 separation of rule and project conversations
-Current phase: Implemented; awaiting document validation and isolated commit
-Collaboration mode: Full-Agent in user-designated rule-only conversation
-Approved boundary: this conversation only; new rule sessions need user designation and authorization
-Completed: authorized rule maintenance gate and centralized rule_change lifecycle
-In progress: RC-006 rule documentation; no project implementation
+Source revision: rule boundary b6dee0f; snapshot included in subsequent closure commit
+Active task: none; next project item is 178A P3 workbook/config interface review
+Current phase: rule maintenance closed; ready for project-only conversation
+Collaboration mode: Co-Build for the next 178A P3 read-only review
+Approved boundary: project read-only review; no rule, code or protected-model modification authorized
+Completed: rule maintenance RC-001/002/003/005/006; evidence in rule_changes.md
+In progress: none
 Blocked: none
-Next recommended action: verify and commit RC-006 in rule-only session; technical queue remains 178A P3
-Next action owner: user selects next proposal; unauthorized sessions may only submit proposals
-Stop point: no automatic proposal execution, 93A work, or protected COM changes
+Next recommended action: preflight then show Ad Hoc -> project workbook -> runtime mapping tree for P3
+Next action owner: new project conversation; do not resume rule-maintenance tasks
+Stop point: report findings; rule gaps become proposals only; modifications need their applicable approval
 Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
                 docs/planning/rule_changes.md; docs/planning/active_contracts.md
-Dirty-state summary: RC-006 docs uncommitted; existing reference_data/results changes untouched
+Dirty-state summary: existing reference_data deletions/additions and results/ untouched; do not mix into commits
 ```
 
 ## New-session resume checklist
