@@ -216,8 +216,10 @@ Proposed → Accepted → Implemented → Closed
   不需為登記提案另外取得規則修改授權，不自動中斷目前 project task。
 - 每項使用唯一 `RC-YYYYMMDD-NNN` ID，記錄日期、問題、規則位置、情境／證據、建議、影響、
   狀態、評估者／授權依據、決策理由、修改範圍、驗證與 commit evidence；未知欄位明記待評估。
-- 只有已取得使用者明確規則修改授權的 session，可寫入評估決策並將提案轉為 Accepted、Deferred
-  或 Rejected。評估須檢查必要性、權威 owner、既有衝突及授權範圍；Accepted 不把授權轉給其他 session。
+- 只有使用者明確指定且授權的規則專用 session，可寫入評估決策並將提案轉為 Accepted、Deferred
+  或 Rejected，以及執行後續規則修改、驗證、提交與結案。專案更新 session 只交付提案／事實證據，
+  不承接這些步驟，不以單次例外混合兩種對話角色。評估須檢查必要性、權威 owner、既有衝突及
+  授權範圍；Accepted 不把授權轉給其他 session。
 - Accepted 項目進入實作前，在 `active_contracts.md` 連結提案作為該規則維護項目的暫存 contract，
   記錄當前 boundary、next gate 與授權。仍遵守單一 active responsibility boundary；不得自動接管
   或修改另一 session 的 project task。既有 technical queue 保留。
