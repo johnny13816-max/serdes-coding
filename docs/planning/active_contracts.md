@@ -10,9 +10,9 @@ v1.0 release 狀態見
 規則維護 [RC-20261028-001](rule_changes.md#rc-20261028-001--建立規則提案流程) 已 Closed，
 規則 commit 為 `d02cee3`。
 [RC-20261028-002](rule_changes.md#rc-20261028-002--notes-維護權限) 已 Closed，規則 commit 為
-`2a841b8`；目前規則維護邊界為
-[RC-20261028-005](rule_changes.md#rc-20261028-005--讀取截斷補讀要求)，狀態 Implemented，
-下一關為文件驗證與獨立 commit。RC-003/004 仍為 Proposed，不自動啟動。
+`2a841b8`。
+[RC-20261028-005](rule_changes.md#rc-20261028-005--讀取截斷補讀要求) 已 Closed，規則 commit 為
+`a1f592c`；目前沒有 active rule change。RC-003/004 仍為 Proposed，不自動啟動。
 使用者授予本對話的規則維護權限不延伸至新 session；technical queue 保持如下。
 
 `GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在

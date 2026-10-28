@@ -5,7 +5,7 @@
 
 ## RC-20261028-005 — 讀取截斷補讀要求
 
-- 日期／狀態：2026-10-28／Implemented；尚未 commit 或 Closed。
+- 日期／狀態：2026-10-28／Closed。
 - 問題／規則位置：collaboration_contract.md 的 Token-first 只要求 targeted read，未定義截斷後的完整性責任。
 - 情境／證據：工具輸出可能因 token budget 截斷；讀取命令成功不等於已取得所有必要內容。
 - 建議／影響：截斷時分段補讀並核對任務所需範圍；保留彈性讀取量，無法補齊時揭露限制。
@@ -14,8 +14,8 @@
 - 修改範圍：collaboration_contract.md、active_contracts.md、HANDOFF.md 與本紀錄。
 - 驗證：diff 與本地連結檢查通過，新增 heading anchor 與標題核對；人工情境檢查確認截斷須補讀、
   非相關內容不強制全讀、無法補齊須揭露限制，且不設固定行數上限。
-- Commit evidence：尚未提交。
-- 下一個關卡：文件驗證、獨立 commit 與 active state 收斂。
+- Commit evidence：`a1f592c1527cb1c39c700fe26cfd3708a7f112fc`；active state 與 HANDOFF 於後續 closure commit 收斂。
+- 下一個關卡：無；其餘提案等待評估，不自動啟動。
 
 ## RC-20261028-001 — 建立規則提案流程
 
