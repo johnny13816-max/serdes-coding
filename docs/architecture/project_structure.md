@@ -74,7 +74,27 @@ Temporary Git worktrees are not the default editing, installation, workbook or e
 
 ## Inputs and formats
 
-Each active case uses `cases/<case_id>/<model>/config.xlsx`; generated output stays below that model's `results/<run_name>/`. A reusable project-config template belongs at `cases/_templates/<model>/config.xlsx` only after it passes the conversion schema reader and has no case-specific provenance or channel selection. A template may intentionally leave channel S4P paths blank and is not a runnable case until the channel rows are completed. Do not keep obsolete or empty placeholder templates. Downloaded workflow artifacts must be extracted into `results/` and their duplicate ZIP files removed.
+Each active case uses `cases/<case_id>/<model>/config.xlsx`; generated output stays below that model's `results/<run_name>/`. A reusable project-config template belongs at `cases/_templates/<model>/config.xlsx` only after it passes the conversion schema reader and has no case-specific provenance or channel selection. A template may intentionally leave channel S4P paths blank and is not a runnable case until the channel rows are completed. Do not keep obsolete or empty placeholder templates.
+
+### Downloaded workflow artifacts
+
+- 本機下載與解壓的完整位置為 `cases/<case_id>/<model>/results/<run_name>/`，其中 GitHub
+  artifact 使用可辨識 run ID／attempt 的名稱，例如 `github_38745800222_attempt1`；不得覆寫不同
+  run 或 attempt。無法確認 case/model 時，先保存在 `%TEMP%` 的專用子目錄並查明來源，不猜測歸屬。
+- 本文件中的 artifact `results/` 均指上述 case/model 下的位置，不指 repository root；不得因此
+  新增頂層 `results/`、`artifacts/` 或 `downloads/`。`.gitignore` 排除不等於目錄建立授權。
+- 保留 artifact 內部相對結構；下載各分片時依 manifest／原 workflow 佈局組合，並以實際 output
+  root 執行適用 verify。保留 run/attempt、source revision、input hashes、manifest 與驗證結果，
+  缺少的 provenance 須明示，不以本機 HEAD 取代來源 revision。
+- ZIP 只有在解壓成功、適用完整性驗證通過且確認為可重取的重複下載副本後才清除；不得把此條款
+  用於刪除 reference input ZIP、唯一原始檔或他人既有資料。解壓或驗證失敗時保留可恢復副本。
+- `%TEMP%` 驗證產物為可拋棄暫存；正式保留的 evidence 位於上述 case output，且應受 Git ignore
+  規則排除。既有非標準位置另案盤點，不因本規則自動搬移、刪除或提交。
+- CI runner 可使用 workflow 明定的暫存 output path，例如 `artifacts/partial_search`；此為 CI
+  工作目錄內的暫時產物，不改變本機 canonical root 的 allowlist。本機執行相同驗證時，使用
+  `%TEMP%` 專用子目錄或已定義的 case output，並明確傳入 output root。
+
+### Workbook ownership
 
 178A workbooks contain `fixed_config`, `search_config`, `channels`, and `run_config`. Channel paths are defined exclusively in `config.xlsx`'s `channels` sheet and resolved relative to the workbook. S4P inputs remain in `reference_data/COM_channel_data/`; do not duplicate them under cases. Manifests record provenance; they do not override channel definitions. Legacy `config/config_178A.xlsx` and shared channel manifests are not templates for new runs.
 

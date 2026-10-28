@@ -48,11 +48,18 @@
 
 ## RC-20261028-003 — Artifact 輸出位置
 
-- 日期／狀態：2026-10-28／Proposed。
+- 日期／狀態：2026-10-28／Implemented；待 commit，尚未 Closed。
 - 問題／位置：project_structure.md 的 case output、下載 artifact 的 results/ 與頂層 allowlist 定義不一致。
 - 情境／證據：下載 artifact 解壓指令可能被解讀為新增未允許的頂層 results/。
 - 建議／影響：明確指定 artifact 保存位置與 lifecycle，避免各 session 自行選擇。
-- 評估者／授權依據、決策理由、修改範圍、驗證、commit evidence：待評估；尚未核准或修改。
+- 評估者／授權依據：本規則維護 session；使用者授權規則維護並選擇評估 RC-003。
+- 決策理由：接受；沿用 case/model results 的既有 ownership，區分本機保存與 CI 暫存。
+- 修改範圍：project_structure.md、search_execution.md、active_contracts.md、HANDOFF.md 與本紀錄；
+  不改 code、workflow、ignore pattern 或既有資料位置。
+- 驗證：diff、本地連結與示例 case output 的 git check-ignore 檢查通過；已核對 heading anchors。
+  既有 93A/178A workflows 使用 case results，partial validation workflow 使用 CI 暫存
+  artifacts/partial_search，規則明列兩者；人工確認不同 attempt 隔離、未知 case 暫存與驗證失敗保留 ZIP。
+- Commit evidence：尚未提交。
 
 ## RC-20261028-004 — Release evidence 時效
 

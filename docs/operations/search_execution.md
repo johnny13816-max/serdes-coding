@@ -55,6 +55,10 @@ cases/<case_id>/<version>/results/actions/
 
 Final artifacts include `resolved_config.json`, the Git revision and dirty-state marker, input fingerprints, manifests and group results needed for audit, merged/final search data, plots, and verification metadata.
 
+本機下載後的保存位置、run/attempt 分隔、ZIP 清理條件與 CI 暫存例外，統一依
+[project_structure.md](../architecture/project_structure.md#downloaded-workflow-artifacts)；以上
+`results/actions/` 是 workflow 執行佈局，不代表不同 GitHub runs 可共用並覆寫同一份本機下載目錄。
+
 ## Local use
 
 For a simple interactive search, the versioned model's manual `search_run` entry may be used. For reproducible split execution, use the command-line lifecycle above so partial results can be merged and verified using the same boundaries as GitHub Actions.
