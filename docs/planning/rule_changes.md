@@ -3,6 +3,20 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261029-001 — 技術文件同步結案檢查
+
+- 日期／狀態：2026-10-29／Implemented；尚未 commit 或 Closed。
+- 問題／位置：documentation_contract.md 的 Update rule 與 project_workflow.md 的 Git and closure；
+  既有同步規則缺少一般技術文件用途、結案前明確核對及無需更新的理由紀錄。
+- 情境／證據：使用者要求每次修改 close 前確認相關專案技術文件已同步，並核准本對話提出的文字。
+- 建議／影響：以唯一技術文件 owner 同步為 closure gate，不強迫新增文件，不授權修改治理規則。
+- 評估者／授權依據：本規則專用對話；使用者已授權規則維護並選擇依建議文字加入。
+- 決策理由：接受；讓文件同步是否完成有明確結案證據。
+- 修改範圍：documentation_contract.md、project_workflow.md、本紀錄及 active_contracts.md 的獨立規則狀態。
+- 驗證：diff whitespace、本地連結及新增 heading anchor 核對通過；人工確認需同步者未同步不得
+  Closed、無需更新者須記理由、無須每次新增文件且不改變治理授權。不執行 project code 或數值測試。
+- Commit evidence：尚未提交；不接管其他對話的 project boundary 或既有 dirty changes。
+
 ## RC-20261028-006 — 規則與專案對話分工
 
 - 日期／狀態：2026-10-28／Closed。

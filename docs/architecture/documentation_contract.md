@@ -134,6 +134,14 @@ quantities.
 
 ## Update rule
 
+專案技術文件用來描述特定模組、功能集、契約、設計假設，以及需要文字輔助理解與演進的抽象概念。
+
+每項專案修改在標記 `Closed` 前，必須辨認受影響的技術文件，核對其描述是否與修改後的實作一致，
+並在同一責任邊界內完成必要同步。若無需更新，須在結案紀錄簡述理由；若尚有必要文件未同步，
+則不得標記 `Closed`。
+
+文件同步以既有的唯一權威文件為主，不要求每次修改新增文件，也不得藉技術文件同步修改專案治理規則。
+
 A change to a stage boundary, config dataclass, status dataclass, workbook
 mapping, semantic call tree, or reporting dependency updates its authoritative
 document in the same change. Mathematical documentation is subject to the Core

@@ -128,6 +128,8 @@ small/full search。已通過的檢查不因形式而重跑；只有新變更、
 
 ### 7. Git and closure
 
+- 結案前依 [`documentation_contract.md` 的 Update rule](documentation_contract.md#update-rule)
+  核對受影響技術文件與實作的同步情況，記錄已同步文件或無需更新的理由；必要文件未同步不得 Closed。
 - 每個可獨立 review/rollback 的責任邊界一個 commit；protected behavior 必須獨立 commit。
 - 不提交無法安全歸屬的既有 dirty changes。需要 GitHub sync 的 workflow 在切換下一項前先 push。
 - `Closed` 需要 implementation、focused/applicable regression、required docs、tracker reconciliation、
