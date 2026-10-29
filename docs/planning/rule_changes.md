@@ -5,7 +5,7 @@
 
 ## RC-20261029-001 — 技術文件同步結案檢查
 
-- 日期／狀態：2026-10-29／Implemented；尚未 commit 或 Closed。
+- 日期／狀態：2026-10-29／Closed。
 - 問題／位置：documentation_contract.md 的 Update rule 與 project_workflow.md 的 Git and closure；
   既有同步規則缺少一般技術文件用途、結案前明確核對及無需更新的理由紀錄。
 - 情境／證據：使用者要求每次修改 close 前確認相關專案技術文件已同步，並核准本對話提出的文字。
@@ -15,7 +15,8 @@
 - 修改範圍：documentation_contract.md、project_workflow.md、本紀錄及 active_contracts.md 的獨立規則狀態。
 - 驗證：diff whitespace、本地連結及新增 heading anchor 核對通過；人工確認需同步者未同步不得
   Closed、無需更新者須記理由、無須每次新增文件且不改變治理授權。不執行 project code 或數值測試。
-- Commit evidence：尚未提交；不接管其他對話的 project boundary 或既有 dirty changes。
+- Commit evidence：`4f5f5156d95e7f847c52799dcc3f39297dd69af1`；後續 closure commit 記錄結案。
+  本項暫存 active 段落已移除；active_contracts.md 的其餘既有專案修改與 HANDOFF 保持原狀且不納入提交。
 
 ## RC-20261028-006 — 規則與專案對話分工
 
