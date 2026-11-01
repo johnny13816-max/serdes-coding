@@ -11,6 +11,8 @@ from serdes_coding.models.com_model_178A import (
     COM,
     COMAddedNoiseStatus,
     COMEqChannelStatus,
+    COMPostFFEEqChannelStatus,
+    COMPreDTEEqChannelStatus,
     COMImpairmentStatus,
     COMImpStageStatus,
     COMPSDStatus,
@@ -30,6 +32,12 @@ class TestMLSDNoise178A(unittest.TestCase):
         self.H_rxffe = SampledResponse.from_ir(np.array([1.0, 0.5]), self.grid)
         self.h_ISI = SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), self.grid)
         self.sigma_X = 0.3
+        self.eq_ch = COMEqChannelStatus(
+            phase_index=0,
+            pre_dte=COMPreDTEEqChannelStatus(),
+            post_ffe=COMPostFFEEqChannelStatus(h_ISI=self.h_ISI),
+        )
+        self.dte = SimpleNamespace(H_rxffe=self.H_rxffe)
         self.imp = COMImpairmentStatus(
             pre_dte=COMImpStageStatus(
                 psd=COMPSDStatus(S_total=self.S_n, S_qn=self.S_qn, sigma_X=self.sigma_X)
@@ -41,8 +49,6 @@ class TestMLSDNoise178A(unittest.TestCase):
                     S_rn=SampledPSD.from_constant(self.grid.theta, 0.01, self.fb, cfg=self.grid)
                 )
             ),
-            eq_ch=COMEqChannelStatus(h_ISI=self.h_ISI),
-            H_rxffe=self.H_rxffe,
         )
         self.S_an = SampledPSD.from_constant(self.grid.theta, 0.02 / self.fb, self.fb, cfg=self.grid)
         self.added_noise = COMAddedNoiseStatus(
@@ -57,9 +63,12 @@ class TestMLSDNoise178A(unittest.TestCase):
             policy=COMPolicyConfig(),
             dte=SimpleNamespace(d_w=0),
         )
+        self.model._eq_ch_imp_record_cfg = self.grid
 
     def test_eq54_source_folding_and_parseval(self) -> None:
-        result = self.model.build_mlsd_noise(self.imp, self.added_noise)
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
 
         # Eq. 178A-54 specifies a two-sided density. Only interior rFFT bins
         # double when represented by SampledPSD's one-sided samples.
@@ -85,7 +94,9 @@ class TestMLSDNoise178A(unittest.TestCase):
         self.model.cfg.policy = COMPolicyConfig(
             mlsd_quantization_psd="main_tap_white"
         )
-        result = self.model.build_mlsd_noise(self.imp, self.added_noise)
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
 
         expected_non_qn = (
             (self.S_n.psd - self.S_qn.psd)
@@ -112,13 +123,17 @@ class TestMLSDNoise178A(unittest.TestCase):
         )
         self.imp.pre_dte.psd.S_total = shifted
         with self.assertRaisesRegex(ValueError, "pre-FFE S_n must share"):
-            self.model.build_mlsd_noise(self.imp, self.added_noise)
+            self.model.build_mlsd_noise(
+                self.imp, self.eq_ch, self.dte, self.added_noise
+            )
 
     def test_added_noise_must_share_post_ffe_grid(self) -> None:
         other_grid = LinkConfig.from_Nfft(self.fb, 1, 8)
         self.added_noise.S_an = SampledPSD.from_constant(other_grid.theta, 0.02 / self.fb, self.fb)
         with self.assertRaisesRegex(ValueError, "added_noise.S_an must share"):
-            self.model.build_mlsd_noise(self.imp, self.added_noise)
+            self.model.build_mlsd_noise(
+                self.imp, self.eq_ch, self.dte, self.added_noise
+            )
 
 
 if __name__ == "__main__":

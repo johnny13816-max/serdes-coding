@@ -30,6 +30,8 @@ from .status import (
     COMAddedNoiseStatus,
     COMDTEStatus,
     COMEqChannelStatus,
+    COMPostFFEEqChannelStatus,
+    COMPreDTEEqChannelStatus,
     COMImpStageStatus,
     COMImpairmentStatus,
     COMMLSDNoiseStatus,

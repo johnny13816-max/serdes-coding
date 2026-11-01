@@ -1,4 +1,4 @@
-# 178A post-FFE impairment stage
+# 178A Stage 5: post-FFE impairment
 
 > **Review state:** selected-phase response construction, status ownership, reporting-PSD separation, downstream COM inputs, and current automated checks are confirmed from source. Governing equations and reference-case accuracy have not been independently revalidated by this documentation change.
 
@@ -9,7 +9,7 @@ This stage takes the selected pre-DTE impairment and selected limited DTE result
 It owns:
 
 - the run-level fixed sampled grid shared with pre-DTE;
-- RX FFE response representation;
+- consumption of the Stage 4 RX FFE response representation;
 - equalized victim and aggressor responses;
 - residual ISI after applying selected DFE feedback taps;
 - post-FFE jitter sensitivity;
@@ -22,18 +22,21 @@ It does not change the selected DTE MSE and does not build the final interferenc
 ## Entry and output
 
 ```text
-calculate_post_ffe_imp(dte_status, imp_pre, victim_pulse, run_cfg)
-    -> COMImpairmentStatus
+calculate_post_ffe_imp(dte_status, eq_ch, imp_pre, victim_pulse, run_cfg)
+    -> (COMPostFFEEqChannelStatus, COMImpairmentStatus)
 ```
 
-`COM._run_once()` merges this result into the selected pre-DTE impairment. The returned `eq_ch` object contains both selected pre-DTE and new post-FFE responses so the merge does not intentionally discard the earlier response fields.
+`COM._run_once()` commits both Stage 5 outputs through `_assign_post_ffe()`.
+The commit validates the selected phase and adds only `eq_ch.post_ffe` and
+`imp.post_ffe`; it cannot replace selected pre-DTE or DTE data.
 
 ## Required inputs
 
 | Input | Required fields/data | Role |
 |---|---|---|
-| `dte_status` | `w_lim`, `b_lim`, `d`, `pos` | selected RX FFE/DFE and cursor metadata |
-| `imp_pre` | `sigma_X`, pre-DTE `S_rn`, `S_tn`, `h_dsamp`, `h_J`, `h_XTs_dsamp`, and selected equivalent responses | physical pre-DTE inputs |
+| `dte_status` | `w_lim`, `H_rxffe`, `b_lim`, `d`, `pos` | selected RX FFE/DFE and cursor metadata |
+| `eq_ch` | matching `phase_index` plus pre-DTE `h_dsamp`, `h_J`, `h_XTs_dsamp` | selected equivalent-channel inputs |
+| `imp_pre` | `sigma_X`, pre-DTE `S_rn`, `S_tn`, and selected impairment data | physical pre-DTE inputs |
 | `h` | oversampled victim pulse | post-FFE jitter sensitivity from adjacent phases |
 | `COMConfig.link` | run-level sampled grid and symbol timing | all pre/post-FFE responses and PSDs |
 | `COMConfig.policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | victim、XT 與 DDJ 的 FFE record-boundary method |
@@ -59,7 +62,7 @@ run-level grid
 ├── w_lim_pre
 ├── S_G_pre
 ├── sigma_G after one FFE filtering operation
-├── H_rxffe
+├── Stage 4 dte.H_rxffe
 ├── h_w
 ├── h_XTs_w
 ├── h_ISI
@@ -72,19 +75,19 @@ does not change DTE MSE or DFE COM.
 
 ## Ordered functional blocks
 
-### 1. Validate and represent the selected FFE
+### 1. Validate the selected FFE
 
 - validate `w_lim` shape and finite values;
 - retain the full vector for run-level-grid convolution/filter use;
-- trim only trailing zero taps for the compact `H_rxffe` representation;
+- require the matching `dte_status.H_rxffe` constructed by Stage 4;
 - construct `w_lim_pre` on the run-level link grid.
 
 ### 2. Build fixed-grid equivalent responses
 
 ```text
-imp_pre.h_dsamp + w_lim -> selected _apply_rxffe_response method -> h_w on cfg.link
-w_finite on cfg.link -> H_rxffe
-for every imp_pre.h_XTs_dsamp
+eq_ch.pre_dte.h_dsamp + w_lim -> selected _apply_rxffe_response method -> h_w on cfg.link
+dte_status.H_rxffe -> PSD/filter consumers
+for every eq_ch.pre_dte.h_XTs_dsamp
     apply the same selected record method -> h_XTs_w[k] on cfg.link
 ```
 
@@ -136,8 +139,13 @@ The stored component sigmas are obtained from their matching fixed-grid PSDs.
 ## Produced status
 
 ```text
-COMImpairmentStatus
-├── post_ffe: COMImpStageStatus
+COMStatus Stage 5 additions
+├── eq_ch.post_ffe: COMPostFFEEqChannelStatus
+│   ├── h_w
+│   ├── h_XTs_w
+│   ├── h_ISI
+│   └── h_w_J
+└── imp.post_ffe: COMImpStageStatus
 │   ├── psd: COMPSDStatus
 │   │   ├── As
 │   │   ├── S_rn / sigma_rn
@@ -149,13 +157,6 @@ COMImpairmentStatus
 │   │   ├── sigma_G
 │   │   └── sigma_ISI
 │   └── adc_input: COMAdcInputPMF
-├── eq_ch: COMEqChannelStatus
-│   ├── selected pre-DTE response fields
-│   ├── h_w
-│   ├── h_XTs_w
-│   ├── h_ISI
-│   └── h_w_J
-└── H_rxffe
 ```
 
 `As` is created at this stage. `R_n` remains a pre-DTE DTE-solver input and is not recreated for post-FFE reporting.

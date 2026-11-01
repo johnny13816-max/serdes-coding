@@ -60,8 +60,8 @@ COMConfig
 │   ├── final_adc_quantization_convention
 │   ├── ctle_pulse_realization
 │   ├── rxffe_record_realization
-│   ├── noise_grid_method
-│   ├── noise_grid_num_ui
+│   ├── eq_ch_imp_len
+│   ├── num_trunc_ui
 │   ├── discrete_pmf_placement
 │   ├── interference_pmf_method
 │   ├── xtalk_pmf_accumulation
@@ -150,6 +150,8 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `final_adc_quantization_convention` | `COMConfig.policy` | `annex_d3` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
 | `rxffe_record_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `linear_convolution` |
+| `eq_ch_imp_len` | `COMConfig.policy`（workbook 獨立曝露） | `full` |
+| `num_trunc_ui` | `COMConfig.policy`（僅 `truncated` 適用） | blank / `None` |
 
 All listed PMF controls and `missing_dc_policy` are labeled `policy`. There is
 no `quantization_vqc_method` row in the 178A project template: it has no 178A
@@ -157,14 +159,15 @@ runtime owner. `run_config.pre_dte_pmf_method` is the applicable execution
 control.
 
 `run_config.control.execution_profile` 是新版 178A 模板的 facade selector；
-合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。新模板不逐欄曝露
-`noise_grid_num_ui` 等底層 method controls；它們由 profile 展開，也不從 Ad Hoc 映射。
+合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。B-005 的
+`eq_ch_imp_len`／`num_trunc_ui` 保留為 workbook 獨立控制，不從 Ad Hoc 映射；
+其他未曝露的底層 method controls 由 profile 展開。
 `project_standard` 使用專案預設，
 `custom` 讀取 workbook 明示的 advanced/legacy method；`sicopr_reference_v1` 由
 `com_excel_io_178A` 在建構 runtime config 前展開為 SiCoPR／MATLAB 4.17
 具名方法：`zero_padding`、`s4p_first`、`bilinear_iir`、
 `finite_record_circshift`、pre-DTE/final ADC reference 分支，
-`fixed_ui` noise grid（本案 4096 UI）、
+`truncated` eq-channel impairment record（本案 4096 UI）、
 以及 `COMPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑
 XT、Gaussian grid sampling（支撐範圍由 `NormalDist().inv_cdf(1-DER_0)`
 決定）、uniform 最近端點、ordinate interpolation、reference support 與

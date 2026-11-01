@@ -5,6 +5,9 @@
 v1.0 是可重現、可理解、可擴充的 COM model platform。它不只要求數值正確，還要求清楚的 function
 call tree、config/status ownership、workbook UX、study extension framework、文件與 release evidence。
 
+> 2026-11-01：使用者已依 [`v1_0_rebaseline.md`](v1_0_rebaseline.md)
+> 恢復 company-platform CP-BR；舊 P4–P9 仍是歷史進度，不作為自動工作隊列。
+
 ```text
 v1.0 foundation
 ├─ numerical COM baseline
@@ -22,7 +25,7 @@ v1.0 foundation
 |---|---|---|---|
 | P1 | 產品邊界：public baseline／internal fork／research | Complete | `evolution_strategy.md` |
 | P2 | software layers、version ownership、93A/178A decoupling | Complete | ARC-178A-001/004 commits and anchors |
-| P3 | workbook、Ad Hoc→project→runtime mapping、UX/provenance | **Next / not reviewed as a whole** | mapping tree、field ownership、user workflow review |
+| P3 | workbook、Ad Hoc→project→runtime mapping、UX/provenance | **Complete（current SiCoPR scope）** | `sicopr_akinwale_vendorx_22db` mapping tree、field ownership、profile/provenance 與 user-workflow review；歷史 C2M workbooks 不納入此判定 |
 | P4 | config/status dataclass tree、serialization、過度分支 | Partial | reviewed trees、lifecycle and compatibility evidence |
 | P5 | function call tree、stage responsibility、extension seams | Partial | stage-wise owner/call review and unresolved list |
 | P6 | utility contracts：S-parameter/grid/PSD/PMF/response | Partial | invariant/round-trip/loss policy review |
@@ -33,11 +36,11 @@ v1.0 foundation
 `docs/models/178A/design_review.md` 是逐章 review 記錄；不得用已完成的 P2 架構 decoupling 推定 P3–P9
 全部通過。只有每一列具備 exit evidence 後，才能將 178A platform review 宣告完成並進入 93A 修改。
 
-## 下一個建議焦點
+## Current company-platform focus
 
-P3：以使用者門面為主，先畫出 Ad Hoc config → project workbook → runtime config/profile 的 tree，
-再逐欄確認 source、default、requiredness、validation、provenance 與 workbook 暴露程度。這是 read-only
-review；發現修改需求後再依責任邊界建立 contract。
+CP-BR 依 stage-by-stage layered call tree 審查算法分支。B-005 已於
+2026-11-01 關閉，B-006 為目前唯一 Approved review item；93A、reporting、
+C2M migration 與 public release 仍維持暫停。
 
 ## 與其他狀態文件的分工
 

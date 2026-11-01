@@ -106,6 +106,7 @@ def test_178a_migrated_leaf_field_contracts_match_the_previous_boundary() -> Non
     assert [item.name for item in fields(COMSharedPath)] == [
         *[item.name for item in fields(com_93A.COMSharedPath)],
         "ctle_iir",
+        "ctle_pulse_realization",
     ]
 
 
@@ -113,6 +114,7 @@ def test_178a_status_has_only_178a_root_stage_fields() -> None:
     assert [item.name for item in fields(COMStatus)] == [
         "paths",
         "run",
+        "eq_ch",
         "dte",
         "imp",
         "pmf",

@@ -42,14 +42,14 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         post = status.imp.post_ffe.psd
         for name in ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total"):
             value = getattr(post, name)
-            self.assertTrue(np.isclose(value.fb, status.imp.h_w.fb), name)
-            np.testing.assert_allclose(value.theta, status.imp.h_w.theta, rtol=1e-12, atol=1e-15)
+            self.assertTrue(np.isclose(value.fb, status.eq_ch.h_w.fb), name)
+            np.testing.assert_allclose(value.theta, status.eq_ch.h_w.theta, rtol=1e-12, atol=1e-15)
 
     def test_xtalk_psd_is_power_sum_of_post_ffe_paths(self) -> None:
         status = self.status
         post = status.imp.post_ffe.psd
         direct = SampledPSD.from_constant(post.S_xn.theta, 0.0, post.S_xn.fb)
-        for response in status.imp.h_XTs_w:
+        for response in status.eq_ch.h_XTs_w:
             source = SampledPSD.from_constant(
                 response.theta,
                 status.imp.sigma_X**2 / response.fb,
@@ -81,7 +81,7 @@ class TestPostFFEImpairment178A(unittest.TestCase):
                     name,
                     SampledPSD.from_constant(original.theta, 0.0, original.fb),
                 )
-            repeated = self.model.calculate_COM_DFE(status.imp, status.dte)
+            repeated = self.model.calculate_COM_DFE(status.imp, status.eq_ch, status.dte)
             self.assertAlmostEqual(repeated.COM, status.pmf.COM, places=12)
         finally:
             for name, value in saved.items():
@@ -101,8 +101,10 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         # The reference branch is tested here for stage isolation; a coarse
         # final grid keeps this generic integration fixture inexpensive.
         run_cfg = replace(reference_cfg.execution.search_final, pmf_dy_override=1e-3)
-        annex = self.model.calculate_COM_DFE(status.imp, status.dte, run_cfg)
-        alternate = COM(reference_cfg).calculate_COM_DFE(status.imp, status.dte, run_cfg)
+        annex = self.model.calculate_COM_DFE(status.imp, status.eq_ch, status.dte, run_cfg)
+        alternate = COM(reference_cfg).calculate_COM_DFE(
+            status.imp, status.eq_ch, status.dte, run_cfg
+        )
         self.assertTrue(np.isfinite(alternate.COM))
         self.assertNotAlmostEqual(alternate.COM, annex.COM, places=4)
         self.assertEqual(status.dte.mse, original_mse)

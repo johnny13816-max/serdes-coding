@@ -998,8 +998,8 @@ class COMPolicyConfig(COMDataclassText):
     rxffe_record_realization: Literal[
         "linear_convolution", "finite_record_circshift"
     ] = "linear_convolution"
-    noise_grid_method: Literal["analysis_grid", "fixed_ui"] = "analysis_grid"
-    noise_grid_num_ui: Optional[int] = None
+    eq_ch_imp_len: Literal["full", "truncated"] = "full"
+    num_trunc_ui: Optional[int] = None
     discrete_pmf_placement: Literal["linear", "nearest"] = "linear"
     interference_pmf_method: Literal["signal_fir", "pam_atoms"] = "signal_fir"
     xtalk_pmf_accumulation: Literal["pathwise_convolution"] = "pathwise_convolution"
@@ -1029,8 +1029,8 @@ class COMPolicyConfig(COMDataclassText):
             TextSection("Noise and ADC", (
                 self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
                 self._field("final_adc_quantization_convention", "final ADC quantization", stored_unit="policy"),
-                self._field("noise_grid_method", "noise grid method", stored_unit="policy"),
-                self._field("noise_grid_num_ui", "noise grid length", stored_unit="UI count"),
+                self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
+                self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("final_adc_pmf_projection", "final ADC PMF projection", stored_unit="policy"),
             )),
             TextSection("PMF methods", (
@@ -1070,7 +1070,7 @@ class COMPolicyConfig(COMDataclassText):
             "final_adc_quantization_convention": {"annex_d3", "matlab_4_17_reference_only"},
             "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
             "rxffe_record_realization": {"linear_convolution", "finite_record_circshift"},
-            "noise_grid_method": {"analysis_grid", "fixed_ui"},
+            "eq_ch_imp_len": {"full", "truncated"},
             "discrete_pmf_placement": {"linear", "nearest"},
             "interference_pmf_method": {"signal_fir", "pam_atoms"},
             "xtalk_pmf_accumulation": {"pathwise_convolution"},
@@ -1094,21 +1094,23 @@ class COMPolicyConfig(COMDataclassText):
                     "COMPolicyConfig.gaussian_n_sigma_override must be finite and positive."
                 )
             object.__setattr__(self, "gaussian_n_sigma_override", value)
-        if self.noise_grid_method == "analysis_grid":
-            if self.noise_grid_num_ui is not None:
-                raise ValueError("analysis_grid requires noise_grid_num_ui=None.")
+        if self.eq_ch_imp_len == "full":
+            if self.num_trunc_ui is not None:
+                raise ValueError("eq_ch_imp_len='full' requires num_trunc_ui=None.")
         else:
             if (
-                self.noise_grid_num_ui is None
-                or int(self.noise_grid_num_ui) != self.noise_grid_num_ui
-                or int(self.noise_grid_num_ui) < 2
+                self.num_trunc_ui is None
+                or int(self.num_trunc_ui) != self.num_trunc_ui
+                or int(self.num_trunc_ui) < 2
             ):
-                raise ValueError("fixed_ui requires an integer noise_grid_num_ui >= 2.")
-            if int(self.noise_grid_num_ui) % 2 != 0:
                 raise ValueError(
-                    "fixed_ui requires even noise_grid_num_ui so the PSD includes Nyquist."
+                    "eq_ch_imp_len='truncated' requires an integer num_trunc_ui >= 2."
                 )
-            object.__setattr__(self, "noise_grid_num_ui", int(self.noise_grid_num_ui))
+            if int(self.num_trunc_ui) % 2 != 0:
+                raise ValueError(
+                    "eq_ch_imp_len='truncated' requires even num_trunc_ui so the PSD includes Nyquist."
+                )
+            object.__setattr__(self, "num_trunc_ui", int(self.num_trunc_ui))
         if (
             self.final_adc_pmf_projection == "reference_support"
             and self.final_adc_quantization_convention != "matlab_4_17_reference_only"
@@ -1120,28 +1122,6 @@ class COMPolicyConfig(COMDataclassText):
         if self.applied_config_profile is not None:
             object.__setattr__(self, "applied_config_profile", str(self.applied_config_profile))
         object.__setattr__(self, "config_profile_overrides", dict(self.config_profile_overrides))
-
-    def resolve_noise_grid(self, link_cfg: LinkConfig) -> LinkConfig:
-        """Return the shared grid used by every MMSE noise PSD component."""
-        if self.noise_grid_method == "analysis_grid":
-            return link_cfg
-        return LinkConfig.from_Nfft(
-            fb=link_cfg.fb,
-            per_ui=link_cfg.per_ui,
-            Nfft=int(self.noise_grid_num_ui) * link_cfg.per_ui,
-        )
-
-    def fit_noise_response(self, response: np.ndarray) -> np.ndarray:
-        """Apply the explicit finite record used before a noise DFT."""
-        response = np.asarray(response, dtype=float)
-        if response.ndim != 1:
-            raise ValueError("noise-grid response must be one-dimensional.")
-        if self.noise_grid_method == "analysis_grid":
-            return response
-        fitted = np.zeros(int(self.noise_grid_num_ui), dtype=float)
-        count = min(len(response), len(fitted))
-        fitted[:count] = response[:count]
-        return fitted
 
 @dataclass(repr=False)
 class COMConfig(COMDataclassText):
@@ -1200,10 +1180,10 @@ class COMConfig(COMDataclassText):
         if not isinstance(self.policy, COMPolicyConfig):
             raise TypeError("policy must be a COMPolicyConfig.")
         if (
-            self.policy.noise_grid_method == "fixed_ui"
-            and int(self.policy.noise_grid_num_ui) < int(self.dte.N_max)
+            self.policy.eq_ch_imp_len == "truncated"
+            and int(self.policy.num_trunc_ui) < int(self.dte.N_max)
         ):
-            raise ValueError("policy.noise_grid_num_ui must cover COMDTEConfig.N_max lags.")
+            raise ValueError("policy.num_trunc_ui must cover COMDTEConfig.N_max lags.")
 
     def resolve_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
         """Compatibility identity: adapters now construct effective run profiles."""

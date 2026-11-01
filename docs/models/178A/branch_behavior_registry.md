@@ -1,13 +1,16 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-10-15
+最後核對：2026-11-01
 
-本文件是 178A model 所有平行算法、數值策略與執行策略的正式索引。新增、修改、重新命名、合併或移除分支時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
+本文件是 178A model 現有具名方法選擇及其分類審查候選的正式索引。新增、修改、重新命名、合併或移除 branch behavior 時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
 
 範圍包含 178A runtime 及其實際呼叫的 shared utility 分支；不把 178A 選項自動視為 93A 行為。若 93A 新增平行算法，應建立或更新對應的 `docs/models/93A/branch_behavior_registry.md`。
 
 ## 判定規則
+
+branch behavior、一般 config、execution strategy、input boundary、固定行為與
+provenance 的正式定義，見 [Branch behavior contract](../../architecture/branch_behavior_contract.md)。本表的 B／E 編號維持現況追溯性；其中列於該契約「Current review set」的項目仍待分類確認，不因本文件的既有分段而預先判定。
 
 - **算法分支**：相同物理輸入可選擇兩種以上具名數學或數值實作。
 - **執行分支**：改變搜尋、精度或計算成本，但不重新定義物理輸入。
@@ -26,8 +29,8 @@
 | `policy.out_of_measured` | `cosine_decay` | `zero_padding` | 是 |
 | `policy.ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | 是 |
 | `policy.rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | 是 |
-| `policy.noise_grid_method` | `analysis_grid` | `fixed_ui` | 是 |
-| `policy.noise_grid_num_ui` | `None` | `4096`；`custom` 可由 legacy／advanced row 指定 | 是 |
+| `policy.eq_ch_imp_len` | `full` | `truncated` | 是；workbook 保留獨立控制 |
+| `policy.num_trunc_ui` | `None` | `4096` | 是；只在 `truncated` 時適用 |
 | `policy.pre_dte_adc_clipping_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
 | `policy.final_adc_quantization_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
 | `policy.discrete_pmf_placement` | `linear` | `nearest` | 是 |
@@ -57,11 +60,11 @@
 
 | ID | Stage | Runtime control | Project default | Alternate/reference 行為 | 責任邊界與不得影響項目 |
 |---|---|---|---|---|---|
-| B-001 | Channel ingestion | `policy.channel_renormalization_order` | `sdd_first`：raw S4P → optional frequency limit → `s4p_to_s2p()` → differential `renormalized(2*R_0)` | `s4p_first`：raw S4P → full four-port `renormalized(R_0)` → optional frequency limit → `s4p_to_s2p()` | Constructor 只保存 raw representation；`_build_channel_under_test()` 顯式排列具名 utility 操作。`_build_path()` 不得交換 port 或再次 renormalize。 |
-| B-002 | S-parameter → scalar transfer | `policy.out_of_measured` | `cosine_decay`：在量測上限外做 cosine decay，phase linear extrapolation | `zero_padding`：量測上限以上的 scalar `H_21` 為零 | 屬 `SparamModel.to_LinkSegment()`／link resampling 邊界。不得修改 `S_ch`、`S_all` 或暗中改變量測上限。victim/NEXT/FEXT 共用。 |
-| B-003 | Pre-CTLE response → pulse | `policy.ctle_pulse_realization` | `continuous_tf`：連續頻域 CTF 乘入等效 transfer function | `bilinear_iir`：measured composite TF → reference grid → raw IFFT → `1e-3` peak 截尾 → bilinear IIR → unit pulse | `_realize_ctle_response()` 擁有整個 realization。TX FFE 不屬此分支；連續 VTF `H_all` 不因 pulse realization 改寫。 |
+| B-001 *(pending draft/reference evidence)* | Channel ingestion | `policy.channel_renormalization_order` | `sdd_first`：raw S4P → optional frequency limit → `s4p_to_s2p()` → differential `renormalized(2*R_0)` | `s4p_first`：raw S4P → full four-port `renormalized(R_0)` → optional frequency limit → `s4p_to_s2p()` | 保留兩種方法，直到取得可核對的 draft/reference source。Constructor 只保存 raw representation；`_build_channel_under_test()` 顯式排列具名 utility 操作。`_build_path()` 不得交換 port 或再次 renormalize。 |
+| B-002 | Transfer extrapolation | `policy.out_of_measured` *(future name: `transfer_extrapolation_method`)* | `cosine_decay`：在量測上限外做 cosine decay，phase linear extrapolation | `zero_padding`：量測上限以上的 scalar `H_21` 為零 | 對已終端化 scalar transfer `H_21` 的量測頻寬外延拓；屬 `SparamModel.to_LinkSegment()`／link resampling 邊界。不得修改 `S_ch`、`S_all` 或暗中改變量測上限。victim/NEXT/FEXT 共用。 |
+| B-003 | Pre-CTLE response → pulse | `policy.ctle_pulse_realization` | `continuous_tf`：連續頻域 CTF 乘入等效 transfer function | `bilinear_iir`：measured composite TF → reference grid → raw IFFT → `1e-3` peak 截尾 → bilinear IIR → unit pulse | **L3 owner:** `CTLE pulse realization` under shared-path construction. `_build_shared_path()` resolves and records the method in `COMSharedPath`; `_prepare_ctle_pulse_realization()` prepares shared IIR state; `_realize_ctle_pulse_for_path()` is the only production per-path entry. `_realize_ctle_response()` remains L4 numerical mechanics, not a config-selection boundary. TX FFE 不屬此分支；連續 VTF `H_all` 不因 pulse realization 改寫。 |
 | B-004 | Post-FFE record | `policy.rxffe_record_realization` | `linear_convolution`：固定 grid linear convolution，保留 overflow guard | `finite_record_circshift`：在既有有限 impulse record 上做 tap shift-sum | `_apply_rxffe_response()` 擁有 record 邊界。不得改變 RX FFE taps、MMSE 解或原始 pre-FFE response。 |
-| B-005 | MMSE noise PSD/correlation | `policy.noise_grid_method`, `noise_grid_num_ui` | `analysis_grid`：使用 `LinkConfig` 的 sampled grid | `fixed_ui`：使用指定的偶數 UI record；reference case 為 4096 UI | `COMPolicyConfig.resolve_noise_grid()/fit_noise_response()` 只控制 noise DFT record、PSD 與 `R_n`。不得改變 channel/pulse analysis grid 或 `h_dsamp`。 |
+| B-005 | Multiple stages involved / Shared L3 (Stages 2, 3, 5, 7) | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`：以完整 one-sample/UI impairment equivalent-channel response 建立 PSD | `truncated`：在 PSD 轉換前依 `num_trunc_ui` 截短／補齊；SiCoPR preset 為 4096 UI | **L3 owner:** eq-channel impairment PSD construction。`_realize_eq_ch_imp_record()` 與 `_build_eq_ch_imp_psd()` 是所有 Stage 2/3/5/7 consumer 的單一入口；Stage 7 用它建立 MLSD `S_isi`。XT path phase 由 Stage 3 先以完整 oversampled response 選定，再輸出完整 one-sample/UI `eq_ch_XT`。分支只改 PSD/correlation record；不得改變 XT phase、channel/pulse analysis grid、`h_dsamp`、`h_XTs_dsamp`、`h_tn`、`h_J`、`h_ISI`、`h_w` 或已保存的 full response。workbook 保留獨立 selector；`num_trunc_ui` 只在 `truncated` 時合法。 |
 | B-006 | Pre-DTE ADC clipping | `policy.pre_dte_adc_clipping_convention` | `annex_d3`：完整 jitter，CDF tail=`P_qc/2` | `matlab_4_17_reference_only`：clipping PMF 使用 RJ-only，CDF tail=`P_qc` | `calculate_pre_dte_imp_at_pos()`、`_calculate_V_qc*()`、`_build_psd_adc_qn()`。只經 `V_qc → delta → S_qn` 影響 MMSE `R_n`；其他 jitter PSD 仍含 RJ+DDJ。 |
 | B-007 | Final COM ADC quantization | `policy.final_adc_quantization_convention` | `annex_d3`：selected-phase delta 與全部 FFE taps | `matlab_4_17_reference_only`：重建 final clipping PMF，略過主 tap | `calculate_COM_DFE()`／`_final_adc_clip_reference_only()`。與 B-006 是不同 stage，不得共用一個隱含 clipping 開關。 |
 | B-008 | Discrete-amplitude PMF creation | `policy.discrete_pmf_placement` | `linear`：質量線性分配至相鄰格點 | `nearest`：質量放入最近格點 | 只在離散 amplitude/tap PMF 的建立者使用；不得改成 `Pmf1D` 所有操作的全域量化規則。 |
@@ -109,9 +112,9 @@
 | Preset 展開與 provenance | `io/com_excel_io_178A.py::_resolve_project_profile_178A()` | `tests/test_com_model_178A_policy_branches.py` |
 | Channel renormalization | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
 | High-frequency handling | `SparamModel.to_LinkSegment()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py` |
-| CTLE pulse realization | `_realize_ctle_response()` | `tests/test_com_model_178A_ctle_pulse.py` |
+| CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse_for_path()` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `_apply_rxffe_response()` | `tests/test_com_model_178A_post_ffe.py`、CTLE pulse tests |
-| Noise grid／MMSE inputs | `COMPolicyConfig.resolve_noise_grid()/fit_noise_response()`、noise PSD builders | policy tests、`tests/test_com_model_178A_mlsd_noise.py` |
+| Eq-channel impairment record／MMSE inputs | `COM._realize_eq_ch_imp_record()`、`COM._build_eq_ch_imp_psd()`；Stage 3 `_select_xtalk_path_phase()` | policy tests、`tests/test_com_model_178A_mlsd_noise.py` |
 | PMF branches | `_build_pmf_interference_178A()`、`_build_pmf_G()`、ADC/final PMF builders | `tests/test_pmf_reference_methods.py`、policy tests |
 | MLSD branches | `solve_g_an()`、`build_mlsd_noise()`、`calculate_der_mlsd()`、`calculate_COM_MLSD()` | `tests/test_com_model_178A_mlsd_flow.py`、`test_com_model_178A_mlsd_noise.py`、`test_com_model_178A_mlsd_eq47.py` |
 | Fixed-grid cascade | `utilities/link.py::LinkSegment.cascade_ir()`、`SampledResponse.cascade_ir()` | `tests/test_fixed_grid_contract.py` |

@@ -35,6 +35,7 @@ try:
         COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
         COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
+        COMPostFFEEqChannelStatus, COMPreDTEEqChannelStatus,
     )
     from .com_178a.path_stage import (
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
@@ -67,6 +68,7 @@ except ImportError:
         COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
         COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
+        COMPostFFEEqChannelStatus, COMPreDTEEqChannelStatus,
     )
     from serdes_coding.models.com_178a.path_stage import (
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
@@ -116,58 +118,20 @@ def _build_psd_rx_noise(link_cfg: LinkConfig, imp_cfg: COMImpairmentConfig, ft_c
     S_rn_filtered = S_rn_broadband.filtered_by(H_rn)
     return S_rn_filtered.to_sampled(link_cfg.fb, link_cfg.theta)
 
-def _find_pos_xtalk(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
+def _select_xtalk_path_phase(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.ndarray]:
     """
     Find the 178A-18 crosstalk worst-case sampling phase.
 
     Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
     maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
-    the victim sampling phase candidate.
+    the victim sampling phase candidate. Record-length policy is deliberately
+    excluded; B-005 is applied later when this full response becomes a PSD.
     """
     rss = np.zeros(per_ui)
     for phase in np.arange(per_ui):
         rss[phase] = np.sum(h_XT[phase::per_ui] ** 2)
     pos = int(np.argmax(rss))
-    return pos, h_XT[pos::per_ui]
-
-def _build_psd_xtalk(
-    h_XTs: list[np.ndarray],
-    link_cfg: LinkConfig,
-    sigma_x: float,
-    *,
-    noise_link_cfg: Optional[LinkConfig] = None,
-    noise_grid: COMPolicyConfig = COMPolicyConfig(),
-) -> tuple[SampledPSD, list[np.ndarray]]:
-
-    noise_link_cfg = noise_link_cfg or link_cfg
-
-    # initialized with psd_constant = 0.0
-    S_xn_all = SampledPSD.from_constant(
-        noise_link_cfg.theta, 0.0, noise_link_cfg.fb, cfg=noise_link_cfg
-    )
-    h_XTs_dsamp = []
-    for h_XT in h_XTs:
-        # Eq. 178A-18 selects one sampling phase per crosstalk path.  A fixed
-        # noise record applies before both the phase-energy search and DFT,
-        # matching num_ui_RXFF_noise in the MATLAB/SiCoPR implementation.
-        if noise_grid.noise_grid_method == "fixed_ui":
-            record_samples = int(noise_grid.noise_grid_num_ui) * link_cfg.per_ui
-            phase, h_XT_noise = _find_pos_xtalk(
-                np.asarray(h_XT)[:record_samples], link_cfg.per_ui
-            )
-            h_XT_dsamp = np.asarray(h_XT)[phase::link_cfg.per_ui]
-        else:
-            phase, h_XT_noise = _find_pos_xtalk(h_XT, link_cfg.per_ui)
-            h_XT_dsamp = h_XT_noise
-        S_xn_temp = _build_psd_from_DFT_response(
-            noise_grid.fit_noise_response(h_XT_noise),
-            noise_link_cfg,
-            sigma_x**2,
-        )
-        h_XTs_dsamp.append(h_XT_dsamp)
-        S_xn_all = S_xn_all.add(S_xn_temp)
-
-    return S_xn_all, h_XTs_dsamp
+    return pos, np.asarray(h_XT, dtype=float)[pos::per_ui]
 
 # ---------------------------------------------
 # calculate_pre_dte_imp_at_pos(): private helpers
@@ -225,7 +189,7 @@ def _build_psd_from_DFT_response(
     H = SampledResponse.from_ir(h_dsamp, link_cfg)
     return S_base.filtered_by(H)
 
-def _build_psd_tx_noise(
+def _calculate_tx_noise_eq_ch(
     victim: COMPath,
     link_cfg: LinkConfig,
     channel_cfg: COMChannelConfig,
@@ -233,17 +197,13 @@ def _build_psd_tx_noise(
     imp_cfg: COMImpairmentConfig,
     pos: int,
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"],
-    *,
-    noise_link_cfg: Optional[LinkConfig] = None,
-    noise_grid: COMPolicyConfig = COMPolicyConfig(),
-) -> tuple[SampledPSD, np.ndarray]:
+) -> tuple[np.ndarray, float]:
     """
-    Build transmitter output noise PSD and the sampled no-FFE pulse response.
+    Build the full sampled no-FFE equivalent channel for transmitter noise.
 
     Reference:
     - IEEE 802.3 Annex 178A.1.7.3, Eq. 178A-19 and Eq. 178A-20.
     """
-    noise_link_cfg = noise_link_cfg or link_cfg
     H_pre_noffe = (
         victim.H_t
         .cascade_tf(victim.H_21)
@@ -279,9 +239,7 @@ def _build_psd_tx_noise(
     )
     h_tn = pulse_noffe.ir[int(pos)::link_cfg.per_ui]
     variance = 10 ** (-imp_cfg.SNR_TX / 10)
-    return _build_psd_from_DFT_response(
-        noise_grid.fit_noise_response(h_tn), noise_link_cfg, variance
-    ), h_tn
+    return h_tn, variance
 
 def _apply_fir_finite_record(response: np.ndarray, taps: np.ndarray) -> np.ndarray:
     """Apply FIR taps as a fixed-length circular shift sum."""
@@ -365,24 +323,17 @@ def _calculate_h_J(
     h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
     return h_J
 
-def _build_psd_tx_jitter(
+def _calculate_tx_jitter_eq_ch(
     victim: COMPath,
     link_cfg: LinkConfig,
     imp_cfg: COMImpairmentConfig,
     pos: int,
     sigma_X: float,
-    *,
-    noise_link_cfg: Optional[LinkConfig] = None,
-    noise_grid: COMPolicyConfig = COMPolicyConfig(),
-) -> tuple[SampledPSD, np.ndarray]:
+) -> tuple[np.ndarray, float]:
 
-    noise_link_cfg = noise_link_cfg or link_cfg
     h_J = _calculate_h_J(victim.pulse.ir, pos, link_cfg)
     jitter_variance = sigma_X**2 * (imp_cfg.A_DD**2 + imp_cfg.sigma_RJ**2)
-    S_jn = _build_psd_from_DFT_response(
-        noise_grid.fit_noise_response(h_J), noise_link_cfg, jitter_variance
-    )
-    return S_jn, h_J
+    return h_J, jitter_variance
 
 def _calculate_V_qc(
     p_sig: Pmf1D,
@@ -1101,6 +1052,7 @@ def _build_pmf_G(
 
 def _final_adc_clip_reference_only(
     imp_status: COMImpairmentStatus,
+    eq_ch: COMEqChannelStatus,
     L: int,
     pmf_cfg: COMPMFRuntimeConfig,
     main_gain: float,
@@ -1130,18 +1082,18 @@ def _final_adc_clip_reference_only(
         L, clip_cfg, placement=pmf_methods.discrete_pmf_placement,
     )
     p_s = _build_pmf_interference_178A(
-        p_sig, imp_status.h_dsamp.ir, clip_cfg, L,
+        p_sig, eq_ch.h_dsamp.ir, clip_cfg, L,
         method=pmf_methods.interference_pmf_method, name="ADC reference signal",
     )
     p_isi = _build_pmf_interference_178A(
-        p_sig, imp_status.h_ISI.ir / main_gain, clip_cfg, L,
+        p_sig, eq_ch.h_ISI.ir / main_gain, clip_cfg, L,
         method=pmf_methods.interference_pmf_method, name="ADC reference ISI",
     )
     p_xt = _build_pmf_w_XT_all(
         p_sig,
         [
             (path.ir if isinstance(path, SampledResponse) else path) / main_gain
-            for path in imp_status.h_XTs_w
+            for path in (eq_ch.h_XTs_w or [])
         ],
         clip_cfg,
         L=L,
@@ -1149,7 +1101,7 @@ def _final_adc_clip_reference_only(
     )
     p_dd = _build_pmf_interference_178A(
         p_sig,
-        A_DD * imp_status.h_w_J.ir / main_gain,
+        A_DD * eq_ch.h_w_J.ir / main_gain,
         clip_cfg,
         L, method=pmf_methods.interference_pmf_method, name="ADC reference Dual-Dirac",
     )
@@ -1693,8 +1645,62 @@ class COM:
 
     def __init__(self, cfg: COMConfig):
         self.cfg = cfg
-        self.noise_link_cfg = cfg.policy.resolve_noise_grid(cfg.link)
+        self._eq_ch_imp_record_cfg = self._resolve_eq_ch_imp_record_cfg()
         self.status: Optional[COMStatus | COMSearchStatus] = None
+
+    def _resolve_eq_ch_imp_record_cfg(self) -> LinkConfig:
+        """Resolve the single PSD/correlation record shared by B-005 consumers."""
+        if self.cfg.policy.eq_ch_imp_len == "full":
+            return self.cfg.link
+        return LinkConfig.from_Nfft(
+            fb=self.cfg.link.fb,
+            per_ui=self.cfg.link.per_ui,
+            Nfft=int(self.cfg.policy.num_trunc_ui) * self.cfg.link.per_ui,
+        )
+
+    def _realize_eq_ch_imp_record(
+        self,
+        response: np.ndarray,
+        *,
+        source_name: str,
+    ) -> np.ndarray:
+        """Apply B-005 to one full one-sample-per-UI impairment response."""
+        response = np.asarray(response, dtype=float)
+        if response.ndim != 1:
+            raise ValueError(f"{source_name} must be a one-dimensional response.")
+        if self.cfg.policy.eq_ch_imp_len == "full":
+            return response
+        record = np.zeros(int(self.cfg.policy.num_trunc_ui), dtype=float)
+        count = min(len(response), len(record))
+        record[:count] = response[:count]
+        return record
+
+    def _build_eq_ch_imp_psd(
+        self,
+        response: np.ndarray,
+        variance: float,
+        *,
+        source_name: str,
+        record_cfg: Optional[LinkConfig] = None,
+    ) -> SampledPSD:
+        """Build an impairment PSD through the one shared B-005 L3 facade."""
+        record_cfg = record_cfg or self._eq_ch_imp_record_cfg
+        if (
+            record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
+            or not np.isclose(record_cfg.fb, self._eq_ch_imp_record_cfg.fb)
+        ):
+            raise ValueError(
+                f"{source_name} record config conflicts with COMPolicyConfig.eq_ch_imp_len."
+            )
+        record = self._realize_eq_ch_imp_record(
+            response,
+            source_name=source_name,
+        )
+        return _build_psd_from_DFT_response(
+            record,
+            record_cfg,
+            variance,
+        )
 
     def _effective_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
         """Return the run profile already resolved by the input adapter."""
@@ -1782,13 +1788,19 @@ class COM:
         h_XTs = [path.pulse.ir for path in xtalk_paths]
         report(f"build_all_paths: done ({len(paths)} paths)")
 
-        # stage 2: calculate pre-DTE impairment common cache
+        # stage 2: calculate phase-independent receiver impairment cache
         report("pre_dte_imp_common: start")
-        pre_dte_imp_common, h_XTs_dsamp = self.calculate_pre_dte_imp_common(
-            victim=victim,
+        pre_dte_imp_common = self.calculate_pre_dte_imp_common(victim=victim)
+        report("pre_dte_imp_common: done")
+
+        # stage 3 preparation: select each full-length XT path phase once, then
+        # pass its one-sample-per-UI response through the shared B-005 L3 path.
+        report("sampling_phase_common: start")
+        pre_dte_imp_common, h_XTs_dsamp = self.prepare_sampling_phase_common(
+            common=pre_dte_imp_common,
             h_XTs=h_XTs,
         )
-        report("pre_dte_imp_common: done")
+        report("sampling_phase_common: done")
 
         # ===========================
         # pos sweeping
@@ -1801,15 +1813,16 @@ class COM:
         )
         self._assign_run(run_status)
         best_dte: Optional[COMDTEStatus] = None
+        best_eq_ch: Optional[COMEqChannelStatus] = None
         best_imp_pre: Optional[COMImpairmentStatus] = None
 
         def evaluate_pos_indices(pos_indices: list[int], phase_label: str) -> None:
-            nonlocal best_dte, best_imp_pre
+            nonlocal best_dte, best_eq_ch, best_imp_pre
             for pos in pos_indices:
                 pos_started = perf_counter()
                 try:
                     report(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
-                    imp_pre, dte_status = self.calculate_pos_candidate(
+                    eq_ch, imp_pre, dte_status = self.calculate_pos_candidate(
                         victim=victim,
                         pos=pos,
                         common=pre_dte_imp_common,
@@ -1825,6 +1838,7 @@ class COM:
                 is_best = best_dte is None or dte_status.mse < best_dte.mse
                 if is_best:
                     best_dte = dte_status
+                    best_eq_ch = eq_ch
                     best_imp_pre = imp_pre
                 report(
                     f"{phase_label} pos {pos + 1}/{self.per_ui}: done in "
@@ -1850,11 +1864,10 @@ class COM:
             report(f"pos sweep fine around pos={best_dte.pos}: {fine_pos_indices}")
             evaluate_pos_indices(fine_pos_indices, "fine")
 
-        if best_dte is None or best_imp_pre is None:
+        if best_dte is None or best_eq_ch is None or best_imp_pre is None:
             raise RuntimeError("COM did not produce any valid sampling phase candidate.")
 
-        self._assign_dte(best_dte)
-        self._merge_imp(best_imp_pre)
+        self._assign_selected_phase(best_eq_ch, best_imp_pre, best_dte)
         report(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
 
         if run_cfg.target == "mse":
@@ -1862,13 +1875,14 @@ class COM:
             return self._require_status()
 
         report("post_ffe_imp: start")
-        imp_status = self.calculate_post_ffe_imp(
+        eq_ch_post, imp_status = self.calculate_post_ffe_imp(
             dte_status=best_dte,
+            eq_ch=best_eq_ch,
             imp_pre=best_imp_pre,
             h=victim.pulse.ir,
             run_cfg=run_cfg,
         )
-        self._merge_imp(imp_status)
+        self._assign_post_ffe(best_eq_ch.phase_index, eq_ch_post, imp_status)
         report("post_ffe_imp: done")
 
         merged_imp_status = self._require_status().imp
@@ -1877,7 +1891,12 @@ class COM:
 
         if run_cfg.target in {"dfe", "mlsd", "full"}:
             report("calculate_COM_DFE: start")
-            self._assign_pmf(self.calculate_COM_DFE(merged_imp_status, best_dte, run_cfg=run_cfg))
+            selected_eq_ch = self._require_status().eq_ch
+            if selected_eq_ch is None:
+                raise RuntimeError("Selected equivalent-channel status is not available.")
+            self._assign_pmf(self.calculate_COM_DFE(
+                merged_imp_status, selected_eq_ch, best_dte, run_cfg=run_cfg,
+            ))
             report("calculate_COM_DFE: done")
 
         if mlsd_requested:
@@ -1893,35 +1912,61 @@ class COM:
             self.status = COMStatus()
         self.status.paths = paths
 
-    def _assign_dte(self, dte_status: COMDTEStatus) -> None:
-        """Assign selected DTE stage output into the incremental run status."""
-        if self.status is None or isinstance(self.status, COMSearchStatus):
-            self.status = COMStatus()
-        self.status.dte = dte_status
-
     def _assign_run(self, run_status: COMRunStatus) -> None:
         """Assign run-local status that is accumulated across the sampling-phase sweep."""
         if self.status is None or isinstance(self.status, COMSearchStatus):
             self.status = COMStatus()
         self.status.run = run_status
 
-    def _merge_imp(self, imp_status: COMImpairmentStatus) -> None:
-        """Merge one 178A impairment stage output into the incremental status."""
-        if self.status is None or isinstance(self.status, COMSearchStatus):
-            self.status = COMStatus()
-        if self.status.imp is None:
-            self.status.imp = COMImpairmentStatus()
-        if not isinstance(self.status.imp, COMImpairmentStatus):
-            raise TypeError("COM status.imp must be COMImpairmentStatus.")
-        current = self.status.imp
-        if imp_status.eq_ch is not None:
-            current.eq_ch = imp_status.eq_ch
-        if imp_status.H_rxffe is not None:
-            current.H_rxffe = imp_status.H_rxffe
-        for name in ("pre_dte", "post_ffe"):
-            value = getattr(imp_status, name)
-            if value is not None:
-                setattr(current, name, value)
+    def _assign_selected_phase(
+        self,
+        eq_ch: COMEqChannelStatus,
+        imp_status: COMImpairmentStatus,
+        dte_status: COMDTEStatus,
+    ) -> None:
+        """Atomically publish one internally consistent selected phase."""
+        if eq_ch.phase_index != dte_status.pos:
+            raise ValueError(
+                "Selected phase status mismatch: "
+                f"eq_ch.phase_index={eq_ch.phase_index}, dte.pos={dte_status.pos}."
+            )
+        if eq_ch.post_ffe is not None:
+            raise ValueError("Selected phase commit requires pre-DTE eq_ch only.")
+        if imp_status.pre_dte is None or imp_status.post_ffe is not None:
+            raise ValueError("Selected phase commit requires pre-DTE impairment only.")
+        if not isinstance(dte_status.H_rxffe, SampledResponse):
+            raise ValueError("Completed Stage 4 status must provide H_rxffe.")
+        current = (
+            COMStatus()
+            if self.status is None or isinstance(self.status, COMSearchStatus)
+            else self.status
+        )
+        self.status = replace(
+            current,
+            eq_ch=eq_ch,
+            imp=imp_status,
+            dte=dte_status,
+        )
+
+    def _assign_post_ffe(
+        self,
+        phase_index: int,
+        eq_ch_post: COMPostFFEEqChannelStatus,
+        imp_post: COMImpairmentStatus,
+    ) -> None:
+        """Atomically add Stage 5 outputs without replacing selected-phase data."""
+        current = self._require_status()
+        if current.eq_ch is None or current.imp is None or current.dte is None:
+            raise RuntimeError("Post-FFE commit requires a selected phase.")
+        if phase_index != current.eq_ch.phase_index or phase_index != current.dte.pos:
+            raise ValueError("Post-FFE phase does not match the selected phase.")
+        if current.eq_ch.post_ffe is not None or current.imp.post_ffe is not None:
+            raise ValueError("Post-FFE output has already been committed.")
+        if imp_post.pre_dte is not None or imp_post.post_ffe is None:
+            raise ValueError("Post-FFE commit requires post-FFE impairment only.")
+        merged_eq_ch = replace(current.eq_ch, post_ffe=eq_ch_post)
+        merged_imp = replace(current.imp, post_ffe=imp_post.post_ffe)
+        self.status = replace(current, eq_ch=merged_eq_ch, imp=merged_imp)
 
     def _assign_pmf(self, pmf_status: Optional[COMPMFStatus]) -> None:
         """Assign COM DFE PMF stage output into the incremental run status."""
@@ -2019,8 +2064,7 @@ class COM:
     def calculate_pre_dte_imp_common(
         self,
         victim: COMPath,
-        h_XTs: list[np.ndarray],
-    ) -> tuple[COMPSDStatus, list[np.ndarray]]:
+    ) -> COMImpairmentStatus:
         """
         Calculate pre-DTE impairment components that do not depend on phase.
 
@@ -2028,52 +2072,73 @@ class COM:
         ----------
         victim:
             Victim COMPath for the current TX FFE/CTLE/channel candidate.
-        h_XTs:
-            Crosstalk pulse responses in V. Each crosstalk PSD uses its own
-            worst-case sampling phase as defined below Eq. 178A-18.
-
         Returns
         -------
-        tuple[COMPSDStatus, list[np.ndarray]]
-            Cached receiver/crosstalk PSD terms and crosstalk sampled
-            sequences. This is a run-local cache, not a standalone status
-            stage; the selected pre-DTE result records these terms later.
+        COMImpairmentStatus
+            Receiver-noise PSD and signal variance cached before Stage 3.
+            XT phase selection belongs to Stage 3 preparation.
         """
-        link_cfg = self.cfg.link
-        noise_link_cfg = self.noise_link_cfg
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
         L = self.cfg.L
 
         del victim
-        if any(np.asarray(h_xt).ndim != 1 for h_xt in h_XTs):
-            raise ValueError("Each crosstalk pulse response must be a one-dimensional array.")
-
         # input signal power
         sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
 
         # Receiver input noise PSD
-        S_rn = _build_psd_rx_noise(noise_link_cfg, imp_cfg, ft_cfg)
+        S_rn = _build_psd_rx_noise(self._eq_ch_imp_record_cfg, imp_cfg, ft_cfg)
         sigma_rn = S_rn.to_sigma()
 
-        # Crosstalk PSD
-        S_xn, h_XTs_dsamp = _build_psd_xtalk(
-            h_XTs,
-            link_cfg,
-            sigma_X,
-            noise_link_cfg=noise_link_cfg,
-            noise_grid=self.cfg.policy,
-        )
-        sigma_xn = S_xn.to_sigma()
-
-        return (
-            COMPSDStatus(
-                sigma_X=sigma_X,
-                S_rn=S_rn,
-                sigma_rn=sigma_rn,
-                S_xn=S_xn,
-                sigma_xn=sigma_xn,
+        return COMImpairmentStatus(
+            pre_dte=COMImpStageStatus(
+                psd=COMPSDStatus(
+                    sigma_X=sigma_X,
+                    S_rn=S_rn,
+                    sigma_rn=sigma_rn,
+                ),
             ),
+        )
+
+    def prepare_sampling_phase_common(
+        self,
+        common: COMImpairmentStatus,
+        h_XTs: list[np.ndarray],
+    ) -> tuple[COMImpairmentStatus, list[np.ndarray]]:
+        """Select full XT path phases once and build their shared Stage 3 PSD."""
+        common_stage = common.pre_dte
+        common_psd = None if common_stage is None else common_stage.psd
+        if (
+            common_psd is None
+            or common_psd.sigma_X is None
+            or common_psd.S_rn is None
+        ):
+            raise ValueError(
+                "common must be the complete output of calculate_pre_dte_imp_common()."
+            )
+        if any(np.asarray(h_xt).ndim != 1 for h_xt in h_XTs):
+            raise ValueError("Each crosstalk pulse response must be one-dimensional.")
+
+        S_xn = _zero_sampled_psd(self._eq_ch_imp_record_cfg)
+        h_XTs_dsamp: list[np.ndarray] = []
+        for path_index, h_XT in enumerate(h_XTs, start=1):
+            _, h_XT_dsamp = _select_xtalk_path_phase(h_XT, self.cfg.link.per_ui)
+            h_XTs_dsamp.append(h_XT_dsamp)
+            S_xn = S_xn.add(
+                self._build_eq_ch_imp_psd(
+                    h_XT_dsamp,
+                    common_psd.sigma_X**2,
+                    source_name=f"XT{path_index} eq-channel",
+                )
+            )
+
+        updated_psd = replace(
+            common_psd,
+            S_xn=S_xn,
+            sigma_xn=S_xn.to_sigma(),
+        )
+        return (
+            replace(common, pre_dte=replace(common_stage, psd=updated_psd)),
             h_XTs_dsamp,
         )
 
@@ -2081,10 +2146,10 @@ class COM:
         self,
         victim: COMPath,
         pos: int,
-        common: COMPSDStatus,
+        common: COMImpairmentStatus,
         h_XTs_dsamp: list[np.ndarray],
         run_cfg: COMRunConfig,
-    ) -> COMImpairmentStatus:
+    ) -> tuple[COMEqChannelStatus, COMImpairmentStatus]:
         """
         Calculate complete pre-DTE impairment status for one phase candidate.
 
@@ -2119,21 +2184,27 @@ class COM:
         pos = int(pos)
         if pos < 0 or pos >= link_cfg.per_ui:
             raise ValueError("pos must be in [0, link_cfg.per_ui).")
-        if common.sigma_X is None or common.S_rn is None or common.S_xn is None:
+        common_psd = None if common.pre_dte is None else common.pre_dte.psd
+        if (
+            common_psd is None
+            or common_psd.sigma_X is None
+            or common_psd.S_rn is None
+            or common_psd.S_xn is None
+        ):
             raise ValueError(
                 "common must be the complete output of "
-                "calculate_pre_dte_imp_common()."
+                "prepare_sampling_phase_common()."
             )
-        # The common stage owns the concrete noise-grid object. Reuse that
+        # The common stage owns the concrete PSD-record object. Reuse that
         # exact reference so equivalent COMConfig copies can consume a cached
         # common result without violating SampledPSD's shared-grid contract.
-        noise_link_cfg = common.S_rn.cfg or self.noise_link_cfg
+        eq_ch_imp_record_cfg = common_psd.S_rn.cfg or self._eq_ch_imp_record_cfg
         if not isinstance(h_XTs_dsamp, list) or any(
             np.asarray(h_xt_dsamp).ndim != 1 for h_xt_dsamp in h_XTs_dsamp
         ):
             raise ValueError(
                 "h_XTs_dsamp must be the list of one-dimensional sampled "
-                "crosstalk responses returned by calculate_pre_dte_imp_common()."
+                "crosstalk responses returned by prepare_sampling_phase_common()."
             )
         pmf_cfg = _resolve_adc_input_pmf_config(
             self.cfg.pmf,
@@ -2153,12 +2224,12 @@ class COM:
         h_dsamp_response = SampledResponse.from_ir(h_dsamp, link_cfg)
         
         # From common_psd
-        sigma_X = common.sigma_X
-        S_rn = common.S_rn
-        S_xn = common.S_xn
+        sigma_X = common_psd.sigma_X
+        S_rn = common_psd.S_rn
+        S_xn = common_psd.S_xn
 
-        # transmitter output noise PSD, Eq. 178A-19 and Eq. 178A-20.
-        S_tn, h_tn = _build_psd_tx_noise(
+        # Transmitter output-noise equivalent channel, then shared B-005 PSD.
+        h_tn, tx_noise_variance = _calculate_tx_noise_eq_ch(
             victim,
             link_cfg,
             self.cfg.channel,
@@ -2166,20 +2237,28 @@ class COM:
             imp_cfg,
             pos,
             self.cfg.policy.ctle_pulse_realization,
-            noise_link_cfg=noise_link_cfg,
-            noise_grid=self.cfg.policy,
+        )
+        S_tn = self._build_eq_ch_imp_psd(
+            h_tn,
+            tx_noise_variance,
+            source_name="TX-noise eq-channel",
+            record_cfg=eq_ch_imp_record_cfg,
         )
         sigma_tn = S_tn.to_sigma()
 
-        # transmitter jitter-induced noise PSD, Eq. 178A-21 and Eq. 178A-22.
-        S_jn, h_J = _build_psd_tx_jitter(
+        # Jitter equivalent channel, then shared B-005 PSD.
+        h_J, jitter_variance = _calculate_tx_jitter_eq_ch(
             victim,
             link_cfg,
             imp_cfg,
             pos,
             sigma_X,
-            noise_link_cfg=noise_link_cfg,
-            noise_grid=self.cfg.policy,
+        )
+        S_jn = self._build_eq_ch_imp_psd(
+            h_J,
+            jitter_variance,
+            source_name="jitter eq-channel",
+            record_cfg=eq_ch_imp_record_cfg,
         )
         sigma_jn = S_jn.to_sigma()
 
@@ -2192,10 +2271,11 @@ class COM:
         # comparison branch.
         S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
         if self.cfg.policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only":
-            S_jn_clip = _build_psd_from_DFT_response(
-                self.cfg.policy.fit_noise_response(h_J),
-                noise_link_cfg,
+            S_jn_clip = self._build_eq_ch_imp_psd(
+                h_J,
                 sigma_X**2 * imp_cfg.sigma_RJ**2,
+                source_name="RJ-only jitter eq-channel",
+                record_cfg=eq_ch_imp_record_cfg,
             )
             S_clip = S_rn.add(S_xn).add(S_tn).add(S_jn_clip)
             cdf_tail = imp_cfg.P_qc
@@ -2204,7 +2284,7 @@ class COM:
             cdf_tail = None  # Preserve the Annex P_qc/2 default.
         sigma_clip = S_clip.to_sigma()
         if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            S_qn = _zero_sampled_psd(noise_link_cfg)
+            S_qn = _zero_sampled_psd(eq_ch_imp_record_cfg)
             adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
         else:
             S_qn, adc_input_pmf = _build_psd_adc_qn(
@@ -2214,7 +2294,7 @@ class COM:
                 P_qc = imp_cfg.P_qc,
                 N_qb = imp_cfg.N_qb,
                 pmf_cfg = pmf_cfg, 
-                link_cfg = noise_link_cfg,
+                link_cfg = eq_ch_imp_record_cfg,
                 vqc_method=run_cfg.pre_dte_pmf_method,
                 cdf_tail=cdf_tail,
                 L=L,
@@ -2230,44 +2310,48 @@ class COM:
         sigma_total = S_total.to_sigma()
         R_n = S_total.to_autocorrelation()
 
-        return COMImpairmentStatus(
-            pre_dte=COMImpStageStatus(
-                psd=COMPSDStatus(
-                sigma_X=sigma_X,
-                S_rn=S_rn,
-                sigma_rn=common.sigma_rn,
-                S_xn=S_xn,
-                sigma_xn=common.sigma_xn,
-                S_tn=S_tn,
-                sigma_tn=sigma_tn,
-                S_jn=S_jn,
-                sigma_jn=sigma_jn,
-                S_qn=S_qn,
-                sigma_qn=sigma_qn,
-                S_total=S_total,
-                sigma_total=sigma_total,
-                R_n=R_n,
-                ),
-                adc_input=adc_input_pmf,
-            ),
-            eq_ch=COMEqChannelStatus(
+        eq_ch = COMEqChannelStatus(
+            phase_index=pos,
+            pre_dte=COMPreDTEEqChannelStatus(
                 h_XTs_dsamp=[SampledResponse.from_ir(h_xt, link_cfg) for h_xt in h_XTs_dsamp],
                 h_dsamp=h_dsamp_response,
                 h_tn=SampledResponse.from_ir(h_tn, link_cfg),
                 h_J=SampledResponse.from_ir(h_J, link_cfg),
             ),
         )
+        imp_status = COMImpairmentStatus(
+            pre_dte=COMImpStageStatus(
+                psd=COMPSDStatus(
+                    sigma_X=sigma_X,
+                    S_rn=S_rn,
+                    sigma_rn=common_psd.sigma_rn,
+                    S_xn=S_xn,
+                    sigma_xn=common_psd.sigma_xn,
+                    S_tn=S_tn,
+                    sigma_tn=sigma_tn,
+                    S_jn=S_jn,
+                    sigma_jn=sigma_jn,
+                    S_qn=S_qn,
+                    sigma_qn=sigma_qn,
+                    S_total=S_total,
+                    sigma_total=sigma_total,
+                    R_n=R_n,
+                ),
+                adc_input=adc_input_pmf,
+            ),
+        )
+        return eq_ch, imp_status
 
     def calculate_pos_candidate(
         self,
         victim: COMPath,
         pos: int,
-        common: COMPSDStatus,
+        common: COMImpairmentStatus,
         h_XTs_dsamp: list[np.ndarray],
         run_cfg: COMRunConfig,
-    ) -> tuple[COMImpairmentStatus, COMDTEStatus]:
+    ) -> tuple[COMEqChannelStatus, COMImpairmentStatus, COMDTEStatus]:
         """Calculate one sampling phase's pre-DTE impairment and MMSE-DTE result."""
-        imp_pre = self.calculate_pre_dte_imp_at_pos(
+        eq_ch, imp_pre = self.calculate_pre_dte_imp_at_pos(
             victim=victim,
             pos=pos,
             common=common,
@@ -2276,11 +2360,12 @@ class COM:
         )
         dte_status = self.calculate_MMSE_DTE(
             victim=victim,
+            eq_ch=eq_ch,
             imp_pre=imp_pre,
             pos=pos,
             run_cfg=run_cfg,
         )
-        return imp_pre, dte_status
+        return eq_ch, imp_pre, dte_status
 
     def _initial_pos_sweep_indices(self, run_cfg: COMRunConfig) -> list[int]:
         """Return the first phase set for exhaustive or coarse-fine sampling."""
@@ -2310,6 +2395,7 @@ class COM:
     def calculate_MMSE_DTE(
         self,
         victim: COMPath,
+        eq_ch: COMEqChannelStatus,
         imp_pre: COMImpairmentStatus,
         pos: int,
         run_cfg: COMRunConfig,
@@ -2321,7 +2407,10 @@ class COM:
         response construction belongs to the post-DTE impairment/PMF path, not
         COMDTEStatus.
         """
-        h_dsamp = imp_pre.h_dsamp.ir
+        del victim
+        if eq_ch.phase_index != pos or eq_ch.h_dsamp is None:
+            raise ValueError("Stage 4 requires pre-DTE eq_ch for the requested phase.")
+        h_dsamp = eq_ch.h_dsamp.ir
         solver = COM_MMSE_DTE(
             self.cfg.dte,
             run_cfg.floating_mode,
@@ -2333,15 +2422,20 @@ class COM:
             pos = pos,
             per_ui = self.per_ui,
         )
-        return dte_status
+        eq_ch_imp_record_cfg = imp_pre.S_rn.cfg or self._eq_ch_imp_record_cfg
+        return replace(
+            dte_status,
+            H_rxffe=SampledResponse.from_ir(dte_status.w_lim, eq_ch_imp_record_cfg),
+        )
 
     def calculate_post_ffe_imp(
         self,
         dte_status: COMDTEStatus,
+        eq_ch: COMEqChannelStatus,
         imp_pre: COMImpairmentStatus,
         h: np.ndarray,
         run_cfg: COMRunConfig,
-    ) -> COMImpairmentStatus:
+    ) -> tuple[COMPostFFEEqChannelStatus, COMImpairmentStatus]:
         """Finalize selected-phase equivalent responses and post-DTE diagnostics.
 
         The post-DTE component PSDs are 93A-aligned reporting quantities on the
@@ -2361,27 +2455,26 @@ class COM:
             )
         if not np.all(np.isfinite(w_lim_ndarray)):
             raise ValueError("COMDTEStatus.w_lim contains non-finite values.")
-
-        nonzero_w = np.flatnonzero(w_lim_ndarray != 0.0)
-        w_finite = (
-            w_lim_ndarray[: int(nonzero_w[-1]) + 1]
-            if len(nonzero_w)
-            else w_lim_ndarray[:1]
-        )
-        noise_link_cfg = imp_pre.S_rn.cfg or self.noise_link_cfg
-        w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, noise_link_cfg)
+        if eq_ch.phase_index != dte_status.pos:
+            raise ValueError("Stage 5 eq_ch phase does not match DTE phase.")
+        if eq_ch.post_ffe is not None:
+            raise ValueError("Stage 5 requires pre-DTE eq_ch only.")
+        if not isinstance(dte_status.H_rxffe, SampledResponse):
+            raise ValueError("Stage 5 requires H_rxffe from completed Stage 4.")
+        eq_ch_imp_record_cfg = imp_pre.S_rn.cfg or self._eq_ch_imp_record_cfg
+        w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, eq_ch_imp_record_cfg)
 
         h_w = _apply_rxffe_response(
-            imp_pre.h_dsamp,
+            eq_ch.pre_dte.h_dsamp,
             w_lim_ndarray,
             self.cfg.link,
             self.cfg.policy.rxffe_record_realization,
             "post_ffe victim",
         )
-        H_rxffe = SampledResponse.from_ir(w_finite, noise_link_cfg)
+        H_rxffe = dte_status.H_rxffe
 
         h_XTs_w: list[SampledResponse] = []
-        for path_index, h_XT_dsamp in enumerate(imp_pre.h_XTs_dsamp, start=1):
+        for path_index, h_XT_dsamp in enumerate(eq_ch.pre_dte.h_XTs_dsamp or [], start=1):
             h_XT_w = _apply_rxffe_response(
                 h_XT_dsamp,
                 w_lim_ndarray,
@@ -2401,8 +2494,7 @@ class COM:
             )
         h_ISI_ndarray[d] = 0.0
         h_ISI_ndarray[d + 1:dfe_stop] -= dte_status.b_lim
-        h_ISI_noise = self.cfg.policy.fit_noise_response(h_ISI_ndarray)
-        h_ISI = SampledResponse.from_ir(h_ISI_noise, noise_link_cfg)
+        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, self.cfg.link)
         sigma_ISI = float(imp_pre.sigma_X * np.sqrt(np.sum(h_ISI.ir**2)))
 
         # DDJ uses the original selected-phase construction: take the two
@@ -2411,7 +2503,7 @@ class COM:
             h,
             dte_status.pos,
             self.cfg.link,
-            w_finite,
+            w_lim_ndarray,
             self.cfg.policy.rxffe_record_realization,
         )
         if self.cfg.policy.rxffe_record_realization == "finite_record_circshift":
@@ -2425,10 +2517,11 @@ class COM:
         run_cfg = self._effective_run_cfg(run_cfg)
         # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
         # three Gaussian sources there, and filter once by the pre-grid FFE.
-        S_jn_RJ_pre = _build_psd_from_DFT_response(
-            self.cfg.policy.fit_noise_response(imp_pre.h_J.ir),
-            noise_link_cfg,
+        S_jn_RJ_pre = self._build_eq_ch_imp_psd(
+            eq_ch.pre_dte.h_J.ir,
             imp_pre.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
+            source_name="pre-FFE RJ-only jitter eq-channel",
+            record_cfg=eq_ch_imp_record_cfg,
         )
         S_G_pre = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ_pre)
         sigma_gn_adc = S_G_pre.to_sigma()
@@ -2452,10 +2545,10 @@ class COM:
         else:
             adc_input_pmf = _build_adc_input_pmf_exact(
                 p_sig=p_sig,
-                h_dsamp=imp_pre.h_dsamp.ir,
-                h_XTs_dsamp=imp_pre.h_XTs_dsamp,
+                h_dsamp=eq_ch.pre_dte.h_dsamp.ir,
+                h_XTs_dsamp=eq_ch.pre_dte.h_XTs_dsamp or [],
                 A_DD=self.cfg.imp.A_DD,
-                h_J=imp_pre.h_J.ir,
+                h_J=eq_ch.pre_dte.h_J.ir,
                 sigma_gn=sigma_gn_adc,
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
@@ -2468,38 +2561,46 @@ class COM:
         S_rn = imp_pre.S_rn.filtered_by(H_rxffe)
         S_tn = imp_pre.S_tn.filtered_by(H_rxffe)
 
-        S_xn = _zero_sampled_psd(noise_link_cfg)
+        S_xn = _zero_sampled_psd(eq_ch_imp_record_cfg)
         for h_XT_w in h_XTs_w:
             S_xn = S_xn.add(
-                _build_psd_from_DFT_response(
-                    self.cfg.policy.fit_noise_response(h_XT_w.ir),
-                    noise_link_cfg,
+                self._build_eq_ch_imp_psd(
+                    h_XT_w.ir,
                     imp_pre.sigma_X**2,
+                    source_name="post-FFE XT eq-channel",
+                    record_cfg=eq_ch_imp_record_cfg,
                 )
             )
 
-        S_jn = _build_psd_from_DFT_response(
-            self.cfg.policy.fit_noise_response(h_w_J.ir),
-            noise_link_cfg,
+        S_jn = self._build_eq_ch_imp_psd(
+            h_w_J.ir,
             imp_pre.sigma_X**2
             * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+            source_name="post-FFE jitter eq-channel",
+            record_cfg=eq_ch_imp_record_cfg,
         )
 
         if adc_input_pmf.delta is None:
-            S_qn = _zero_sampled_psd(noise_link_cfg)
+            S_qn = _zero_sampled_psd(eq_ch_imp_record_cfg)
         else:
             S_qn_adc = SampledPSD.from_constant(
-                noise_link_cfg.theta,
-                (adc_input_pmf.delta**2 / 12.0) / noise_link_cfg.fb,
-                noise_link_cfg.fb,
-                cfg=noise_link_cfg,
+                eq_ch_imp_record_cfg.theta,
+                (adc_input_pmf.delta**2 / 12.0) / eq_ch_imp_record_cfg.fb,
+                eq_ch_imp_record_cfg.fb,
+                cfg=eq_ch_imp_record_cfg,
             )
             S_qn = S_qn_adc.filtered_by(H_rxffe)
 
         S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
 
-        return COMImpairmentStatus(
-            post_ffe=COMImpStageStatus(
+        return (
+            COMPostFFEEqChannelStatus(
+                h_w=h_w,
+                h_XTs_w=h_XTs_w,
+                h_ISI=h_ISI,
+                h_w_J=h_w_J,
+            ),
+            COMImpairmentStatus(post_ffe=COMImpStageStatus(
                 psd=COMPSDStatus(
                     As=As,
                     S_rn=S_rn,
@@ -2518,23 +2619,14 @@ class COM:
                     sigma_ISI=sigma_ISI,
                 ),
                 adc_input=adc_input_pmf,
-            ),
-            eq_ch=COMEqChannelStatus(
-                h_XTs_dsamp=imp_pre.h_XTs_dsamp,
-                h_dsamp=imp_pre.h_dsamp,
-                h_tn=imp_pre.h_tn,
-                h_J=imp_pre.h_J,
-                h_w=h_w,
-                h_XTs_w=h_XTs_w,
-                h_ISI=h_ISI,
-                h_w_J=h_w_J,
-            ),
-            H_rxffe=H_rxffe,
+            )),
         )
 
     def build_mlsd_noise(
         self,
         imp_status: COMImpairmentStatus,
+        eq_ch: COMEqChannelStatus,
+        dte_status: COMDTEStatus,
         added_noise: COMAddedNoiseStatus,
     ) -> COMMLSDNoiseStatus:
         """Build Eq. (178A-54) MLSD input PSD and autocorrelation once.
@@ -2548,10 +2640,10 @@ class COM:
                 "build_mlsd_noise requires pre-FFE total noise PSD S_n."
             )
         S_n = pre_dte.psd.S_total
-        H_rxffe = imp_status.H_rxffe
+        H_rxffe = dte_status.H_rxffe
         if not isinstance(H_rxffe, SampledResponse):
             raise TypeError("build_mlsd_noise requires H_rxffe to be a SampledResponse.")
-        h_ISI = imp_status.h_ISI
+        h_ISI = eq_ch.h_ISI
         if not isinstance(h_ISI, SampledResponse):
             raise TypeError(
                 "build_mlsd_noise requires h_ISI to be a SampledResponse."
@@ -2574,13 +2666,6 @@ class COM:
                 raise ValueError(
                     f"{name} must share the H_rxffe theta grid and fb."
                 )
-        if (
-            h_ISI.theta.shape != H_rxffe.theta.shape
-            or not np.isclose(h_ISI.fb, H_rxffe.fb)
-            or not np.allclose(h_ISI.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
-        ):
-            raise ValueError("h_ISI must share the H_rxffe theta grid and fb.")
-
         # Eq. (178A-54): S_n is the complete pre-FFE Eq. (178A-15) PSD.
         # The run-level grid is shared, so no intermediate PSD regrid is needed.
         # The Annex path filters every component, including S_qn, by the full
@@ -2625,12 +2710,15 @@ class COM:
             raise ValueError(f"Unsupported MLSD quantization PSD method: {quantization_method}.")
         # Eq. (178A-54) gives a two-sided ISI density. from_constant() folds
         # interior rFFT bins into SampledPSD's one-sided representation.
-        S_isi = SampledPSD.from_constant(
-            H_rxffe.theta,
-            imp_status.sigma_X**2 / H_rxffe.fb,
-            H_rxffe.fb,
-            cfg=H_rxffe.cfg,
-        ).filtered_by(h_ISI)
+        # Keep the Stage 5 status response full-length. B-005 is applied only
+        # at this PSD-construction boundary, through the same Shared L3 used
+        # by the pre-DTE and post-FFE impairment PSDs.
+        S_isi = self._build_eq_ch_imp_psd(
+            h_ISI.ir,
+            imp_status.sigma_X**2,
+            source_name="post-FFE ISI equivalent channel",
+            record_cfg=H_rxffe.cfg,
+        )
         # Eq. (178A-54): sum receiver, added, and ISI noise densities.
         S_ni = S_n_filtered.add(added_noise.S_an).add(S_isi)
         # Eq. (178A-16), as directed by the text after Eq. (178A-54).
@@ -2654,6 +2742,7 @@ class COM:
     def calculate_COM_DFE(
         self,
         imp_status: COMImpairmentStatus,
+        eq_ch: COMEqChannelStatus,
         dte_status: COMDTEStatus,
         run_cfg: Optional[COMRunConfig] = None,
     ) -> COMPMFStatus:
@@ -2689,20 +2778,20 @@ class COM:
 
         # pmf of ISI
         p_ISI = _build_pmf_interference_178A(
-            p_sig, imp_status.h_ISI.ir, pmf_cfg_for_com, self.cfg.L,
+            p_sig, eq_ch.h_ISI.ir, pmf_cfg_for_com, self.cfg.L,
             method=self.cfg.policy.interference_pmf_method, name="ISI",
         )
 
         # pmf of XT (all combined)
         p_w_XT_all = _build_pmf_w_XT_all(
-            p_sig, imp_status.h_XTs_w, pmf_cfg_for_com,
+            p_sig, eq_ch.h_XTs_w or [], pmf_cfg_for_com,
             L=self.cfg.L, methods=self.cfg.policy,
         )
 
         # pmf of tx Dual-dirac jitter
         p_w_DD = _build_pmf_interference_178A(
             p_sig,
-            imp_cfg.A_DD * imp_status.h_w_J.ir,
+            imp_cfg.A_DD * eq_ch.h_w_J.ir,
             pmf_cfg_for_com,
             self.cfg.L,
             method=self.cfg.policy.interference_pmf_method,
@@ -2742,6 +2831,7 @@ class COM:
                 main_gain = float(w_lim[self.cfg.dte.d_w])
                 V_qc, adc_grid_cfg, p_noise_adc = _final_adc_clip_reference_only(
                     imp_status,
+                    eq_ch,
                     self.cfg.L,
                     pmf_cfg_for_com,
                     main_gain,
@@ -2836,10 +2926,13 @@ class COM:
 
         status = self._require_status()
         imp_status = status.imp
+        eq_ch = status.eq_ch
         dte_status = status.dte
         pmf_dfe = status.pmf
         if not isinstance(imp_status, COMImpairmentStatus):
             raise RuntimeError("calculate_COM_MLSD requires completed 178A impairment status.")
+        if not isinstance(eq_ch, COMEqChannelStatus) or eq_ch.post_ffe is None:
+            raise RuntimeError("calculate_COM_MLSD requires completed equivalent-channel status.")
         if not isinstance(dte_status, COMDTEStatus):
             raise RuntimeError("calculate_COM_MLSD requires the selected N_b=1 DTE status.")
         if not isinstance(pmf_dfe, COMPMFStatus):
@@ -2892,7 +2985,7 @@ class COM:
                 gaussian_method=self.cfg.policy.gaussian_pmf_method,
             )
         # Eq. (178A-54): build the MLSD noise PSD and autocorrelation.
-        noise = self.build_mlsd_noise(imp_status, added_noise)
+        noise = self.build_mlsd_noise(imp_status, eq_ch, dte_status, added_noise)
         # Eqs. (178A-48), (178A-49), (178A-52), (178A-53): calculate DER.
         DER_MLSD, der_by_j = calculate_der_mlsd(
             added_noise.p_an,
@@ -2952,9 +3045,14 @@ class COM:
         self._assign_mlsd(mlsd_status)
         return mlsd_status
 
-    def calculate_COM(self, imp_status: COMImpairmentStatus, dte_status: COMDTEStatus) -> COMPMFStatus:
+    def calculate_COM(
+        self,
+        imp_status: COMImpairmentStatus,
+        eq_ch: COMEqChannelStatus,
+        dte_status: COMDTEStatus,
+    ) -> COMPMFStatus:
         """Backward-compatible alias for the DFE-based 178A COM stage."""
-        return self.calculate_COM_DFE(imp_status, dte_status)
+        return self.calculate_COM_DFE(imp_status, eq_ch, dte_status)
 
 
 # Public helpers for building or inspecting one 178A COM stage.
@@ -2971,9 +3069,9 @@ build_paths = _build_paths
 build_shared_path = _build_shared_path
 build_psd_adc_qn = _build_psd_adc_qn
 build_psd_rx_noise = _build_psd_rx_noise
-build_psd_tx_jitter = _build_psd_tx_jitter
-build_psd_tx_noise = _build_psd_tx_noise
-build_psd_xtalk = _build_psd_xtalk
+calculate_tx_jitter_eq_ch = _calculate_tx_jitter_eq_ch
+calculate_tx_noise_eq_ch = _calculate_tx_noise_eq_ch
+select_xtalk_path_phase = _select_xtalk_path_phase
 
 
 __all__ = [
@@ -3026,12 +3124,12 @@ __all__ = [
     "build_paths",
     "build_psd_adc_qn",
     "build_psd_rx_noise",
-    "build_psd_tx_jitter",
-    "build_psd_tx_noise",
-    "build_psd_xtalk",
+    "calculate_tx_jitter_eq_ch",
+    "calculate_tx_noise_eq_ch",
     "build_rxpkg",
     "build_shared_path",
     "build_txpkg",
+    "select_xtalk_path_phase",
 ]
 
 

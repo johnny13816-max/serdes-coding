@@ -5,28 +5,27 @@
 不得只憑此文件執行。維持約 30–40 行內，完成或失效內容應刪除而非累積歷史。
 
 ```text
-Handoff state: READY
-Generated at: 2026-10-28 Asia/Taipei
+Handoff state: ACTIVE
+Generated at: 2026-11-01 Asia/Taipei
 Source branch: main
-Source revision: HEAD 6adda53 plus this handoff priority update
-Active task: assess historical legacy errors before resuming unfinished v1.0 review
-Current phase: rule maintenance closed; ready for project-only read-only assessment
-Collaboration mode: Full-Agent for historical-error assessment; Co-Build when resuming v1.0 review
-Approved boundary: project read-only review; no rule, code or protected-model modification authorized
-Completed: rule maintenance RC-001/002/003/005/006; evidence in rule_changes.md
-In progress: none
+Source revision: HEAD 7902cc8 plus CP-BR closure commit
+Active task: CP-BR B-006 pre-DTE ADC clipping convention review
+Current phase: B-005 closed; B-006 discussion only
+Collaboration mode: Co-Build branch review
+Approved boundary: explain and decide B-006 behavior, ownership, config exposure and validation; no B-006 code change before decision
+Completed: B-002, B-003, Stage 2/3 boundary, B-005 implementation and closure
+In progress: B-006 behavior review
 Blocked: none
-Next recommended action: preflight; assess legacy errors and record disposition; then resume v1.0 at 178A P3
-Next action owner: new project conversation; do not resume rule-maintenance tasks
-Stop point: assessment complete means evidence, impact, disposition and unresolved items recorded, not fixes done
-Evidence links: AGENTS.md; docs/architecture/project_workflow.md;
-                docs/planning/rule_changes.md; docs/planning/active_contracts.md
+Next recommended action: compare annex_d3 and matlab_4_17_reference_only clipping inputs and decide whether both remain independently exposed
+Next action owner: Agent explains; user decides
+Stop point: do not enter B-007/B-008 or modify B-006 until the user accepts its formal change contract
+Evidence links: docs/models/178A/stages/README.md; docs/models/178A/stages/pre_dte.md;
+                docs/models/178A/branch_behavior_registry.md; docs/planning/tc022_mmse_noise_grid.md
 Dirty-state summary: existing reference_data deletions/additions and results/ untouched; do not mix into commits
 ```
 
-歷史問題先核對既有稽核發現：93A legacy adapter 的資料路徑／來源資料可用性、缺少的回歸覆蓋，
-以及 tracker 與 roadmap 的狀態差異。重新驗證後分類處置；需要修改者另列 boundary 與核准關卡，
-不得把評估完成當成已修正。規則問題只交付 rule_change，不由專案對話處理。
+93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
+v1.0 release claim。
 
 ## New-session resume checklist
 

@@ -7,26 +7,26 @@ v1.0 release 狀態見
 
 ## Workflow state
 
-本輪規則維護已結案，沒有 active rule change；決策與 commit evidence 見
-[rule_changes.md](rule_changes.md)。RC-004 保留 Proposed，由規則專用對話另行評估，
-不阻擋 technical queue，也不交由專案更新對話處理。使用者指定新專案對話先唯讀評估歷史遺留錯誤，
-完成 evidence、impact、disposition 與未解項目記錄後，再恢復下列未完成的 v1.0 review；不直接授權修正。
+使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
+branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
+規則維護已結案；RC-004 仍為 Proposed，僅由規則專用對話評估。
 
-`GOV-V1-002` 已完成當時的 governance 文件整理，但其「178A 九章全面 PASS」結論在
-2026-10-28 重新審查後判定過度擴張。P1/P2 保持完成，P3–P9 依
-[`v1_0_roadmap.md`](v1_0_roadmap.md) 重開。現在沒有 `Approved` 或 `Implemented` 中的項目。
-
-歷史評估可唯讀檢查 93A legacy 問題，但不啟動 93A 實作。評估後依 workflow integrity gate，
-以 read-only、半代理 review 恢復 178A P3 workbook/config interface；發現修改需求後另依責任邊界提出 contract。
+歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
+SiCoPR case。已完成／未完成事實、分離後的目標與恢復條件見
+[v1_0_rebaseline.md](v1_0_rebaseline.md)。未經使用者選定新目標，不得自動恢復 P4、93A、
+reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| 178A P3 — Workbook/config interface review | Open／next review | Read-only 檢查 Ad Hoc → project → runtime、profile、UX 與 provenance | 新對話先展示完整 mapping tree；不修改 code |
-| ARC-CROSS-001 — Current-schema 93A golden case | Open／queued after 178A | 新增或遷移一個可維護的 93A workbook 與數值 baseline；不改 93A equations | 等 178A review 通過後再提出正式 contract |
-| ARC-REPORT-001 — Cross-version report plot refinement | Open／non-blocking | 收集並修正 presentation 問題；共用 renderer 與 version composition 分開處理 | 在 G9 documentation/report quality 結案前完成；不阻擋 93A golden-case foundation |
+| CP-BR — 178A stage-by-stage branch review | **Approved / B-006 discussion** | 每個 stage 先列 L0–L4 call tree；branch 決策、code、文件與 validation 同步；pending 不修改 | 說明 B-006 現況、選項、project-config exposure，取得使用者決策 |
+| B-005 — Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
+| 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
+| P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
+| ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
+| ARC-REPORT-001 — Cross-version report plot refinement | Paused | 收集具體 plot defect；renderer 與 version composition 分開處理 | 使用者選擇 Goal D |
 
 ## Recently closed boundaries
 
@@ -40,6 +40,8 @@ v1.0 release 狀態見
 | UTIL-EYE-001 — deterministic LinkSegment eye plotting | `e7e1612` |
 | COMPAT-PY37-001 — Python 3.7 utility export | `f774487` |
 | UTIL-SNP-002 — synthetic S4P target semantics | `94e5613` |
+| 178A P3 — Workbook/config interface review | current SiCoPR scope complete；evidence in `docs/models/178A/design_review.md` |
+| B-005 — Eq-channel impairment length | SiCoPR golden DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB`；`187 passed`, `1 deselected`, `2 subtests passed` |
 
 ## Status rules
 

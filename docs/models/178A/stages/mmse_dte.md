@@ -1,15 +1,16 @@
-# 178A sampling-phase and MMSE-DTE stage
+# 178A Stage 4: MMSE-DTE
 
 > **Review state:** phase-sweep ownership, solver call boundaries, floating-tap variants, limiter flow, status output, and current selection behavior are confirmed from source. The MMSE equations and numerical results have not been independently revalidated by this documentation change.
 
 ## Purpose and ownership
 
-This stage evaluates receiver sampling phases and selects one limited discrete-time equalizer result.
+This stage solves one sampling-phase candidate's limited discrete-time equalizer.
 
 Responsibility is deliberately split:
 
-- `COM._run_once()` owns phase scheduling, per-phase orchestration, rejection recording, and minimum-MSE phase selection;
+- Stage 3 owns phase scheduling, per-phase orchestration, rejection recording, minimum-MSE selection, and atomic selected-candidate commit;
 - `COM_MMSE_DTE` owns the MMSE problem for one phase, including floating FFE placement, coefficient solving, limiting/refinement, MSE calculation, and `COMDTEStatus` construction.
+- `calculate_MMSE_DTE()` finalizes the Stage 4 result by representing `w_lim` as `H_rxffe` on the candidate noise grid.
 
 The stage does not build pre-DTE PSDs, construct residual post-FFE responses, build final PMFs, or calculate COM.
 
@@ -21,16 +22,19 @@ Current solver docstrings identify Annex 178A Eq. 178A-31 through Eq. 178A-35 fo
 
 ```text
 calculate_pos_candidate(...)
-    -> (candidate_impairment, candidate_dte)
+    -> (candidate_eq_ch, candidate_impairment, candidate_dte)
 
-calculate_MMSE_DTE(victim, imp_pre, pos, run_cfg)
+calculate_MMSE_DTE(victim, eq_ch, imp_pre, pos, run_cfg)
     -> COMDTEStatus
 
 COM_MMSE_DTE.run(h_dsamp, R_n, sigma_x, pos, per_ui)
     -> COMDTEStatus
 ```
 
-`calculate_MMSE_DTE()` currently receives `victim` for the stage-level API but reads the sampled response and noise data from `imp_pre`.
+`calculate_MMSE_DTE()` reads `h_dsamp` from the candidate `eq_ch`, noise
+covariance/scalars from candidate impairment, and preserves the current solver
+algorithm. `victim` remains in the transitional stage-level signature but is
+not a numerical input.
 
 ## Phase-sweep orchestration
 
@@ -57,8 +61,7 @@ if coarse_fine
 └── evaluate remaining fine phases
 
 select minimum-MSE valid candidate
-├── status.dte = selected COMDTEStatus
-└── status.imp = matching selected pre-DTE impairment
+└── atomically commit matching status.eq_ch / status.imp / status.dte
 ```
 
 The pre-DTE impairment and DTE result remain paired throughout selection. The model never selects a DTE result while retaining impairment data from a different phase.
@@ -89,7 +92,7 @@ A phase with `COMMainCursorError` keeps `mse_by_pos[pos]` as `None` and stores t
 
 | Input | Source | Requirement |
 |---|---|---|
-| `h_dsamp` | `imp_pre.eq_ch.h_dsamp.ir` compatibility proxy | one-dimensional and at least `N_max` samples |
+| `h_dsamp` | `eq_ch.pre_dte.h_dsamp.ir` | one-dimensional and at least `N_max` samples |
 | `R_n` | `imp_pre.pre_dte.psd.R_n` compatibility proxy | at least `N_max` lags; solver retains the first `N_max` |
 | `sigma_x` | `imp_pre.pre_dte.psd.sigma_X` | finite and positive |
 | `pos` | phase orchestrator | integer in `[0, per_ui)` |
@@ -183,8 +186,11 @@ The detailed equations require separate specification validation. This contract 
 | `H`, `R_nn`, `H_b` | selected-domain matrices | solver diagnostics |
 | `w` | `(N_max,)`, dimensionless | unlimited FFE scattered into a full zero-filled vector |
 | `b` | `(N_b,)`, dimensionless | unlimited DFE coefficients |
+| `H_rxffe` | `SampledResponse`, dimensionless | Stage 4 representation of the complete `w_lim` on the candidate noise grid |
 
-The `dfe_coeff` compatibility property returns `b_lim`. Residual ISI is not a `COMDTEStatus` field; it is constructed by the post-FFE stage.
+The `dfe_coeff` compatibility property returns `b_lim`. `H_rxffe` belongs to
+the DTE result because it is completely determined once `w_lim` and the
+candidate grid are known. Residual ISI remains a Stage 5 result.
 
 ## Failure conditions
 
@@ -208,7 +214,7 @@ The stage rejects or propagates errors for these conditions:
 
 | Consumer | Data read |
 |---|---|
-| post-FFE impairment | selected `w_lim`, `b_lim`, `d`, `pos`, and associated pre-DTE response |
+| post-FFE impairment | selected `w_lim`, `H_rxffe`, `b_lim`, `d`, `pos`, and associated pre-DTE response |
 | DFE COM | selected `w_lim` and `b_lim` with completed post-FFE impairment |
 | MLSD | selected `b_lim` and completed DFE baseline |
 | partial search | `mse`, `ts`, and `pos` |

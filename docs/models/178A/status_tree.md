@@ -20,16 +20,19 @@ COMStatus                              standalone 178A root status
 │   ├── victim path
 │   └── zero or more NEXT/FEXT paths
 ├── run: COMRunStatus | None
+├── eq_ch: COMEqChannelStatus | None
+│   ├── phase_index
+│   ├── pre_dte: COMPreDTEEqChannelStatus
+│   └── post_ffe: COMPostFFEEqChannelStatus | None
 ├── dte: COMDTEStatus | None
+│   └── H_rxffe: SampledResponse | None
 ├── imp: COMImpairmentStatus | None
 │   ├── pre_dte: COMImpStageStatus | None
 │   │   ├── psd: COMPSDStatus | None
 │   │   └── adc_input: COMAdcInputPMF | None
-│   ├── post_ffe: COMImpStageStatus | None
-│   │   ├── psd: COMPSDStatus | None
-│   │   └── adc_input: COMAdcInputPMF | None
-│   ├── eq_ch: COMEqChannelStatus | None
-│   └── H_rxffe: SampledResponse | None
+│   └── post_ffe: COMImpStageStatus | None
+│       ├── psd: COMPSDStatus | None
+│       └── adc_input: COMAdcInputPMF | None
 ├── pmf: COMPMFStatus | None
 └── mlsd: COMMLSDStatus | None
 ```
@@ -54,8 +57,8 @@ does not change status lifecycle or numerical content. See
 | before path construction | empty `COMStatus` | every optional field; `paths` empty |
 | paths completed | `paths` | `run`, `dte`, `imp`, `pmf`, `mlsd` |
 | phase sweep initialized | `paths`, `run` | selected `dte`, selected `imp`, later stages |
-| selected phase, `target="mse"` return | `paths`, `run`, `dte`, `imp.pre_dte`, `imp.eq_ch` pre-DTE fields | `imp.post_ffe`, `imp.H_rxffe`, `pmf`, `mlsd` |
-| post-FFE completed | previous fields plus `imp.post_ffe`, shared `imp.eq_ch` post-FFE fields, `imp.H_rxffe` | `pmf`, `mlsd` until requested |
+| selected phase, `target="mse"` return | `paths`, `run`, `eq_ch.phase_index`, `eq_ch.pre_dte`, `dte` including `H_rxffe`, `imp.pre_dte` | `eq_ch.post_ffe`, `imp.post_ffe`, `pmf`, `mlsd` |
+| post-FFE completed | previous fields plus `eq_ch.post_ffe` and `imp.post_ffe` for the same selected phase | `pmf`, `mlsd` until requested |
 | DFE COM completed | previous fields plus `pmf` | `mlsd` |
 | MLSD completed | previous fields plus `mlsd` | none of the requested MLSD result fields |
 
@@ -67,8 +70,8 @@ A failure does not roll the root status back. Fields assigned by completed stage
 |---|---|
 | `_assign_paths(paths)` | replaces `status.paths` |
 | `_assign_run(run_status)` | replaces `status.run` |
-| `_assign_dte(dte_status)` | assigns the selected result to `status.dte` |
-| `_merge_imp(imp_status)` | field-wise merge of `pre_dte`, `post_ffe`, `eq_ch`, and `H_rxffe`; non-`None` incoming fields replace the same field |
+| `_assign_selected_phase(eq_ch, imp, dte)` | validates one phase identity and atomically publishes the selected pre-DTE equivalent channel, impairment, and completed DTE |
+| `_assign_post_ffe(phase_index, eq_ch_post, imp_post)` | validates selected phase identity and atomically adds both Stage 5 outputs without replacing pre-DTE or DTE data |
 | `_assign_pmf(pmf_status)` | replaces `status.pmf` |
 | `_assign_mlsd(mlsd_status)` | replaces `status.mlsd` |
 
@@ -139,6 +142,7 @@ from configuration.
 | `H_all`, `Rnn_all` | arrays on the full solver domain | solver diagnostic |
 | `H`, `R_nn`, `H_b` | arrays on the selected solver domain | solver diagnostic |
 | `w`, `b` | unlimited coefficient arrays | limiter/report diagnostic |
+| `H_rxffe` | dimensionless `SampledResponse` | Stage 4 representation of the selected `w_lim` on the noise grid |
 
 The compatibility property `dfe_coeff` returns `b_lim` for shared report code.
 
@@ -146,16 +150,18 @@ The compatibility property `dfe_coeff` returns `b_lim` for shared report code.
 
 ### Stage ownership
 
-`COMImpStageStatus` contains only `psd` and `adc_input`. Equivalent-channel responses are stored once in `COMImpairmentStatus.eq_ch`; they are not nested separately under each stage.
+`COMImpStageStatus` contains only `psd` and `adc_input`. Equivalent-channel responses are owned by root `COMStatus.eq_ch`; RX FFE ownership belongs to `COMDTEStatus`.
 
 | Root field | Producer | Replacement behavior |
 |---|---|---|
 | `pre_dte` | selected output from `calculate_pre_dte_imp_at_pos()` | assigned after phase selection |
 | `post_ffe` | `calculate_post_ffe_imp()` | added after DTE selection |
-| `eq_ch` | pre-DTE candidate, then completed post-FFE result | later non-`None` object replaces the earlier object |
-| `H_rxffe` | `calculate_post_ffe_imp()` | absent before post-FFE |
+| `status.eq_ch` | selected Stage 3 candidate | pre-DTE fields are preserved; Stage 5 adds only `post_ffe` |
+| `status.dte.H_rxffe` | Stage 4 | completed before candidate selection/commit |
 
-The post-FFE `eq_ch` object carries both the selected pre-DTE responses and the post-FFE responses, so replacing the earlier object does not intentionally discard the selected pre-DTE response fields.
+Stage 3/4 selection retains only the current minimum-MSE candidate's complete
+`eq_ch`／`imp`／`dte` bundle. Other phases retain only `COMRunStatus` summaries.
+The selected bundle is committed once, so mixed-phase root status is illegal.
 
 ### `COMPSDStatus`
 
@@ -183,10 +189,11 @@ Every `S_*` field is a `SampledPSD` and therefore carries its own `theta`, `fb`,
 
 ### `COMEqChannelStatus`
 
-| Phase | Fields | Type |
+| Object | Fields | Type |
 |---|---|---|
-| selected pre-DTE | `h_dsamp`, `h_tn`, `h_J`, `h_XTs_dsamp` | `SampledResponse` or list thereof |
-| post-FFE | `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | `SampledResponse` or list thereof |
+| `COMEqChannelStatus` | `phase_index`, `pre_dte`, optional `post_ffe` | selected-phase lifecycle |
+| `COMPreDTEEqChannelStatus` | `h_dsamp`, `h_tn`, `h_J`, `h_XTs_dsamp` | `SampledResponse` or list thereof |
+| `COMPostFFEEqChannelStatus` | `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | `SampledResponse` or list thereof |
 
 Each COM-produced response retains the run-level `LinkConfig` reference and owns its impulse/transfer representation. Reporting consumes these stored objects.
 
@@ -202,7 +209,11 @@ Which PMF components are present depends on stage, quantization enablement, and 
 
 ### Compatibility proxies
 
-`COMImpairmentStatus` exposes compatibility properties such as `S_rn`, `sigma_rn`, `S_xn`, `sigma_xn`, `h_dsamp`, and `h_w`. PSD proxies search `post_ffe` before `pre_dte`; equivalent-response proxies read `eq_ch`. These properties are views over stored status and do not create new numerical data.
+`COMImpairmentStatus` exposes PSD/scalar compatibility properties such as
+`S_rn`, `sigma_rn`, `S_xn`, and `sigma_xn`; they search `post_ffe` before
+`pre_dte`. Equivalent responses are intentionally not proxied through
+impairment. `COMEqChannelStatus` provides flat read-only response properties
+over its `pre_dte` and `post_ffe` children for calculation/report compatibility.
 
 ## DFE PMF status
 
@@ -264,8 +275,8 @@ COMMLSDStatus
 |---|---|
 | path plots | `status.paths` |
 | phase/MSE and DTE plots | `status.run` and `status.dte` |
-| pre-DTE impairment plots | `status.imp.pre_dte`, plus stored `status.imp.eq_ch` responses when used |
-| post-FFE impairment plots | `status.imp.post_ffe`, plus `status.imp.eq_ch` and `H_rxffe` when used |
+| pre-DTE impairment plots | `status.imp.pre_dte` plus `status.eq_ch.pre_dte` |
+| post-FFE impairment plots | `status.imp.post_ffe`, `status.eq_ch.post_ffe`, and `status.dte.H_rxffe` when used |
 | DFE PMF plots | `status.pmf` |
 | MLSD plots | `status.mlsd` and completed `status.pmf` baseline |
 | partial-search row | `status.dte.mse`, `ts`, and `pos` |

@@ -367,7 +367,7 @@ class COMReport178A(COMReportBase):
         outputs["mse_by_pos"] = output
 
         pre = self.status.imp.pre_dte if self.status.imp is not None else None
-        eq_ch = self.status.imp.eq_ch if self.status.imp is not None else None
+        eq_ch = self.status.eq_ch
         if pre is not None and eq_ch is not None and eq_ch.h_dsamp is not None:
             victim_pulse = self.status.paths[0].pulse if self.status.paths else None
             if victim_pulse is not None:
@@ -608,7 +608,7 @@ class COMReport178A(COMReportBase):
             )
         )
 
-        eq = self.status.imp.eq_ch if self.status.imp is not None else None
+        eq = self.status.eq_ch
         if eq is not None:
             primary = [("h_dsamp", eq.h_dsamp), ("h_tn", eq.h_tn), ("h_J", eq.h_J)] if pre_dte else [("h_w", eq.h_w), ("h_w_J", eq.h_w_J)]
             reference_index = (

@@ -287,7 +287,8 @@ POLICY_FIXED_178A={
     'channel_renormalization_order',
     'pre_dte_adc_clipping_convention',
     'final_adc_quantization_convention',
-    'noise_grid_num_ui',
+    'eq_ch_imp_len',
+    'num_trunc_ui',
 }
 SEARCH_POLICY={'keep_top_n','keep_all_rows','continue_on_error'}
 # These source controls belong to MATLAB reporting, TDR/ERL/ICN calculations,
@@ -318,7 +319,7 @@ def area_for(field, version):
 
 def optional_field(field, version, values):
     if version=='178A':
-        if field.sheet=='fixed_config' and field.parameter=='noise_grid_num_ui':
+        if field.sheet=='fixed_config' and field.parameter=='num_trunc_ui':
             return True
         if field.sheet=='run_config' and field.parameter.endswith('.pmf_dy_override'):
             return True
@@ -337,7 +338,7 @@ def outcome(field, version, values):
     if area_for(field,version) in {'mapping','baseline'} or str(field.unit).lower() not in {'text','enum','none',''}:
         try:
             numbers=array(field.value)
-            if field.parameter in {'N_b','N_qb','N_wg','N_wf','N_fix','N_max','num_pre','d_w','per_ui','L','mlsd_trunc_len','noise_grid_num_ui'}:
+            if field.parameter in {'N_b','N_qb','N_wg','N_wf','N_fix','N_max','num_pre','d_w','per_ui','L','mlsd_trunc_len','num_trunc_ui'}:
                 if np.any(numbers!=np.floor(numbers)) or np.any(numbers<0):return 'fail'
             if field.parameter=='mlsd_trunc_len' and np.any(numbers<=0):return 'fail'
         except (ValueError,TypeError):return 'fail'

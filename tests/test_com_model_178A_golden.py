@@ -33,7 +33,7 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     assert status.dte.ts == 38_149
     assert status.dte.w.shape == (87,)
     assert status.dte.b.shape == (1,)
-    assert status.imp.h_dsamp.ir.shape == (10_626,)
+    assert status.eq_ch.h_dsamp.ir.shape == (10_626,)
     assert status.imp.R_n.shape == (4_096,)
 
     np.testing.assert_allclose(status.dte.mse, 0.0061912610245255335, rtol=0.0, atol=1e-14)
@@ -48,7 +48,7 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     assert _quantized_digest(status.dte.w) == (
         "aedef2cbd02deb6cdd0868c60c8ce46fe927867fcc8a3d5429dc6802e74241f1"
     )
-    assert _quantized_digest(status.imp.h_dsamp.ir) == (
+    assert _quantized_digest(status.eq_ch.h_dsamp.ir) == (
         "8ebb13b0646c7b83fc39e93a3b36b9cf3758825e0316619beca9b1a204d26971"
     )
     assert _quantized_digest(status.imp.R_n) == (

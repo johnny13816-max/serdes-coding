@@ -32,6 +32,8 @@ MODEL_TEXT_CLASSES = (
     model.COMAddedNoiseStatus,
     model.COMMLSDNoiseStatus,
     model.COMMLSDStatus,
+    model.COMPreDTEEqChannelStatus,
+    model.COMPostFFEEqChannelStatus,
     model.COMEqChannelStatus,
     model.COMAdcInputPMF,
     model.COMImpStageStatus,

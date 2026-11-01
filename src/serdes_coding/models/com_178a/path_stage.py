@@ -749,6 +749,18 @@ def _evaluate_pre_ctle_on_measured_grid(S_all: SparamModel, link_cfg: LinkConfig
     time_origin = np.exp(-1j * 2.0 * np.pi * freqs * (3.0 * ft_cfg.Tr))
     return (freqs, H_ffe * H_t * H_21 * H_r * time_origin)
 
+def _prepare_ctle_pulse_realization(link_cfg: LinkConfig, ft_cfg: COMFilterConfig, realization: Literal['continuous_tf', 'bilinear_iir']) -> Optional[COMBilinearCTLE]:
+    """Prepare the shared CTLE state for one resolved pulse-realization method."""
+    if realization == 'continuous_tf':
+        return None
+    if realization != 'bilinear_iir':
+        raise ValueError('CTLE pulse realization must be continuous_tf or bilinear_iir.')
+    required = {'g_1': ft_cfg.g_1, 'g_2': ft_cfg.g_2, 'f_z1': ft_cfg.f_z1, 'f_z2': ft_cfg.f_z2, 'f_p1': ft_cfg.f_p1, 'f_p2': ft_cfg.f_p2, 'f_p3': ft_cfg.f_p3}
+    missing = [name for name, value in required.items() if value is None]
+    if missing:
+        raise ValueError('COMFilterConfig178A is missing required bilinear CTF fields: ' + ', '.join(missing))
+    return IEEECOMFilter.build_rx_equalizer_bilinear(link_cfg, g_1=required['g_1'], g_2=required['g_2'], f_z1=required['f_z1'], f_z2=required['f_z2'], f_p1=required['f_p1'], f_p2=required['f_p2'], f_p3=required['f_p3'])
+
 def _realize_ctle_response(pre_ctle: LinkSegment, H_ctf: LinkSegment, link_cfg: LinkConfig, realization: Literal['continuous_tf', 'bilinear_iir'], ctle_iir: Optional[COMBilinearCTLE], *, measured_freqs: Optional[np.ndarray]=None, measured_tf: Optional[np.ndarray]=None) -> tuple[LinkSegment, Literal['frequency_tf', 'finite_record_ir']]:
     """Realize only the CTLE output from an already-built pre-CTLE response.
 
@@ -791,6 +803,14 @@ def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_c
     pulse_record[:len(pulse_ir)] = pulse_ir
     return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
 
+def _realize_ctle_pulse_for_path(shared: COMSharedPath, H_pre: LinkSegment, S_all: SparamModel, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig) -> LinkSegment:
+    """Realize one path pulse using the method resolved in shared path state."""
+    measured_freqs = measured_pre_ctle = None
+    if shared.ctle_pulse_realization == 'bilinear_iir':
+        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(S_all, link_cfg, channel_cfg, ft_cfg, kind=kind)
+    post_ctle, pulse_domain = _realize_ctle_response(H_pre, shared.H_ctf, link_cfg, shared.ctle_pulse_realization, shared.ctle_iir, measured_freqs=measured_freqs, measured_tf=measured_pre_ctle)
+    return _apply_rectangular_unit_pulse(post_ctle, X, link_cfg, amplitude, pulse_domain)
+
 def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_order: Literal['sdd_first', 's4p_first']='sdd_first') -> list[SparamModel]:
     """
     Build 178A measured-domain channel-under-test S-parameter models.
@@ -829,7 +849,7 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_ord
     common_freqs = channel_cfg.align_grid(channels)
     return [channel.resampled(common_freqs) for channel in channels]
 
-def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, txpkg_cfg: COMPkgConfig, shared: COMSharedPath, kind: Literal['victim', 'next', 'fext'], S_ch: SparamModel, out_of_measured: Literal['cosine_decay', 'zero_padding'], ctle_pulse_realization: Literal['continuous_tf', 'bilinear_iir']) -> COMPath:
+def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, txpkg_cfg: COMPkgConfig, shared: COMSharedPath, kind: Literal['victim', 'next', 'fext'], S_ch: SparamModel, out_of_measured: Literal['cosine_decay', 'zero_padding']) -> COMPath:
     """
     Build one 178A COM signal path from a measured-domain channel-under-test model.
 
@@ -858,12 +878,7 @@ def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COM
     H_21 = S_all.to_LinkSegment(link_cfg, gamma_src=channel_cfg.gamma_src, gamma_load=channel_cfg.gamma_load, dc=channel_cfg.missing_dc_policy, out_of_measured=out_of_measured)
     H_pre = H_ffe.cascade_tf(shared.H_t).cascade_tf(H_21).cascade_tf(shared.H_r)
     H_all = H_pre.cascade_tf(shared.H_ctf)
-    measured_freqs = None
-    measured_pre_ctle = None
-    if ctle_pulse_realization == 'bilinear_iir':
-        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(S_all, link_cfg, channel_cfg, ft_cfg, kind=kind)
-    post_ctle, pulse_domain = _realize_ctle_response(H_pre, shared.H_ctf, link_cfg, ctle_pulse_realization, shared.ctle_iir, measured_freqs=measured_freqs, measured_tf=measured_pre_ctle)
-    pulse = _apply_rectangular_unit_pulse(post_ctle, X, link_cfg, amplitude, pulse_domain)
+    pulse = _realize_ctle_pulse_for_path(shared, H_pre, S_all, channel_cfg, ft_cfg, kind, X, amplitude, link_cfg)
     return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21=H_21, H_all=H_all, X=X, pulse=pulse)
 
 def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
@@ -876,14 +891,9 @@ def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     link_cfg = cfg.link
     ft_cfg = cfg.filter
     H_ctf = _build_H_ctf(link_cfg, ft_cfg)
-    ctle_iir = None
-    if cfg.policy.ctle_pulse_realization == 'bilinear_iir':
-        required = {'g_1': ft_cfg.g_1, 'g_2': ft_cfg.g_2, 'f_z1': ft_cfg.f_z1, 'f_z2': ft_cfg.f_z2, 'f_p1': ft_cfg.f_p1, 'f_p2': ft_cfg.f_p2, 'f_p3': ft_cfg.f_p3}
-        missing = [name for name, value in required.items() if value is None]
-        if missing:
-            raise ValueError('COMFilterConfig178A is missing required bilinear CTF fields: ' + ', '.join(missing))
-        ctle_iir = IEEECOMFilter.build_rx_equalizer_bilinear(link_cfg, g_1=required['g_1'], g_2=required['g_2'], f_z1=required['f_z1'], f_z2=required['f_z2'], f_p1=required['f_p1'], f_p2=required['f_p2'], f_p3=required['f_p3'])
-    return COMSharedPath(H_ffe=_build_H_ffe(link_cfg, ft_cfg), H_ffe_next=_build_H_ffe_next(link_cfg), H_t=_build_H_t(link_cfg, ft_cfg), S_rx=_build_rxpkg(freqs, cfg.rxpkg), H_r=_build_H_r(link_cfg, ft_cfg), H_ctf=H_ctf, ctle_iir=ctle_iir)
+    method = cfg.policy.ctle_pulse_realization
+    ctle_iir = _prepare_ctle_pulse_realization(link_cfg, ft_cfg, method)
+    return COMSharedPath(H_ffe=_build_H_ffe(link_cfg, ft_cfg), H_ffe_next=_build_H_ffe_next(link_cfg), H_t=_build_H_t(link_cfg, ft_cfg), S_rx=_build_rxpkg(freqs, cfg.rxpkg), H_r=_build_H_r(link_cfg, ft_cfg), H_ctf=H_ctf, ctle_iir=ctle_iir, ctle_pulse_realization=method)
 
 def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamModel]) -> list[COMPath]:
     """
@@ -897,19 +907,19 @@ def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamMod
     expected_count = 1 + len(ch_cfg.next_s4p_paths) + len(ch_cfg.fext_s4p_paths)
     if len(channels) != expected_count:
         raise COMLengthMismatchError(f'channels length must match victim + NEXT + FEXT path count. Expected {expected_count}, got {len(channels)}.')
-    paths = [_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_victim, shared=shared, kind='victim', S_ch=channels[0], out_of_measured=cfg.policy.out_of_measured, ctle_pulse_realization=cfg.policy.ctle_pulse_realization)]
+    paths = [_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_victim, shared=shared, kind='victim', S_ch=channels[0], out_of_measured=cfg.policy.out_of_measured)]
     next_count = len(ch_cfg.next_s4p_paths)
     next_channels = channels[1:1 + next_count]
     fext_channels = channels[1 + next_count:]
     for S_ch in next_channels:
-        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_next, shared=shared, kind='next', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured, ctle_pulse_realization=cfg.policy.ctle_pulse_realization))
+        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_next, shared=shared, kind='next', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured))
     for S_ch in fext_channels:
-        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_fext, shared=shared, kind='fext', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured, ctle_pulse_realization=cfg.policy.ctle_pulse_realization))
+        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_fext, shared=shared, kind='fext', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured))
     return paths
 
 __all__ = [
     "COMBilinearCTLE", "IEEECOMFilter", "IEEECOMSparam",
     "_build_H_ctf", "_build_H_ffe", "_build_H_ffe_next", "_build_H_r", "_build_H_t",
     "_build_channel_under_test", "_build_path", "_build_paths", "_build_rxpkg",
-    "_build_shared_path", "_build_txpkg",
+    "_build_shared_path", "_build_txpkg", "_prepare_ctle_pulse_realization", "_realize_ctle_pulse_for_path",
 ]

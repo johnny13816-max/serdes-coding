@@ -1,15 +1,15 @@
-# 178A pre-DTE impairment stage
+# 178A Stage 2 common impairment and Stage 3 per-phase impairment builder
 
 > **Review state:** the two-part stage boundary, cache lifecycle, runtime-policy inputs, produced status fields, and current component data flow are confirmed from source. Specification equations and numerical equivalence have not been independently revalidated by this documentation change.
 
 ## Purpose and ownership
 
-This stage prepares the sampled impairment data required to evaluate each receiver sampling phase before the discrete-time equalizer is solved.
+This document owns the pre-DTE impairment algorithms used across two stage boundaries.
 
 It is split into:
 
-1. a phase-independent common calculation performed once per concrete path/filter candidate;
-2. a phase-dependent calculation performed for every sampling phase selected by the execution policy.
+1. Stage 2 performs the phase-independent common calculation once per concrete path/filter candidate;
+2. Stage 3 calls the phase-dependent builder for every phase selected by its execution policy.
 
 It owns pre-DTE receiver noise, crosstalk, TX noise, jitter noise, optional ADC quantization noise, the combined sampled PSD/autocorrelation, and the sampled equivalent responses used by the DTE solver.
 
@@ -32,29 +32,96 @@ This document records what the current program does and where each result is sto
 ## Stage entries
 
 ```text
-calculate_pre_dte_imp_common(victim, h_XTs)
-    -> (common_psd: COMPSDStatus, h_XTs_dsamp: list[np.ndarray])
+calculate_pre_dte_imp_common(victim)
+    -> common_imp: COMImpairmentStatus
 
-calculate_pre_dte_imp_at_pos(victim, pos, common_psd, h_XTs_dsamp, run_cfg)
-    -> COMImpairmentStatus
+prepare_sampling_phase_common(common_imp, h_XTs)
+    -> (common_imp: COMImpairmentStatus, h_XTs_dsamp: list[np.ndarray])
+
+calculate_pre_dte_imp_at_pos(victim, pos, common_imp, h_XTs_dsamp, run_cfg)
+    -> (COMEqChannelStatus, COMImpairmentStatus)
 ```
 
-`calculate_pos_candidate()` is the orchestration wrapper that calls `calculate_pre_dte_imp_at_pos()` and then passes its output to `calculate_MMSE_DTE()`.
+`calculate_pos_candidate()` is the Stage 3 candidate wrapper. It invokes the
+per-phase builder, then hands the matching `eq_ch` and impairment to Stage 4.
+
+## COM call-tree hierarchy
+
+The two builders share a physical domain but have distinct stage ownership.
+
+```text
+COM                                                   [Root: model]
+├── __init__(cfg)                                     [Root: shared context]
+│   └── _resolve_eq_ch_imp_record_cfg()               [B-005 shared state]
+└── _run_once()                                       [L0: stage set]
+    ├── Stage 2: common pre-DTE impairment            [L1]
+    │   └── calculate_pre_dte_imp_common()            [L2: common-cache set]
+    │       ├── receiver-noise construction           [L3]
+    │       │   └── _build_psd_rx_noise()             [L4; B-005 record]
+    │       └── signal variance                       [L3/L4]
+    └── Stage 3: sampling-phase evaluation            [L1]
+        ├── prepare_sampling_phase_common()           [L2]
+        │   ├── XT path phase selection               [L3]
+        │   │   └── _select_xtalk_path_phase()        [L4; full response]
+        │   └── eq-channel impairment PSD construction [Shared L3; B-005]
+        │       ├── _realize_eq_ch_imp_record()       [L4]
+        │       └── _build_eq_ch_imp_psd()            [L4]
+        └── calculate_pre_dte_imp_at_pos()            [L2: phase-specific set]
+            ├── sampled equivalent-channel formation  [L3]
+            │   └── SampledResponse.from_ir()         [L4]
+            ├── transmitter-noise construction        [L3]
+            │   ├── _calculate_tx_noise_eq_ch()       [L4]
+            │   └── _build_eq_ch_imp_psd()            [Shared L3; B-005]
+            ├── jitter-noise construction             [L3]
+            │   ├── _calculate_tx_jitter_eq_ch()      [L4]
+            │   └── _build_eq_ch_imp_psd()            [Shared L3; B-005]
+            ├── ADC-input / quantization              [L3]
+            │   ├── _resolve_adc_input_pmf_config()   [L4: E003/E004, B014]
+            │   ├── _build_pmf_pam_L()                [L4: B008]
+            │   ├── clipping PSD/tail selection        [L4: B006]
+            │   └── _build_psd_adc_qn()               [L4: E002 dispatcher]
+            │       ├── _calculate_V_qc_gaussian_approx() [L4: E002]
+            │       └── _calculate_V_qc()             [L4: E002 exact path]
+            │           ├── _build_pmf_interference_178A() [L4: B009]
+            │           └── Pmf1D.gaussian()          [L4: B010]
+            └── total-noise covariance                [L3]
+                └── SampledPSD.add() / to_autocorrelation() [L4]
+```
+
+Stage 2 returns a phase-independent `COMImpairmentStatus` used only as a local
+cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
+`COMImpairmentStatus`; Stage 4 consumes their `h_dsamp`, `R_n`, and `sigma_X`.
+
+### Branch-behavior review candidates
+
+| Candidate | L3 owner | L4 decision point | Status for this stage |
+|---|---|---|---|
+| B006 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending.** Selects Annex D3 versus reference-only clipping inputs; it does not change the full-jitter MMSE covariance. |
+| B008 discrete-PMF placement | ADC-input / quantization | `_build_pmf_pam_L()` | **Pending.** The `linear` / `nearest` placement changes the base PAM mass representation used by both ADC methods. |
+| B009 interference-PMF representation | ADC-input / quantization | `_calculate_V_qc()` → `_build_pmf_interference_178A()` | **Pending, conditional.** Used only by the `pmf_exact` path. |
+| B010 Gaussian-PMF creation | ADC-input / quantization | `_calculate_V_qc()` → `Pmf1D.gaussian()` | **Pending, conditional.** Used only by the `pmf_exact` path; it is distinct from the Gaussian approximation selected by E002. |
+| B014 Gaussian support | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending, conditional.** Controls the finite Gaussian PMF support for the exact path. |
+| E002 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending classification.** Chooses `gaussian_approx` or `pmf_exact`; review must decide whether it is retained as an execution-quality control or promoted to an algorithm branch. |
+| E003/E004 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending classification.** Numerical accuracy/cost controls, not automatically algorithm branches. |
+
+Quantization disabled when `N_qb`／`P_qc` is absent is input/configuration
+availability handling, not a branch behavior.
 
 ## Cache and status lifecycle
 
 ```text
 once per concrete candidate
-└── calculate_pre_dte_imp_common(...)
-    ├── common_psd
-    └── h_XTs_dsamp
+├── Stage 2: calculate_pre_dte_imp_common(...)
+│   └── sigma_X + S_rn common cache
+└── Stage 3 preparation: prepare_sampling_phase_common(...)
+    └── S_xn + full one-sample/UI h_XTs_dsamp
 
 for every requested victim pos
 └── calculate_pre_dte_imp_at_pos(...)
-    └── candidate COMImpairmentStatus
+    └── candidate COMEqChannelStatus + COMImpairmentStatus
 
 phase selection
-└── only the selected candidate is merged into status.imp.pre_dte / status.imp.eq_ch
+└── selected eq_ch / imp / dte are committed together at the root
 ```
 
 The common return values are run-local cache objects. They are not a separate `COMStatus` stage. Each phase candidate receives them explicitly. Unselected phase impairment objects are not retained at the root status.
@@ -66,11 +133,11 @@ The common return values are run-local cache objects. They are not a separate `C
 | Input | Required data | Use |
 |---|---|---|
 | `COMConfig.link` | sampled grid, `fb`, `theta`, and `per_ui` | sampled PSD/response construction |
-| `COMConfig.policy noise-grid 欄位` | `analysis_grid` or fixed even `num_ui` | common MMSE noise PSD/correlation record |
+| `COMConfig.policy.eq_ch_imp_len/num_trunc_ui` | `full` or `truncated` plus an even UI count | shared impairment PSD/correlation record |
 | `COMConfig.filter` | receiver noise-filter and CTF controls | receiver-noise filtering |
 | `COMConfig.imp` | `eta_0` | receiver-noise PSD |
 | `COMConfig.L` | PAM order | normalized symbol standard deviation |
-| `h_XTs` | one-dimensional aggressor pulse arrays | per-aggressor sampling and crosstalk PSD |
+| `h_XTs` | full oversampled aggressor pulse arrays | Stage 3 per-path phase selection, full sampled eq-channel records, and crosstalk PSD |
 
 The `victim` argument is accepted by the current public method but is not read inside the common calculation.
 
@@ -97,16 +164,18 @@ calculate_pre_dte_imp_common(...)
 │   ├── construct continuous receiver-noise PSD
 │   ├── filter through receiver-noise and CTF responses
 │   └── convert onto the sampled theta grid
-├── _build_psd_xtalk(...)
-│   └── for each aggressor
-│       ├── apply the explicit fixed-UI record when selected
-│       ├── choose its own implemented worst-energy sampling phase
-│       ├── build its sampled-response PSD
-│       └── add it to the uncorrelated crosstalk PSD sum
-└── return common COMPSDStatus plus sampled aggressor arrays
+└── return sigma_X + S_rn common cache
+
+prepare_sampling_phase_common(...)
+└── for each aggressor
+    ├── select phase from the full oversampled response
+    ├── retain the full one-sample/UI eq-channel response
+    ├── apply B-005 only before PSD conversion
+    └── add the PSD to the uncorrelated crosstalk sum
 ```
 
-The aggressor phase selection is independent of the victim `pos` loop in the current implementation.
+The aggressor phase selection is independent of the victim `pos` loop. It is
+owned by Stage 3 preparation and cannot be changed by B-005 truncation.
 
 The common `COMPSDStatus` populates:
 
@@ -124,8 +193,10 @@ calculate_pre_dte_imp_at_pos(...)
 ├── resolve ADC-input PMF runtime config
 ├── sample victim pulse at pos -> h_dsamp
 ├── enforce positive dominant main cursor
-├── _build_psd_tx_noise(...) -> S_tn, h_tn
-├── _build_psd_tx_jitter(...) -> S_jn, h_J
+├── _calculate_tx_noise_eq_ch(...) -> full h_tn
+├── _build_eq_ch_imp_psd(h_tn, ...) -> S_tn
+├── _calculate_tx_jitter_eq_ch(...) -> full h_J
+├── _build_eq_ch_imp_psd(h_J, ...) -> S_jn
 ├── build PAM input PMF
 ├── combine full-jitter non-quantization PSD components -> S_ga
 ├── select clipping-only Gaussian PSD and CDF tail by fixed policy
@@ -198,7 +269,7 @@ The stage rejects or propagates errors for these conditions:
 - victim sampling produces an empty sequence;
 - the sampled victim response does not have the required positive dominant cursor;
 - jitter finite difference has no valid interior samples;
-- a sampled response exceeds the configured sampled DFT window;
+- a B-005 record cannot be realized under its declared full/truncated contract;
 - PSD grids cannot be added or filtered consistently;
 - `pre_dte_pmf_method` is unsupported;
 - enabled quantization fails to produce a clipping value;
@@ -238,8 +309,9 @@ Until these exist, this document makes no specification-accuracy or numerical-to
 
 - The implemented equations and unit conversions listed in the governing-reference table still require independent comparison with the accepted 178A reference.
 - The common method accepts an unused `victim` argument; this is an API cleanup opportunity and does not change current calculations.
-- `analysis_grid` 保留完整分析記錄；`fixed_ui` 明確採用有限 circular DFT record。
-  這是可稽核的 policy，不由 tail threshold 自動切換。Akinwale 4096-UI 分支已
+- `full` 保留完整 impairment equivalent-channel 記錄；`truncated` 明確採用
+  `num_trunc_ui` 的有限 circular DFT record。這是可稽核的 policy，不由 tail
+  threshold 自動切換。Akinwale 4096-UI 分支已
   對 SiCoPR total `R_n[0:87]` 至 `3.71e-21 V²`。
 - The pre-DTE ADC PMF policy intentionally allows approximation, so `search_sweep` and accuracy-focused profiles may produce different pre-DTE numerical paths.
 - Interference sources outside the currently represented receiver, crosstalk, TX noise, jitter, and quantization components require an explicit specification and config/status change before inclusion.

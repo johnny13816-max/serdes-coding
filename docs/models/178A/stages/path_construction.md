@@ -54,6 +54,137 @@ remaining indices        FEXT paths in workbook/config order
 
 `COM._run_once()` assigns this list to `status.paths`, selects `paths[0]` as the victim, treats `paths[1:]` as crosstalk paths, and then performs the victim time-alignment guard before entering pre-DTE processing.
 
+## COM call-tree hierarchy
+
+This is the authoritative semantic ownership hierarchy for Stage 1. It applies
+the project-wide hierarchy in the
+[documentation contract](../../../architecture/documentation_contract.md#com-call-tree-hierarchy).
+`victim`／`NEXT`／`FEXT` is structural path fan-out, not an algorithm branch.
+
+The tree distinguishes the desired ownership structure from a current-source
+mapping whenever the implementation has not yet been consolidated. It must not
+be read as claiming that a planned helper already exists.
+
+```text
+COM                                            [Root: model]
+└── _run_once()                                [L0: stage set]
+    └── build_all_paths()                      [L1: Stage 1 — Path Construction]
+        ├── _build_channel_under_test()        [L2: channel-under-test]
+        │   ├── channel representation transformation [L3: B001; evidence pending]
+        │   │   ├── from_touchstone()          [L4: measured S-parameter ingestion]
+        │   │   ├── s4p_to_s2p()               [L4: mode conversion]
+        │   │   └── renormalized()             [L4: reference-impedance conversion]
+        │   └── channel-grid alignment         [L3]
+        │       ├── limited_to_frequency()     [L4: case data boundary]
+        │       ├── align_grid()               [L4: common-grid selection]
+        │       └── resampled()                [L4: common-grid resampling]
+        ├── _build_shared_path()               [L2: shared path]
+        │   ├── shared scalar filters          [L3]
+        │   │   ├── _build_H_ffe()             [L4: victim/FEXT TX FFE]
+        │   │   ├── _build_H_ffe_next()        [L4: NEXT TX FFE]
+        │   │   ├── _build_H_t()               [L4: TX transition filter]
+        │   │   ├── _build_H_r()               [L4: RX noise filter]
+        │   │   └── _build_H_ctf()             [L4: continuous CTF]
+        │   ├── RX package construction         [L3]
+        │   │   └── _build_rxpkg()             [L4: RX package composite]
+        │   └── CTLE pulse realization          [L3: B003 owner]
+        │       ├── _prepare_ctle_pulse_realization() [L4: shared setup]
+        │       └── _realize_ctle_pulse_for_path()    [L4: per-path realization]
+        └── _build_paths()                     [L2: path-specific construction]
+            └── _build_path() × victim/NEXT/FEXT [structural path coordinator]
+                ├── TX package construction     [L3]
+                │   └── _build_txpkg()         [L4: TX package composite]
+                ├── S-parameter path cascade    [L3]
+                │   └── cascade_com()          [L4: S-parameter cascade]
+                ├── transfer extrapolation      [L3: B002]
+                │   └── to_LinkSegment()       [L4: terminated transfer + extension]
+                ├── scalar response cascade     [L3]
+                │   └── cascade_tf()           [L4: scalar transfer cascade]
+                ├── realize_ctle_pulse_for_path() [L4: delegated B003]
+                └── COMPath()                  [L4: stage-output record]
+```
+
+### B003 implementation mapping
+
+`_build_shared_path()` resolves `policy.ctle_pulse_realization` once and stores
+the resolved value plus method-specific shared state in `COMSharedPath`.
+`_build_path()` never receives or selects a realization method; it delegates
+per-path work to `_realize_ctle_pulse_for_path()`.
+
+The L3 `CTLE pulse realization` block owns one selector, shared realization
+state, and the extension contract. Its L4
+`_prepare_ctle_pulse_realization()` creates method-specific shared data once;
+its L4 `_realize_ctle_pulse_for_path()`
+accepts the path-specific `H_pre`／`S_all` context and returns the selected
+post-CTLE pulse. The lower-level `_realize_ctle_response()` remains the
+numerical primitive for the two realization formulae; it is not a configuration
+selection point. `H_all` remains the common continuous VTF for reporting and
+is outside B003 ownership.
+
+### B003 interface contract
+
+The L3 block follows the existing function-oriented stage style. One prepare
+function writes the resolved method and method-specific shared fields
+into the existing `COMSharedPath`; one realization function consumes those
+fields for every victim, NEXT, and FEXT path. No new behavior class or state
+class is required.
+
+```text
+_prepare_ctle_pulse_realization(
+    method,
+    link_cfg,
+    filter_cfg,
+) -> ctle_iir | None
+    # caller stores method and result in COMSharedPath
+
+_realize_ctle_pulse_for_path(
+    shared,
+    H_pre,
+    S_all,
+    channel_cfg,
+    filter_cfg,
+    kind,
+    X,
+    amplitude,
+    link_cfg,
+) -> LinkSegment  # stored path pulse
+```
+
+| Boundary | Inputs | Output / responsibility |
+|---|---|---|
+| L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; `bilinear_iir` creates the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
+| L4 `_realize_ctle_pulse_for_path()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; measured-domain `S_all`; channel source/load context; `kind`; already selected rectangular pulse `X` | Owns any measured-grid pre-CTLE reconstruction required by the resolved method, delegates the numerical CTLE formula to `_realize_ctle_response()`, and applies the unit pulse. Returns the stored path pulse. |
+
+The call site must not pass a selector into `_realize_ctle_pulse_for_path()`.
+Method
+selection is complete at prepare time.  A new realization method therefore
+adds only its shared preparation and per-path realization implementation under
+this L3 block.
+
+#### Non-ownership and invariants
+
+- The block does not construct TX FFE, TX/RX packages, `S_all`, `H_21`, or
+  `H_pre`; it consumes them.
+- The block does not own `H_all`. `H_all = H_pre.cascade_tf(H_ctf)` remains
+  the common continuous VTF for reporting, independent of the selected pulse
+  realization.
+- It must preserve the current numerical definitions of both existing
+  methods: continuous transfer-function cascade for `continuous_tf`, and
+  measured-grid reconstruction → raw-IFFT record → bilinear IIR → finite
+  record pulse formation for `bilinear_iir`.
+- A bilinear realization requires matching `LinkConfig.Fs`, valid measured
+  pre-CTLE data, and finite-record length not exceeding `LinkConfig.Nfft`.
+- The result for a selected method remains identical to the pre-consolidation
+  B003 path for the same fully resolved config.
+
+### Algorithm-branch placement
+
+| Branch | L3 owner | L4 execution point | Excluded from branch definition |
+|---|---|---|---|
+| B001 channel representation transformation *(pending evidence)* | channel representation transformation | ingestion/conversion/renormalization order in `_build_channel_under_test()` | frequency limit and ordinary file-read failure |
+| B002 transfer extrapolation | transfer extrapolation | `S_all.to_LinkSegment(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data |
+| B003 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
+
 ## Required input objects
 
 | Input | Fields used by this stage | Role |

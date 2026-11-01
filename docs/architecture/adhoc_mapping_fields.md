@@ -6,7 +6,8 @@ Unless stated otherwise, values are required. Runtime adapters retain responsibi
 
 178A 新模板使用 `run_config.control.execution_profile`，合法值為
 `project_standard`、`sicopr_reference_v1`、`custom`。新模板不再個別露出
-`noise_grid_num_ui` 等底層 method controls；它們由 profile 展開，**不從 Ad Hoc 映射**。舊
+`eq_ch_imp_len`／`num_trunc_ui` 等 project method controls **不從 Ad Hoc 映射**；
+其中 B-005 兩欄由 project workbook 獨立控制，其他未曝露欄位由 profile 展開。舊
 workbook 的 `fixed_config.align_to_ref` 與個別 method 欄位仍可讀取，以保持
 既有 case 的可重現性；新模板不再輸出 boolean。Reference profile 由
 `com_excel_io_178A` 在 project→runtime 邊界展開有效具名方法與 PMF 精度值；

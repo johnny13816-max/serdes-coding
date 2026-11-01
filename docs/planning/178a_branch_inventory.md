@@ -12,7 +12,7 @@
 | `out_of_measured` | 取獨立欄位；預設 `cosine_decay` | 強制 `zero_padding` | **獨立量測邊界 policy**。測到 100 GHz 或 67 GHz 是輸入事實，超出量測的處理是 utility 方法；reference mode 不可暗中改變量測截止。 |
 | `ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | **獨立 pulse-realization method**。後者固定包含 measured composite TF、reference grid、raw IFFT、`1e-3` 截尾、bilinear IIR 與 boxcar；不再拆細項控制。 |
 | `rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | **獨立 post-FFE record policy**。前者保留 overflow guard；後者重現 reference 的有限記錄 shift-sum。 |
-| MMSE noise grid | `analysis_grid`，由 `LinkConfig.sampled_nfft` 決定 | `fixed_ui`；Akinwale `noise_grid_num_ui=4096` | **獨立 noise PSD/correlation policy**。只控制 noise DFT record，不修改 channel／pulse analysis grid。來源 `num_ui_RXFF_noise` 由 converter 保留。 |
+| Eq-channel impairment length | `full`，保留完整 one-sample/UI response 供 PSD | `truncated`；Akinwale `num_trunc_ui=4096` | **獨立 B-005 policy**。Shared L3 供 Stage 2/3/5/7 使用；只在 PSD 前改 record，不修改 XT phase、channel/pulse grid 或 status 中的 full response。workbook 保留獨立控制。 |
 | pre-DTE clipping | 取獨立欄位；預設 D3 `P_qc/2`＋完整 jitter | 強制 MATLAB 4.17 `P_qc`＋RJ-only clipping；MMSE 保留完整 jitter | **可留在 reference algorithm preset**。這是已確認、僅為對照的公式差異；須保持與 final-stage 選擇在邏輯上可區分。 |
 | final ADC quantization | 取獨立欄位；預設 D3 selected-phase delta＋全部 FFE taps | 強制 MATLAB 4.17 final-PMF clipping＋略過主 tap | **可留在 reference algorithm preset**。這是另一 stage 的公式差異，不能假定與 pre-DTE 是同一條公式。 |
 | 離散 tap PMF 格點 | 線性質量分配 | 最近格點 | **可留在 reference numerical preset**；只適用離散幅度建構，不應改成 `Pmf1D` 全部操作共用的量化規則。 |

@@ -102,17 +102,43 @@ def test_178a_ctle_pulse_realization_defaults_and_rejects_unknown_method(referen
         _with_methods(reference_cfg, rxffe_record_realization="other")
 
 
-def test_178a_noise_grid_contract_and_reference_profile(reference_cfg):
-    assert reference_cfg.policy.noise_grid_method == "fixed_ui"
-    assert reference_cfg.policy.noise_grid_num_ui == 4096
+def test_178a_eq_ch_imp_length_contract_and_reference_profile(reference_cfg):
+    assert reference_cfg.policy.eq_ch_imp_len == "truncated"
+    assert reference_cfg.policy.num_trunc_ui == 4096
     model = COM(reference_cfg)
-    assert model.noise_link_cfg.sampled_nfft == 4096
-    assert model.noise_link_cfg is not reference_cfg.link
-    assert COMPolicyConfig().resolve_noise_grid(reference_cfg.link) is reference_cfg.link
-    with pytest.raises(ValueError, match="even noise_grid_num_ui"):
-        COMPolicyConfig(noise_grid_method="fixed_ui", noise_grid_num_ui=4095)
-    with pytest.raises(ValueError, match="num_ui=None"):
-        COMPolicyConfig(noise_grid_method="analysis_grid", noise_grid_num_ui=4096)
+    assert model._eq_ch_imp_record_cfg.sampled_nfft == 4096
+    assert model._eq_ch_imp_record_cfg is not reference_cfg.link
+    assert COM(replace(reference_cfg, policy=COMPolicyConfig()))._eq_ch_imp_record_cfg is reference_cfg.link
+    with pytest.raises(ValueError, match="even num_trunc_ui"):
+        COMPolicyConfig(eq_ch_imp_len="truncated", num_trunc_ui=4095)
+    with pytest.raises(ValueError, match="num_trunc_ui=None"):
+        COMPolicyConfig(eq_ch_imp_len="full", num_trunc_ui=4096)
+
+
+def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
+    response = np.arange(5000, dtype=float)
+    original = response.copy()
+
+    full_model = COM(replace(reference_cfg, policy=COMPolicyConfig()))
+    full_record = full_model._realize_eq_ch_imp_record(
+        response, source_name="test response"
+    )
+    assert full_record is response
+
+    truncated_model = COM(reference_cfg)
+    truncated_record = truncated_model._realize_eq_ch_imp_record(
+        response, source_name="test response"
+    )
+    assert truncated_record.shape == (4096,)
+    np.testing.assert_array_equal(truncated_record, response[:4096])
+    np.testing.assert_array_equal(response, original)
+
+    short = np.arange(8, dtype=float)
+    padded = truncated_model._realize_eq_ch_imp_record(
+        short, source_name="short response"
+    )
+    np.testing.assert_array_equal(padded[:8], short)
+    np.testing.assert_array_equal(padded[8:], 0.0)
 
 
 def test_178a_renormalization_policy_changes_only_channel_and_downstream(reference_cfg):
@@ -142,8 +168,9 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     paths = COM(reference_cfg).build_all_paths()
     victim, xtalks = paths[0], paths[1:]
     model = COM(reference_cfg)
-    common, h_xt_dsamp = model.calculate_pre_dte_imp_common(
-        victim, [path.pulse.ir for path in xtalks]
+    common = model.calculate_pre_dte_imp_common(victim)
+    common, h_xt_dsamp = model.prepare_sampling_phase_common(
+        common, [path.pulse.ir for path in xtalks]
     )
     run_cfg = replace(
         reference_cfg.execution.single_run,
@@ -151,10 +178,10 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
         pmf_dy_override=1e-5,
         pmf_keep_mass=1.0,
     )
-    reference = model.calculate_pre_dte_imp_at_pos(
+    reference_eq, reference = model.calculate_pre_dte_imp_at_pos(
         victim, 23, common, h_xt_dsamp, run_cfg
     )
-    annex = COM(annex_cfg).calculate_pre_dte_imp_at_pos(
+    annex_eq, annex = COM(annex_cfg).calculate_pre_dte_imp_at_pos(
         victim, 23, common, h_xt_dsamp, run_cfg
     )
 
@@ -166,7 +193,7 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     if pmf_method == "pmf_exact":
         assert reference.pre_dte.adc_input.p_n is reference.pre_dte.adc_input.p_ga
         assert annex.pre_dte.adc_input.p_n is annex.pre_dte.adc_input.p_ga
-    np.testing.assert_array_equal(reference.eq_ch.h_dsamp.ir, annex.eq_ch.h_dsamp.ir)
+    np.testing.assert_array_equal(reference_eq.h_dsamp.ir, annex_eq.h_dsamp.ir)
     for name in ("S_rn", "S_xn", "S_tn", "S_jn"):
         np.testing.assert_array_equal(getattr(ref_psd, name).psd, getattr(annex_psd, name).psd)
     np.testing.assert_allclose(
@@ -230,8 +257,8 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.final_adc_quantization_convention == "matlab_4_17_reference_only"
     assert policy.ctle_pulse_realization == "bilinear_iir"
     assert policy.rxffe_record_realization == "finite_record_circshift"
-    assert policy.noise_grid_method == "fixed_ui"
-    assert policy.noise_grid_num_ui == 4096
+    assert policy.eq_ch_imp_len == "truncated"
+    assert policy.num_trunc_ui == 4096
     assert policy.discrete_pmf_placement == "nearest"
     assert policy.interference_pmf_method == "pam_atoms"
     assert policy.gaussian_pmf_method == "reference_sample"
@@ -308,7 +335,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert direct.execution == aligned.execution
 
 
-def test_178a_new_template_exposes_only_the_versioned_execution_profile():
+def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     root = Path(__file__).resolve().parents[1]
     template = root / "cases" / "_templates" / "178A" / "config.xlsx"
     book = openpyxl.load_workbook(template, read_only=True, data_only=True)
@@ -320,6 +347,8 @@ def test_178a_new_template_exposes_only_the_versioned_execution_profile():
         if len(row) > 2
     }
     assert run_rows[("control", "execution_profile")] == "project_standard"
+    assert "eq_ch_imp_len" in fields
+    assert "num_trunc_ui" in fields
     assert "noise_grid_num_ui" not in fields
     for old_field in (
         "out_of_measured", "channel_renormalization_order",

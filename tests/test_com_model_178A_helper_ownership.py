@@ -28,7 +28,7 @@ def test_178a_owns_crosstalk_worst_phase_search() -> None:
         [0.1, -0.2, 0.7, 0.3, -0.4, 0.05, 0.2, -0.1, 0.6, 0.4, -0.3, 0.02]
     )
 
-    phase, sampled = model._find_pos_xtalk(response, 4)
+    phase, sampled = model._select_xtalk_path_phase(response, 4)
 
     assert phase == 2
     np.testing.assert_array_equal(sampled, np.array([0.7, 0.2, -0.3]))

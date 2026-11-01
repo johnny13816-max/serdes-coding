@@ -174,7 +174,8 @@ def _resolve_project_profile_178A(
     dict[str, object],
 ]:
     """Expand a named workbook execution profile into typed runtime settings."""
-    configured_noise_ui = _fixed_optional_int(fixed, "noise_grid_num_ui")
+    configured_eq_ch_imp_len = str(fixed.get("eq_ch_imp_len", "full")).strip()
+    configured_num_trunc_ui = _fixed_optional_int(fixed, "num_trunc_ui")
     general_methods = COMPolicyConfig(
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
         channel_renormalization_order=str(
@@ -192,15 +193,24 @@ def _resolve_project_profile_178A(
         # validated reference realization.
         ctle_pulse_realization="continuous_tf",
         rxffe_record_realization="linear_convolution",
-        noise_grid_method="fixed_ui" if configured_noise_ui is not None else "analysis_grid",
-        noise_grid_num_ui=configured_noise_ui,
+        eq_ch_imp_len=configured_eq_ch_imp_len,
+        num_trunc_ui=configured_num_trunc_ui,
     )
     if execution_profile == "project_standard":
-        return COMPolicyConfig(), execution, execution_profile, {}
+        return general_methods, execution, execution_profile, {}
     if execution_profile == "custom":
         return general_methods, execution, execution_profile, {}
     if execution_profile != "sicopr_reference_v1":
         raise ValueError(f"Unsupported 178A execution_profile: {execution_profile!r}.")
+
+    if "eq_ch_imp_len" in fixed and configured_eq_ch_imp_len != "truncated":
+        raise ValueError(
+            "sicopr_reference_v1 requires fixed_config.eq_ch_imp_len='truncated'."
+        )
+    if configured_num_trunc_ui is not None and configured_num_trunc_ui != 4096:
+        raise ValueError(
+            "sicopr_reference_v1 requires fixed_config.num_trunc_ui=4096."
+        )
 
     profile_name = execution_profile
 
@@ -218,8 +228,8 @@ def _resolve_project_profile_178A(
         final_adc_quantization_convention="matlab_4_17_reference_only",
         ctle_pulse_realization="bilinear_iir",
         rxffe_record_realization="finite_record_circshift",
-        noise_grid_method="fixed_ui",
-        noise_grid_num_ui=configured_noise_ui or 4096,
+        eq_ch_imp_len="truncated",
+        num_trunc_ui=4096,
         discrete_pmf_placement="nearest",
         interference_pmf_method="pam_atoms",
         xtalk_pmf_accumulation="pathwise_convolution",
@@ -318,7 +328,8 @@ def _read_project_execution_profile(
         "channel_renormalization_order",
         "pre_dte_adc_clipping_convention",
         "final_adc_quantization_convention",
-        "noise_grid_num_ui",
+        "eq_ch_imp_len",
+        "num_trunc_ui",
     }
     if any(name in fixed for name in legacy_method_fields):
         return "custom"

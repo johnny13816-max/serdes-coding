@@ -39,8 +39,8 @@ RUN_MODE
 有效 execution profile。`COM._effective_run_cfg()` 只回傳已解析的 profile；
 model 不判斷 selector。有效方法、profile 名稱及 raw/effective override
 隨 config snapshot 輸出。
-`COM.__init__()` 另由 `COMPolicyConfig` 建立共享 MMSE noise grid；它不改動
-channel／pulse 使用的 `COMConfig.link`。
+`COM.__init__()` 另依 `COMPolicyConfig.eq_ch_imp_len` 建立共享 B-005
+impairment-record context；它不改動 channel／pulse 使用的 `COMConfig.link`。
 
 ## Manual file entry
 
@@ -94,24 +94,31 @@ COM._run_once(run_cfg)
 │                   ├── _reference_fd_to_td_record(...)
 │                   ├── _realize_ctle_response(...)
 │                   └── _apply_rectangular_unit_pulse(...)
-├── calculate_pre_dte_imp_common(victim, xtalk pulses)
-│   ├── build all common PSDs on the resolved noise grid
-│   └── return run-local common PSD/cache data
+├── Stage 2: calculate_pre_dte_imp_common(victim)
+│   ├── build receiver-noise PSD on the shared B-005 record
+│   └── return sigma_X + S_rn run-local cache
 ├── initialize COMRunStatus
-├── choose initial phase indices
-├── evaluate each requested phase
-│   └── calculate_pos_candidate(...)
-│       ├── calculate_pre_dte_imp_at_pos(...)
-│       └── calculate_MMSE_DTE(...)
-│           └── COM_MMSE_DTE(...).run(...)
-├── optionally choose and evaluate fine phase indices
-├── select minimum-MSE valid phase
-├── assign selected DTE and pre-DTE impairment status
+├── Stage 3: sampling-phase evaluation
+│   ├── prepare_sampling_phase_common(...)
+│   │   ├── select each XT path phase from the full oversampled response
+│   │   ├── emit full one-sample/UI eq_ch_XT records
+│   │   └── build S_xn through shared B-005 L3
+│   ├── choose initial phase indices
+│   ├── evaluate each requested phase
+│   │   └── calculate_pos_candidate(...)
+│   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
+│   │       └── Stage 4: calculate_MMSE_DTE(...)
+│   │           ├── COM_MMSE_DTE(...).run(...)
+│   │           └── build H_rxffe from selected w_lim representation
+│   ├── optionally choose and evaluate fine phase indices
+│   ├── retain the current minimum-MSE complete candidate bundle
+│   └── _assign_selected_phase(eq_ch, imp, dte) once
 └── branch by run_cfg.target
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
-    │   ├── calculate_post_ffe_imp(...)
+    │   ├── Stage 5: calculate_post_ffe_imp(...), reusing shared B-005 L3
+    │   ├── _assign_post_ffe(...) once
     │   │   └── _apply_rxffe_response(...) using resolved record realization
     │   ├── calculate_COM_DFE(...)
     │   └── return DFE COM status
@@ -126,6 +133,9 @@ COM._run_once(run_cfg)
         ├── calculate_COM_MLSD() when cfg.mlsd.enable is true
         └── return requested completed status
 ```
+
+Stage 7 建立 MLSD `S_isi` 時也以 full `h_ISI` 呼叫 shared B-005 L3；
+status 中的 `h_ISI` 不先截短。
 
 A `COMMainCursorError` rejects only that phase in the sampling loop. Other exceptions leave `_run_once()` and preserve any status already assigned, as described in the status lifecycle.
 

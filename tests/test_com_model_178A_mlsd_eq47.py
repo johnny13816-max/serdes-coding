@@ -14,6 +14,9 @@ from serdes_coding.models.com_model_178A import (
     COMDTEStatus,
     COMImpairmentStatus,
     COMImpStageStatus,
+    COMEqChannelStatus,
+    COMPostFFEEqChannelStatus,
+    COMPreDTEEqChannelStatus,
     COMMLSDConfig,
     COMPolicyConfig,
     COMMLSDNoiseStatus,
@@ -78,7 +81,12 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                     DER_0=1e-6,
                     L=4,
                 )
-                model.status = COMStatus(imp=imp, dte=dte, pmf=pmf)
+                eq_ch = COMEqChannelStatus(
+                    phase_index=0,
+                    pre_dte=COMPreDTEEqChannelStatus(),
+                    post_ffe=COMPostFFEEqChannelStatus(),
+                )
+                model.status = COMStatus(eq_ch=eq_ch, imp=imp, dte=dte, pmf=pmf)
 
                 with (
                     patch(
@@ -97,7 +105,7 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                 ):
                     result = model.calculate_COM_MLSD()
 
-                build_noise.assert_called_once_with(imp, added_noise)
+                build_noise.assert_called_once_with(imp, eq_ch, dte, added_noise)
                 solve_der.assert_called_once_with(
                     p_an,
                     noise.R_ni,

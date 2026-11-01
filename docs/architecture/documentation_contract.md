@@ -53,6 +53,46 @@ A raw Python call graph is not an architecture document. Calls to validation,
 array conversion, plotting helpers, NumPy, SciPy, and trivial accessors are
 omitted unless they change data ownership or mathematical behavior.
 
+## COM call-tree hierarchy
+
+For a COM model, the authoritative stage documents record the semantic call
+tree using the following fixed vocabulary.  This hierarchy describes runtime
+responsibility; it does not replace the separate configuration, status, or
+mathematical contracts.
+
+| Level | Name | Contract |
+|---|---|---|
+| Root | `COM` model | One model execution instance. Owns model config, root status lifecycle, and cross-stage lifetime. |
+| L0 | Stage set | Defines the ordered stages for one run, their data handoffs, and target-dependent completion. It does not own each stage's domain algorithm. |
+| L1 | Stage | One recognizable COM domain step with an explicit input, output, and status-ownership boundary. |
+| L2 | Function set | A cooperating set within one stage that constructs one class of intermediate data or model objects. |
+| L3 | Functional block | A domain-meaningful unit inside an L2 function set. It may own a branch behavior, its shared state, and its input/output contract. |
+| L4 | Function | The smallest callable model construction, transformation, or numerical operation shown in the COM call tree. |
+
+For a call that crosses into a generic utility or third-party implementation,
+the L4 call is the leaf of the COM call tree unless that utility changes COM
+data ownership or mathematical behavior.  Validation guards, simple data
+presence conditions, error paths, array conversion, and trivial accessors are
+not algorithm branches and are normally omitted from this hierarchy.
+
+## COM method and auxiliary-function ownership
+
+Call-tree level does not by itself decide whether a callable belongs to the
+`COM` class. Use the following ownership rule:
+
+- make it a `COM` method when it reads resolved model/run configuration,
+  accesses run-owned state, coordinates stages, commits status, or enforces a
+  cross-stage invariant;
+- make it a module-level auxiliary function when it is pure numerical work
+  whose complete behavior is determined by explicit arguments and return
+  values;
+- when both concerns exist, keep a thin `COM` method as the policy/ownership
+  boundary and delegate the pure numerical transform to an auxiliary function.
+
+Branch selection and shared branch state remain visible at the owning L3
+boundary. Moving numerical mechanics outside the class must not hide or
+duplicate the branch decision.
+
 ## Required model documents
 
 Each supported COM version owns:
@@ -86,6 +126,14 @@ Every model stage document records:
 - downstream consumers and reports;
 - validation evidence and numerical tolerance;
 - known limitations or unresolved questions.
+
+Every model stage document also records a **COM call-tree hierarchy**. It must
+show the owning L1 stage entry, its L2 function sets, L3 functional blocks,
+and material L4 functions in execution order. The tree marks structural
+fan-out separately from algorithm branches. Algorithm branches name their L3
+functional-block owner and their L4 execution point; path kind, guards, error handling, and input
+presence do not become algorithm branches merely because they select control
+flow.
 
 The stage contract is authoritative even when private helper functions are
 refactored.
@@ -150,6 +198,11 @@ behavior.
 
 Governance rules follow the same single-owner principle. Update links and summaries in index files, but keep the
 normative wording in one owning document. Periodically remove superseded, duplicated and stale material.
+
+Method-choice classification is governed by the
+[Branch behavior contract](branch_behavior_contract.md).  A stage document
+records the call-tree owner and implementation point; the version registry
+records the selector, legal behaviors, and validation evidence.
 
 At active-item closure, apply the lifecycle in `project_workflow.md`: promote durable content, reconcile trackers,
 dispose of the temp contract, then slim HANDOFF and NOTES. Protected contracts or ADR-like decisions may remain only

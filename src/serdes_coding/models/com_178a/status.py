@@ -25,6 +25,7 @@ class COMSharedPath(COMDataclassText):
     H_r: Any
     H_ctf: Any
     ctle_iir: Optional[Any] = None
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -36,6 +37,7 @@ class COMSharedPath(COMDataclassText):
                 self._field("H_r", "receiver noise filter", stored_unit="dimensionless", summary="shape"),
                 self._field("H_ctf", "CTLE response", stored_unit="dimensionless", summary="shape"),
                 self._field("ctle_iir", "bilinear CTLE realization", stored_unit="status"),
+                self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
             )),
         )
 
@@ -363,24 +365,13 @@ class COMMLSDStatus(COMDataclassText):
         )
 
 @dataclass(repr=False)
-class COMEqChannelStatus(COMDataclassText):
-    """
-    178A equivalent-channel status.
+class COMPreDTEEqChannelStatus(COMDataclassText):
+    """Selected sampling phase's equivalent responses before RX FFE."""
 
-    Contract: only sampled response / equivalent-channel sequences named h_xx
-    are stored here. PSD objects and scalar sigma values belong to COMPSDStatus.
-    """
-    # pre-dte
     h_dsamp: Optional[SampledResponse] = None
     h_tn: Optional[SampledResponse] = None
     h_J: Optional[SampledResponse] = None
     h_XTs_dsamp: Optional[list[SampledResponse]] = None
-
-    # post-ffe
-    h_ISI: Optional[SampledResponse] = None
-    h_w_J: Optional[SampledResponse] = None
-    h_w: Optional[SampledResponse] = None
-    h_XTs_w: Optional[list[SampledResponse]] = None
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -390,6 +381,23 @@ class COMEqChannelStatus(COMDataclassText):
                 self._field("h_J", "jitter response", stored_unit="V/UI"),
                 self._field("h_XTs_dsamp", "sampled crosstalk responses", stored_unit="V", summary="count"),
             )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("h_dsamp", "sampled victim response", stored_unit="V"),)
+
+
+@dataclass(repr=False)
+class COMPostFFEEqChannelStatus(COMDataclassText):
+    """Selected sampling phase's equivalent responses after RX FFE."""
+
+    h_ISI: Optional[SampledResponse] = None
+    h_w_J: Optional[SampledResponse] = None
+    h_w: Optional[SampledResponse] = None
+    h_XTs_w: Optional[list[SampledResponse]] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
             TextSection("Post-FFE responses", (
                 self._field("h_ISI", "ISI response", stored_unit="V"),
                 self._field("h_w_J", "equalized jitter response", stored_unit="V/UI"),
@@ -399,10 +407,66 @@ class COMEqChannelStatus(COMDataclassText):
         )
 
     def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("h_w", "equalized victim response", stored_unit="V"),)
+
+
+@dataclass(repr=False)
+class COMEqChannelStatus(COMDataclassText):
+    """Equivalent-channel lifecycle for one selected sampling phase."""
+
+    phase_index: int
+    pre_dte: COMPreDTEEqChannelStatus
+    post_ffe: Optional[COMPostFFEEqChannelStatus] = None
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
         return (
-            self._field("h_dsamp", "sampled victim response", stored_unit="V"),
-            self._field("h_w", "equalized victim response", stored_unit="V"),
+            TextSection("Selected phase", (
+                self._field("phase_index", "sampling phase", stored_unit="sample index"),
+            )),
+            TextSection("Equivalent-channel lifecycle", (
+                self._field("pre_dte", "pre-DTE responses", stored_unit="status", summary="stage"),
+                self._field("post_ffe", "post-FFE responses", stored_unit="status", summary="stage"),
+            )),
         )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field("phase_index", "sampling phase", stored_unit="sample index"),
+            self._field("pre_dte", "pre-DTE responses", stored_unit="status", summary="stage"),
+            self._field("post_ffe", "post-FFE responses", stored_unit="status", summary="stage"),
+        )
+
+    @property
+    def h_dsamp(self) -> Optional[SampledResponse]:
+        return self.pre_dte.h_dsamp
+
+    @property
+    def h_tn(self) -> Optional[SampledResponse]:
+        return self.pre_dte.h_tn
+
+    @property
+    def h_J(self) -> Optional[SampledResponse]:
+        return self.pre_dte.h_J
+
+    @property
+    def h_XTs_dsamp(self) -> Optional[list[SampledResponse]]:
+        return self.pre_dte.h_XTs_dsamp
+
+    @property
+    def h_ISI(self) -> Optional[SampledResponse]:
+        return None if self.post_ffe is None else self.post_ffe.h_ISI
+
+    @property
+    def h_w_J(self) -> Optional[SampledResponse]:
+        return None if self.post_ffe is None else self.post_ffe.h_w_J
+
+    @property
+    def h_w(self) -> Optional[SampledResponse]:
+        return None if self.post_ffe is None else self.post_ffe.h_w
+
+    @property
+    def h_XTs_w(self) -> Optional[list[SampledResponse]]:
+        return None if self.post_ffe is None else self.post_ffe.h_XTs_w
 
 @dataclass(repr=False)
 class COMAdcInputPMF(COMDataclassText):
@@ -481,16 +545,12 @@ class COMImpairmentStatus(COMDataclassText):
     """
     pre_dte: Optional[COMImpStageStatus] = None
     post_ffe: Optional[COMImpStageStatus] = None
-    eq_ch: Optional[COMEqChannelStatus] = None
-    H_rxffe: Optional[SampledResponse] = None
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Stage lifecycle", (
                 self._field("pre_dte", "pre-DTE impairments", stored_unit="status"),
                 self._field("post_ffe", "post-FFE impairments", stored_unit="status"),
-                self._field("eq_ch", "equivalent-channel responses", stored_unit="status"),
-                self._field("H_rxffe", "RX FFE response", stored_unit="dimensionless"),
             )),
         )
 
@@ -498,7 +558,6 @@ class COMImpairmentStatus(COMDataclassText):
         return (
             self._field("pre_dte", "pre-DTE impairments", stored_unit="status", summary="stage"),
             self._field("post_ffe", "post-FFE impairments", stored_unit="status", summary="stage"),
-            self._field("eq_ch", "equivalent-channel responses", stored_unit="status", summary="stage"),
         )
 
     def _stages(self) -> tuple[COMImpStageStatus, ...]:
@@ -516,13 +575,6 @@ class COMImpairmentStatus(COMDataclassText):
                     return value
         raise AttributeError(f"{type(self).__name__}.{name} is not available.")
 
-    def _eq_attr(self, name: str) -> Any:
-        if self.eq_ch is not None:
-            value = getattr(self.eq_ch, name, None)
-            if value is not None:
-                return value
-        raise AttributeError(f"{type(self).__name__}.{name} is not available.")
-
     @property
     def adc_input_pmf(self) -> COMAdcInputPMF:
         """Compatibility proxy; final DFE data takes precedence over pre-DTE data."""
@@ -530,13 +582,6 @@ class COMImpairmentStatus(COMDataclassText):
             if stage.adc_input is not None:
                 return stage.adc_input
         raise AttributeError(f"{type(self).__name__}.adc_input_pmf is not available.")
-
-    @property
-    def w_lim(self) -> SampledResponse:
-        """Post-FFE sampled response proxy for the limited receiver FFE."""
-        if self.H_rxffe is None:
-            raise AttributeError(f"{type(self).__name__}.H_rxffe is not available.")
-        return self.H_rxffe
 
     @property
     def sigma_X(self) -> float:
@@ -629,38 +674,6 @@ class COMImpairmentStatus(COMDataclassText):
     def sigma_ISI(self) -> float:
         return self._psd_attr("sigma_ISI")
 
-    @property
-    def h_dsamp(self) -> SampledResponse:
-        return self._eq_attr("h_dsamp")
-
-    @property
-    def h_tn(self) -> SampledResponse:
-        return self._eq_attr("h_tn")
-
-    @property
-    def h_J(self) -> SampledResponse:
-        return self._eq_attr("h_J")
-
-    @property
-    def h_XTs_dsamp(self) -> list[SampledResponse]:
-        return self._eq_attr("h_XTs_dsamp")
-
-    @property
-    def h_w(self) -> SampledResponse:
-        return self._eq_attr("h_w")
-
-    @property
-    def h_XTs_w(self) -> list[SampledResponse]:
-        return self._eq_attr("h_XTs_w")
-
-    @property
-    def h_ISI(self) -> SampledResponse:
-        return self._eq_attr("h_ISI")
-
-    @property
-    def h_w_J(self) -> SampledResponse:
-        return self._eq_attr("h_w_J")
-
 @dataclass(repr=False)
 class COMDTEStatus(COMDataclassText):
     """
@@ -682,6 +695,7 @@ class COMDTEStatus(COMDataclassText):
     # without limter results
     w: np.ndarray                  # unit: dimensionless, raw zero-filled unlimited FFE taps, shape (N_max,)
     b: np.ndarray
+    H_rxffe: Optional[SampledResponse] = None
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -695,6 +709,7 @@ class COMDTEStatus(COMDataclassText):
                 self._field("w_lim", "FFE coefficients", stored_unit="dimensionless"),
                 self._field("b_lim", "DFE coefficients", stored_unit="dimensionless"),
                 self._field("pruned_index", "selected FFE indices", stored_unit="tap index"),
+                self._field("H_rxffe", "RX FFE response", stored_unit="dimensionless"),
             )),
             TextSection("Unlimited solution", (
                 self._field("w", "unlimited FFE coefficients", stored_unit="dimensionless"),
@@ -755,9 +770,10 @@ class COMRunStatus(COMDataclassText):
 
 @dataclass(repr=False)
 class COMStatus(COMDataclassText):
-    """Standalone 178A COM status in stage-execution order."""
+    """Standalone 178A status grouped by model-object ownership."""
     paths: list[COMPath] = field(default_factory=list)
     run: Optional[COMRunStatus] = None
+    eq_ch: Optional[COMEqChannelStatus] = None
     dte: Optional[COMDTEStatus] = None
     imp: Optional[COMImpairmentStatus] = None
     pmf: Optional[COMPMFStatus] = None
@@ -784,6 +800,7 @@ class COMStatus(COMDataclassText):
             TextSection("Pipeline state", (
                 self._field("paths", "channel paths", stored_unit="path count", summary="count"),
                 self._field("run", "run records", stored_unit="status", summary="stage"),
+                self._field("eq_ch", "equivalent-channel lifecycle", stored_unit="status", summary="stage"),
                 self._field("dte", "DTE stage", stored_unit="status", summary="stage"),
                 self._field("imp", "impairment stage", stored_unit="status", summary="stage"),
                 self._field("pmf", "PMF stage", stored_unit="status", summary="stage"),

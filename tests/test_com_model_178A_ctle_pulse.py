@@ -6,13 +6,14 @@ from scipy.signal import freqz, lfilter
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import (
+    COM,
     COMBilinearCTLE,
     IEEECOMFilter,
     _apply_fir_finite_record,
     _build_channel_under_test,
     _apply_rectangular_unit_pulse,
     _build_paths,
-    _build_psd_tx_noise,
+    _calculate_tx_noise_eq_ch,
     _build_shared_path,
     _reference_fd_to_td_record,
     _realize_ctle_response,
@@ -158,11 +159,15 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
     )
     continuous_shared = _build_shared_path(continuous_cfg, channels[0].freqs)
     bilinear_shared = _build_shared_path(bilinear_cfg, channels[0].freqs)
+    assert continuous_shared.ctle_pulse_realization == "continuous_tf"
+    assert bilinear_shared.ctle_pulse_realization == "bilinear_iir"
     assert continuous_shared.ctle_iir is None
     assert isinstance(bilinear_shared.ctle_iir, COMBilinearCTLE)
     continuous = _build_paths(continuous_cfg, continuous_shared, channels)
     bilinear = _build_paths(bilinear_cfg, bilinear_shared, channels)
     assert len(continuous) == len(bilinear) == 6
+    assert all(path.shared.ctle_pulse_realization == "continuous_tf" for path in continuous)
+    assert all(path.shared.ctle_pulse_realization == "bilinear_iir" for path in bilinear)
     assert all(path.shared.ctle_iir is bilinear_shared.ctle_iir for path in bilinear)
 
     for lhs, rhs in zip(continuous, bilinear):
@@ -174,11 +179,17 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
         assert np.max(np.abs(lhs.pulse.ir - rhs.pulse.ir)) > 0.0
 
     pos = int(np.argmax(bilinear[0].pulse.ir)) % cfg.link.per_ui
-    S_cont, h_cont = _build_psd_tx_noise(
+    h_cont, variance_cont = _calculate_tx_noise_eq_ch(
         continuous[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos, "continuous_tf"
     )
-    S_bilin, h_bilin = _build_psd_tx_noise(
+    h_bilin, variance_bilin = _calculate_tx_noise_eq_ch(
         bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos, "bilinear_iir"
+    )
+    S_cont = COM(continuous_cfg)._build_eq_ch_imp_psd(
+        h_cont, variance_cont, source_name="continuous TX-noise eq-channel"
+    )
+    S_bilin = COM(bilinear_cfg)._build_eq_ch_imp_psd(
+        h_bilin, variance_bilin, source_name="bilinear TX-noise eq-channel"
     )
     assert np.max(np.abs(h_cont - h_bilin)) > 0.0
     assert np.max(np.abs(S_cont.psd - S_bilin.psd)) > 0.0
