@@ -38,14 +38,16 @@ and in the [branch registry](../branch_behavior_registry.md).
 | Stage | Layered call tree | Closed decisions | Pending / next |
 |---|---|---|---|
 | 1 Path construction | Recorded | B-002, B-003 | B-001 external evidence; B-020 classification |
-| 2 Pre-DTE impairment | Recorded | B-005 shared-L3 ownership and config exposure | **B-006 next**; B-008, B-009, B-010, B-014, E-002, E-003/E-004 |
+| 2 Pre-DTE impairment | Recorded | B-005 shared-L3 ownership and config exposure | B-006 **pending**（疑似 D3p2 差異，待規範證據）；B-008, B-009, B-010, B-014, E-002, E-003/E-004 |
 | 3 Sampling-phase evaluation | Recorded | Stage boundary; B-005 XT-phase separation | Remaining Stage 3 candidates after Stage 2 review |
 | 4 MMSE DTE | Recorded | None under current CP-BR pass | Branch review not started |
 | 5 Post-FFE impairment | Recorded | B-005 shared-L3 consumer | B-004 formal review deferred until Stage 5 |
+| 6 DFE COM | Recorded | — | **B-007 next**；B-011, B-012, B-013, B-015 |
 | 6 DFE COM | Recorded | None under current CP-BR pass | Branch review not started |
 | 7 MLSD COM | Recorded | B-005 `S_isi` shared-L3 consumer | Branch review not started |
 
 B-005 closed on 2026-11-01 after implementation, documentation/workbook
 sync, unchanged SiCoPR golden COM values, branch isolation tests, and full
-non-GUI regression. The next active review item is B-006; no B-006 code change
-is authorized until its behavior and config exposure are accepted.
+non-GUI regression. B-006 is pending for D3p2 evidence. The next active review
+item is B-007; no B-006/B-007 code change is authorized until the applicable
+behavior and config exposure are accepted.

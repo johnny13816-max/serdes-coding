@@ -21,7 +21,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage branch review | **Approved / B-006 discussion** | 每個 stage 先列 L0–L4 call tree；branch 決策、code、文件與 validation 同步；pending 不修改 | 說明 B-006 現況、選項、project-config exposure，取得使用者決策 |
+| CP-BR — 178A stage-by-stage branch review | **Approved / B-007 discussion** | 每個 stage 先列 L0–L4 call tree；branch 決策、code、文件與 validation 同步；pending 不修改 | B-006 因疑似 D3p2 差異暫列 pending；審查 B-007 final COM ADC quantization |
 | B-005 — Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |

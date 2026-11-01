@@ -8,17 +8,17 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-01 Asia/Taipei
 Source branch: main
-Source revision: HEAD 7902cc8 plus CP-BR closure commit
-Active task: CP-BR B-006 pre-DTE ADC clipping convention review
-Current phase: B-005 closed; B-006 discussion only
+Source revision: 1b97834
+Active task: CP-BR B-007 final COM ADC quantization review
+Current phase: B-005 closed; B-006 pending for D3p2 evidence; B-007 discussion only
 Collaboration mode: Co-Build branch review
-Approved boundary: explain and decide B-006 behavior, ownership, config exposure and validation; no B-006 code change before decision
+Approved boundary: explain and decide B-007 behavior, ownership, config exposure and validation; no B-006/B-007 code change before decision
 Completed: B-002, B-003, Stage 2/3 boundary, B-005 implementation and closure
-In progress: B-006 behavior review
+In progress: B-007 behavior review
 Blocked: none
-Next recommended action: compare annex_d3 and matlab_4_17_reference_only clipping inputs and decide whether both remain independently exposed
+Next recommended action: compare B-007 Annex D3 final quantization with the MATLAB 4.17 reference-only reconstruction and decide its ownership and config exposure
 Next action owner: Agent explains; user decides
-Stop point: do not enter B-007/B-008 or modify B-006 until the user accepts its formal change contract
+Stop point: do not enter B-008 or modify B-006/B-007 until the user accepts the applicable formal change contract
 Evidence links: docs/models/178A/stages/README.md; docs/models/178A/stages/pre_dte.md;
                 docs/models/178A/branch_behavior_registry.md; docs/planning/tc022_mmse_noise_grid.md
 Dirty-state summary: existing reference_data deletions/additions and results/ untouched; do not mix into commits

@@ -96,7 +96,7 @@ cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 
 | Candidate | L3 owner | L4 decision point | Status for this stage |
 |---|---|---|---|
-| B006 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending.** Selects Annex D3 versus reference-only clipping inputs; it does not change the full-jitter MMSE covariance. |
+| B006 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending for specification evidence.** 疑似源於 D3p2 差異；在取得可核對文件前保留現況且不修改。它不改變 full-jitter MMSE covariance。 |
 | B008 discrete-PMF placement | ADC-input / quantization | `_build_pmf_pam_L()` | **Pending.** The `linear` / `nearest` placement changes the base PAM mass representation used by both ADC methods. |
 | B009 interference-PMF representation | ADC-input / quantization | `_calculate_V_qc()` → `_build_pmf_interference_178A()` | **Pending, conditional.** Used only by the `pmf_exact` path. |
 | B010 Gaussian-PMF creation | ADC-input / quantization | `_calculate_V_qc()` → `Pmf1D.gaussian()` | **Pending, conditional.** Used only by the `pmf_exact` path; it is distinct from the Gaussian approximation selected by E002. |
