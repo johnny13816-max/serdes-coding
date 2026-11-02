@@ -1050,6 +1050,75 @@ def _build_pmf_G(
     )
 
 
+def _final_adc_clip_reference_only(
+    imp_status: COMImpairmentStatus,
+    eq_ch: COMEqChannelStatus,
+    L: int,
+    pmf_cfg: COMPMFRuntimeConfig,
+    main_gain: float,
+    A_DD: float,
+    P_qc: float,
+    *,
+    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+) -> tuple[float, COMPMFRuntimeConfig, Pmf1D]:
+    """MATLAB 4.17 comparison boundary: pre-FFE signal plus normalized final noise.
+
+    This is deliberately separate from the Annex D3 post-FFE ADC-input PMF.
+    SiCoPR's final quantizer convolves the pre-FFE victim signal with the
+    post-FFE ISI/XT/DD/Gaussian noise expressed back at the ADC input, then
+    locates the one-sided ``P_qc`` CDF point.
+    """
+    if not np.isfinite(main_gain) or main_gain <= 0.0:
+        raise ValueError("Reference final ADC clipping requires positive RX FFE main gain.")
+    # The final PMF uses the post-FFE voltage grid. Refer it back to the ADC
+    # input together with the post-FFE responses; otherwise a 59x FFE gain
+    # silently makes the clipping CDF grid 59x coarser than the final PDF.
+    clip_cfg = replace(
+        pmf_cfg,
+        dy=pmf_cfg.dy / main_gain,
+        tap_abs_th=pmf_cfg.tap_abs_th / main_gain,
+    )
+    p_sig = _build_pmf_pam_L(
+        L, clip_cfg, placement=pmf_methods.discrete_pmf_placement,
+    )
+    p_s = _build_pmf_interference_178A(
+        p_sig, eq_ch.h_dsamp.ir, clip_cfg, L,
+        method=pmf_methods.interference_pmf_method, name="ADC reference signal",
+    )
+    p_isi = _build_pmf_interference_178A(
+        p_sig, eq_ch.h_ISI.ir / main_gain, clip_cfg, L,
+        method=pmf_methods.interference_pmf_method, name="ADC reference ISI",
+    )
+    p_xt = _build_pmf_w_XT_all(
+        p_sig,
+        [
+            (path.ir if isinstance(path, SampledResponse) else path) / main_gain
+            for path in (eq_ch.h_XTs_w or [])
+        ],
+        clip_cfg,
+        L=L,
+        methods=pmf_methods,
+    )
+    p_dd = _build_pmf_interference_178A(
+        p_sig,
+        A_DD * eq_ch.h_w_J.ir / main_gain,
+        clip_cfg,
+        L, method=pmf_methods.interference_pmf_method, name="ADC reference Dual-Dirac",
+    )
+    p_ga = Pmf1D.gaussian(
+        mu=0.0,
+        sigma=imp_status.sigma_G / main_gain,
+        dx=clip_cfg.dy,
+        n_sigma=clip_cfg.gaussian_n_sigma,
+        unit="volt",
+        name="ADC reference Gaussian",
+        method=pmf_methods.gaussian_pmf_method,
+    )
+    p_noise = p_isi.combine(p_xt).combine(p_dd).combine(p_ga)
+    p_sn = p_s.combine(p_noise)
+    return -float(p_sn.quantile(P_qc)), clip_cfg, p_noise
+
+
 def evaluate_delta_com_an(
     g_an: float,
     post_ffe: COMImpStageStatus,
@@ -2729,11 +2798,10 @@ class COM:
             name="Dual-Dirac",
         )
 
-        # Final quantization consumes the selected-phase ADC-input delta
-        # prepared by calculate_post_ffe_imp(). Starting the convolution from
-        # a Dirac delta and applying every RX FFE tap is equivalent to the
-        # reference implementation that starts from the main-tap uniform PMF
-        # and then applies only the non-main taps.
+        # Annex D3 final quantization consumes the selected-phase ADC-input
+        # delta prepared by calculate_post_ffe_imp(). The reference-only branch
+        # below follows MATLAB 4.17's distinct final-PDF clipping boundary.
+        # Pre-DTE S_qn remains MMSE-only in both branches.
         if imp_status.post_ffe is None:
             raise RuntimeError("calculate_COM_DFE requires post-FFE impairment status.")
         adc_input_pmf = imp_status.post_ffe.adc_input
@@ -2757,21 +2825,64 @@ class COM:
                     "calculate_COM_DFE() requires COMDTEStatus.w_lim to be the "
                     f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_lim.shape}."
                 )
-            if adc_input_pmf.delta is None:
-                raise RuntimeError("Final quantization requires ADC input delta.")
-            delta = adc_input_pmf.delta
-            p_delta = Pmf1D.uniform(
-                delta, pmf_cfg_for_com,
-                method=self.cfg.policy.uniform_pmf_method,
-            )
+            if self.cfg.policy.final_adc_quantization_convention == "matlab_4_17_reference_only":
+                # MATLAB 4.17 / SiCoPR final-PDF branch: P_qc at the ADC-input
+                # CDF and quantization noise through all non-main RX FFE taps.
+                main_gain = float(w_lim[self.cfg.dte.d_w])
+                V_qc, adc_grid_cfg, p_noise_adc = _final_adc_clip_reference_only(
+                    imp_status,
+                    eq_ch,
+                    self.cfg.L,
+                    pmf_cfg_for_com,
+                    main_gain,
+                    imp_cfg.A_DD,
+                    imp_cfg.P_qc,
+                    pmf_methods=self.cfg.policy,
+                )
+                delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
+                quantization_taps = w_lim.copy()
+                quantization_taps[self.cfg.dte.d_w] = 0.0
+                # The uniform error exists at the ADC input. Project each
+                # scaled tap to the final (post-FFE) PMF grid in fir_filter.
+                p_delta = Pmf1D.uniform(
+                    delta, adc_grid_cfg,
+                    method=self.cfg.policy.uniform_pmf_method,
+                    support=(
+                        p_noise_adc
+                        if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                        else None
+                    ),
+                )
+            else:
+                # Annex 178A-44: every FFE tap contributes to final ADC
+                # quantization PMF; clipping remains at the post-FFE owner.
+                if adc_input_pmf.delta is None:
+                    raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
+                delta = adc_input_pmf.delta
+                quantization_taps = w_lim
+                p_delta = Pmf1D.uniform(
+                    delta, pmf_cfg_for_com,
+                    method=self.cfg.policy.uniform_pmf_method,
+                )
             p_qn = p_delta.fir_filter(
-                w_lim,
+                quantization_taps,
                 keep_mass = pmf_cfg_for_com.keep_mass,
                 dx_ref = pmf_cfg_for_com.dy,
-                tap_abs_th = pmf_cfg_for_com.tap_abs_th,
+                tap_abs_th = (
+                    np.nextafter(0.0, 1.0)
+                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                    else pmf_cfg_for_com.tap_abs_th
+                ),
                 max_taps = None,
                 name = "ADC_QN",
                 scaling_method=self.cfg.policy.pmf_scaling_method,
+                initial_bin_range=(
+                    (p_noise_adc.st_idx, p_noise_adc.st_idx + len(p_noise_adc.pmf) - 1)
+                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                    and self.cfg.policy.final_adc_quantization_convention
+                    == "matlab_4_17_reference_only"
+                    else None
+                ),
             )
 
         # pmf of gaussian noise

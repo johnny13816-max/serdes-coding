@@ -1,7 +1,5 @@
 # TC-019R — 178A reference preset 在 project→runtime 邊界展開
 
-> 2026-11-02 update: 本文所列 `final_adc_quantization_convention`、`final_adc_pmf_projection` 與 `_final_adc_clip_reference_only()` 已由 B-007 re-review supersede；目前 production 固定使用 Dirac seed＋全部 FFE taps。其餘 preset 決策不受影響。
-
 **Core Model Change Contract；已核准並在工作樹實作。** 本契約是已實作 TC-019 的責任邊界修訂，保留其算法選擇和數值結果；**不包含 TC-020 的 CTLE 新算法**。關聯 G-001／002／004／006／008 與使用者 2026-10-12 指定的 config 邊界。
 
 ## 結論與需要的決策

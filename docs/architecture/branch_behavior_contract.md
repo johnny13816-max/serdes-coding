@@ -141,6 +141,7 @@ classification is treated as settled:
 | E-005 `floating_mode` | execution profile | Does each value select a distinct DTE solve method and therefore require branch treatment? |
 | E-006 phase sweep | execution profile | Is it an L0 evaluation strategy rather than an in-stage model branch? |
 | `gaussian_n_sigma_override` | `COMPolicyConfig` | Is it recorded only as the support branch's parameter rather than a standalone branch? |
+| `final_adc_pmf_projection` | `COMPolicyConfig` | Is it an independent branch or a constrained sub-option of final ADC quantization? |
 | `applied_config_profile` / `config_profile_overrides` | `COMPolicyConfig` | Should provenance be structurally separate from behavior selectors? |
 
 The source inventory is [178A branch behavior registry](../models/178A/branch_behavior_registry.md).  Stage-specific ownership is documented in the corresponding files under `docs/models/178A/stages/`.

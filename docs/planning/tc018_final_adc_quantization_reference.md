@@ -1,6 +1,6 @@
 # TC-018 — 178A final quantization MATLAB 4.17 對照分支
 
-狀態：**Superseded 2026-11-02**。B-007 經重新審查判定為等價實作，不保留 runtime branch；production 固定採 Dirac seed＋all taps，reference code 只作外部對照。原 reference-only helper、selector 與附屬 projection selector已移除。以下保留為歷史診斷紀錄，不再描述目前實作。
+狀態：使用者已核准；工作樹實作、固定候選驗證通過，待隔離提交。關聯 G-006。
 
 ## 目的與來源
 

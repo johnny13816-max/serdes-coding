@@ -39,11 +39,11 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     np.testing.assert_allclose(status.dte.mse, 0.0061912610245255335, rtol=0.0, atol=1e-14)
     np.testing.assert_allclose(status.dte.b, [0.8420106292760028], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.imp.As, 0.31666666666666665, rtol=0.0, atol=1e-15)
-    np.testing.assert_allclose(status.pmf.A_ni, 0.27518333333333334, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(status.pmf.COM, 1.2196044710266705, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(status.mlsd.delta_COM, 1.3190596062773947, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(status.mlsd.COM_MLSD, 2.538664077304065, rtol=0.0, atol=1e-12)
-    np.testing.assert_allclose(status.final_COM, 2.538664077304065, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.pmf.A_ni, 0.2656833333333335, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.pmf.COM, 1.5247607834259893, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.mlsd.delta_COM, 1.3711379014472564, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.mlsd.COM_MLSD, 2.895898684873246, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.final_COM, 2.895898684873246, rtol=0.0, atol=1e-12)
 
     assert _quantized_digest(status.dte.w) == (
         "aedef2cbd02deb6cdd0868c60c8ce46fe927867fcc8a3d5429dc6802e74241f1"

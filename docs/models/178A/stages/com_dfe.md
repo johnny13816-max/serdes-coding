@@ -107,9 +107,9 @@ The stage reads `sigma_G` directly. It does not derive Gaussian noise from post-
 
 When quantization is disabled, `p_qn` is a unit-mass PMF at zero.
 
-When enabled, the stage requires the exact selected-phase ADC-input material prepared earlier. It consumes `delta`, builds a uniform quantization-error PMF, starts accumulation from a Dirac PMF, and applies the selected full zero-filled FFE vector.
+When enabled, the `annex_d3` stage requires the exact selected-phase ADC-input material prepared earlier. It consumes `delta`, builds a uniform quantization-error PMF, and applies the selected full zero-filled FFE vector (Eq. 178A-44).
 
-This is fixed behavior, not a branch. For a unit main tap, the reference loop may instead initialize the output with one uniform PMF and then convolve only the non-main tap contributions. That accumulation is algebraically identical to Dirac initialization followed by every tap. The reference implementation is comparison evidence and is not copied into a production runtime path. The bookkeeping equivalence and the later Dirac-seed cleanup are documented in the public [IEEE COM 4p7_4 contribution](https://www.ieee802.org/3/dj/public/adhoc/COM/25_0204/shakiba_3dj_COM_01a_250204.pdf).
+The separate `matlab_4_17_reference_only` policy follows the reference final-PDF calculation: it forms the clipping PMF from the pre-FFE victim signal and post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE main gain. The clipping PMF grid and tap threshold are referred back by the same gain. Its left-tail CDF target is `P_qc`; its uniform quantization error is built on that ADC-input grid, then scaled through all RX FFE taps except the main tap onto the final PDF grid. This branch is for calibration against MATLAB/SiCoPR, not a replacement for the D3.0 default. The two policies share the already selected phase, FFE/DFE, and non-quantization final PMFs.
 
 The pre-DTE quantization PSD exists to support the MMSE solve. It is not substituted for this final quantization PMF.
 
@@ -165,7 +165,6 @@ Current automated evidence is limited to `tests/test_com_model_178A_post_ffe.py`
 
 - final `p_qn` RMS agrees with the post-FFE quantization reporting PSD RMS within `rtol=5e-4`, `atol=1e-8` for one fixed case;
 - replacing all post-FFE display PSDs with zero leaves recomputed DFE COM unchanged to 12 decimal places.
-- a three-tap PMF test proves Dirac initialization plus all taps equals main-PMF initialization plus non-main taps.
 
 There is no dedicated independent golden test for each component PMF, combined PMF, `DER_0` quantile, `A_ni`, or final DFE COM.
 
