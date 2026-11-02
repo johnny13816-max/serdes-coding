@@ -286,7 +286,6 @@ POLICY_FIXED_178A={
     'out_of_measured',
     'channel_renormalization_order',
     'pre_dte_adc_clipping_convention',
-    'final_adc_quantization_convention',
     'eq_ch_imp_len',
     'num_trunc_ui',
 }

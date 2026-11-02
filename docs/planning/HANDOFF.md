@@ -8,17 +8,17 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-01 Asia/Taipei
 Source branch: main
-Source revision: 1b97834
-Active task: CP-BR B-007 final COM ADC quantization review
-Current phase: B-005 closed; B-006 pending for D3p2 evidence; B-007 discussion only
+Source revision: HEAD (B-007 closure commit)
+Active task: CP-BR B-008 discrete-amplitude PMF placement review
+Current phase: B-005/B-007 closed; B-006 pending for D3p2 evidence; B-008 discussion only
 Collaboration mode: Co-Build branch review
-Approved boundary: explain and decide B-007 behavior, ownership, config exposure and validation; no B-006/B-007 code change before decision
-Completed: B-002, B-003, Stage 2/3 boundary, B-005 implementation and closure
-In progress: B-007 behavior review
+Approved boundary: explain and decide B-008 behavior, ownership, config exposure and validation; no B-006/B-008 code change before decision
+Completed: B-002, B-003, Stage 2/3 boundary, B-005 and B-007 implementation/closure
+In progress: B-008 behavior review
 Blocked: none
-Next recommended action: compare B-007 Annex D3 final quantization with the MATLAB 4.17 reference-only reconstruction and decide its ownership and config exposure
+Next recommended action: compare B-008 linear mass placement with nearest-bin placement and decide its ownership and config exposure
 Next action owner: Agent explains; user decides
-Stop point: do not enter B-008 or modify B-006/B-007 until the user accepts the applicable formal change contract
+Stop point: do not enter B-009 or modify B-006/B-008 until the user accepts the applicable formal change contract
 Evidence links: docs/models/178A/stages/README.md; docs/models/178A/stages/pre_dte.md;
                 docs/models/178A/branch_behavior_registry.md; docs/planning/tc022_mmse_noise_grid.md
 Dirty-state summary: existing reference_data deletions/additions and results/ untouched; do not mix into commits

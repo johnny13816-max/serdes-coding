@@ -19,6 +19,6 @@
 | channel renormalization：spec-defined Sdd vs SiCoPR S4P-first | 178A `COMConfig.policy.channel_renormalization_order`；模板 `sdd_first`、SiCoPR case `s4p_first` | `SparamModel.from_network()`／`from_touchstone()` 在 S4P ingestion 邊界執行；COM 只轉送 | **[TC-016](../planning/tc016_channel_renormalization_order.md) 已實作並通過固定驗證**。`_build_path()` 不事後修改 S_ch；93A 繼續 sdd_first。 |
 | unit pulse 的 boxcar／sinc 表示 | 無正式分支 | 兩者描述相同的輸入 pulse 頻域乘積 `X(f)H(f)`，比較時需對齊時間原點 | **不建立平行算法**。既有受控比較已排除 pulse 表示法造成的實質響應差；純時間位移僅作比較座標對齊。 |
 | pre-DTE ADC clipping `P_s`／`P_n`／tail | `COMConfig.policy.pre_dte_adc_clipping_convention` | `calculate_pre_dte_imp_at_pos()` 選 clipping sigma／tail；`_calculate_V_qc()` 建 PMF；`_build_psd_adc_qn()` 建 `S_qn` | **[TC-017](../planning/tc017_pre_dte_adc_clipping_reference.md) 已實作**。D3 預設完整 jitter＋`P_qc/2`；reference-only 選 RJ＋`P_qc`，但 MMSE noise 仍保留完整 jitter。 |
-| final DFE COM ADC 量化 | `COMConfig.policy.final_adc_quantization_convention` | `calculate_COM_DFE()`／`_final_adc_clip_reference_only()` | **[TC-018](../planning/tc018_final_adc_quantization_reference.md) 已實作、驗證中**。D3 用 selected-phase delta 和全部 FFE tap；reference-only 重建 final clipping PMF 並略過主 tap。兩個 stage 的 policy 互不覆蓋。 |
+| final DFE COM ADC 量化 | 無 selector；固定行為 | `calculate_COM_DFE()` | **不是 branch**。固定使用 selected-phase `delta`，從 Dirac PMF 起始並 convolution 全部 FFE taps；reference 的 main-PMF seed＋non-main loop 是等價累積方式，只作外部比較。TC-018 已 supersede。 |
 
 `S4P-first` 與兩個 stage 各自的 ADC policy 均已提供正式選項；boxcar／sinc 不建立分支。reference-only ADC 分支供校準，不等於通用 178A 合規方法。任何後續模型改動契約均須列出設定所有者、數值所有者、逐層呼叫鏈、預期變動的中間量與禁止高層事後修改的邊界。

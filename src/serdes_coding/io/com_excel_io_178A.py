@@ -184,9 +184,6 @@ def _resolve_project_profile_178A(
         pre_dte_adc_clipping_convention=str(
             fixed.get("pre_dte_adc_clipping_convention", "annex_d3")
         ).strip(),
-        final_adc_quantization_convention=str(
-            fixed.get("final_adc_quantization_convention", "annex_d3")
-        ).strip(),
         # This branch is intentionally not exposed as an individual workbook
         # row. The general project profile uses the continuous Eq. 178A-14
         # realization; the reference execution profile expands it to the
@@ -225,7 +222,6 @@ def _resolve_project_profile_178A(
         out_of_measured="zero_padding",
         channel_renormalization_order="s4p_first",
         pre_dte_adc_clipping_convention="matlab_4_17_reference_only",
-        final_adc_quantization_convention="matlab_4_17_reference_only",
         ctle_pulse_realization="bilinear_iir",
         rxffe_record_realization="finite_record_circshift",
         eq_ch_imp_len="truncated",
@@ -237,7 +233,6 @@ def _resolve_project_profile_178A(
         uniform_pmf_method="nearest_centers",
         pmf_scaling_method="interpolate_ordinates",
         final_pmf_grid="relative_As",
-        final_adc_pmf_projection="reference_support",
         gaussian_n_sigma_override=NormalDist().inv_cdf(1.0 - der_0),
         added_noise_pdf="scaled_total_pdf",
         mlsd_quantization_psd="main_tap_white",
@@ -327,7 +322,6 @@ def _read_project_execution_profile(
         "out_of_measured",
         "channel_renormalization_order",
         "pre_dte_adc_clipping_convention",
-        "final_adc_quantization_convention",
         "eq_ch_imp_len",
         "num_trunc_ui",
     }

@@ -209,12 +209,6 @@ def test_178a_pre_dte_adc_clipping_policy_rejects_unknown_method(reference_cfg):
         _with_methods(reference_cfg, pre_dte_adc_clipping_convention="unknown")
 
 
-def test_178a_final_adc_quantization_policy_rejects_unknown_method(reference_cfg):
-    assert reference_cfg.policy.final_adc_quantization_convention == "matlab_4_17_reference_only"
-    with pytest.raises(ValueError, match="final_adc_quantization_convention"):
-        _with_methods(reference_cfg, final_adc_quantization_convention="unknown")
-
-
 def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference_cfg, tmp_path):
     source = (
         Path(__file__).resolve().parents[1]
@@ -228,7 +222,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "out_of_measured": "cosine_decay",
         "channel_renormalization_order": "sdd_first",
         "pre_dte_adc_clipping_convention": "annex_d3",
-        "final_adc_quantization_convention": "annex_d3",
     }
     for row in fixed.iter_rows(min_row=4):
         name = row[1].value
@@ -254,7 +247,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.out_of_measured == "zero_padding"
     assert policy.channel_renormalization_order == "s4p_first"
     assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
-    assert policy.final_adc_quantization_convention == "matlab_4_17_reference_only"
     assert policy.ctle_pulse_realization == "bilinear_iir"
     assert policy.rxffe_record_realization == "finite_record_circshift"
     assert policy.eq_ch_imp_len == "truncated"
@@ -270,7 +262,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.reported_der == "baseline_pdf_re_evaluation"
     assert policy.gaussian_n_sigma_override == pytest.approx(3.540083799206174)
     assert policy.final_pmf_grid == "relative_As"
-    assert policy.final_adc_pmf_projection == "reference_support"
     effective = COM(aligned)._effective_run_cfg(aligned.execution.search_sweep)
     assert effective.pre_dte_pmf_method == "pmf_exact"
     assert effective.pmf_grid_quality == "fine"
@@ -352,7 +343,7 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert "noise_grid_num_ui" not in fields
     for old_field in (
         "out_of_measured", "channel_renormalization_order",
-        "pre_dte_adc_clipping_convention", "final_adc_quantization_convention",
+        "pre_dte_adc_clipping_convention",
     ):
         assert old_field not in fields
 

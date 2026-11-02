@@ -14,7 +14,7 @@
 | `rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | **獨立 post-FFE record policy**。前者保留 overflow guard；後者重現 reference 的有限記錄 shift-sum。 |
 | Eq-channel impairment length | `full`，保留完整 one-sample/UI response 供 PSD | `truncated`；Akinwale `num_trunc_ui=4096` | **獨立 B-005 policy**。Shared L3 供 Stage 2/3/5/7 使用；只在 PSD 前改 record，不修改 XT phase、channel/pulse grid 或 status 中的 full response。workbook 保留獨立控制。 |
 | pre-DTE clipping | 取獨立欄位；預設 D3 `P_qc/2`＋完整 jitter | 強制 MATLAB 4.17 `P_qc`＋RJ-only clipping；MMSE 保留完整 jitter | **可留在 reference algorithm preset**。這是已確認、僅為對照的公式差異；須保持與 final-stage 選擇在邏輯上可區分。 |
-| final ADC quantization | 取獨立欄位；預設 D3 selected-phase delta＋全部 FFE taps | 強制 MATLAB 4.17 final-PMF clipping＋略過主 tap | **可留在 reference algorithm preset**。這是另一 stage 的公式差異，不能假定與 pre-DTE 是同一條公式。 |
+| final ADC quantization | 無獨立欄位；selected-phase delta＋全部 FFE taps | reference code 的 initial main-PMF＋non-main loop 僅作數學等價性對照 | **不是 branch**。Production 固定採 Dirac seed＋all taps；原 B-007/B-015 selector 已移除。 |
 | 離散 tap PMF 格點 | 線性質量分配 | 最近格點 | **可留在 reference numerical preset**；只適用離散幅度建構，不應改成 `Pmf1D` 全部操作共用的量化規則。 |
 | Gaussian PMF | bin integral；固定 `gaussian_n_sigma` | grid sample；依 `DER_0` 決定支撐範圍 | **可留在 reference numerical preset**，但截尾誤差／支撐範圍應另做數值收斂驗證。 |
 | uniform PMF／PMF scaling | bin integral／mass deposit | nearest centers／ordinate interpolation | **可留在 reference numerical preset**；方法由 PMF 建立者按來源選擇，generic utility 僅提供可重用操作。 |

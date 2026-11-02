@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-11-01
+最後核對：2026-11-02
 
 本文件是 178A model 現有具名方法選擇及其分類審查候選的正式索引。新增、修改、重新命名、合併或移除 branch behavior 時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
 
@@ -32,14 +32,12 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | `policy.eq_ch_imp_len` | `full` | `truncated` | 是；workbook 保留獨立控制 |
 | `policy.num_trunc_ui` | `None` | `4096` | 是；只在 `truncated` 時適用 |
 | `policy.pre_dte_adc_clipping_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
-| `policy.final_adc_quantization_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
 | `policy.discrete_pmf_placement` | `linear` | `nearest` | 是 |
 | `policy.interference_pmf_method` | `signal_fir` | `pam_atoms` | 是 |
 | `policy.gaussian_pmf_method` | `bin_integral` | `reference_sample` | 是 |
 | `policy.uniform_pmf_method` | `bin_integral` | `nearest_centers` | 是 |
 | `policy.pmf_scaling_method` | `mass_deposit` | `interpolate_ordinates` | 是 |
 | `policy.final_pmf_grid` | `fine` | `relative_As` | 是 |
-| `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support` | 是 |
 | `policy.gaussian_n_sigma_override` | `None` | `NormalDist().inv_cdf(1-DER_0)` | 是 |
 | `policy.added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` | 是 |
 | `policy.mlsd_quantization_psd` | `pre_dte_filtered` | `main_tap_white` | 是 |
@@ -66,7 +64,6 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | B-004 | Post-FFE record | `policy.rxffe_record_realization` | `linear_convolution`：固定 grid linear convolution，保留 overflow guard | `finite_record_circshift`：在既有有限 impulse record 上做 tap shift-sum | `_apply_rxffe_response()` 擁有 record 邊界。不得改變 RX FFE taps、MMSE 解或原始 pre-FFE response。 |
 | B-005 | Multiple stages involved / Shared L3 (Stages 2, 3, 5, 7) | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`：以完整 one-sample/UI impairment equivalent-channel response 建立 PSD | `truncated`：在 PSD 轉換前依 `num_trunc_ui` 截短／補齊；SiCoPR preset 為 4096 UI | **L3 owner:** eq-channel impairment PSD construction。`_realize_eq_ch_imp_record()` 與 `_build_eq_ch_imp_psd()` 是所有 Stage 2/3/5/7 consumer 的單一入口；Stage 7 用它建立 MLSD `S_isi`。XT path phase 由 Stage 3 先以完整 oversampled response 選定，再輸出完整 one-sample/UI `eq_ch_XT`。分支只改 PSD/correlation record；不得改變 XT phase、channel/pulse analysis grid、`h_dsamp`、`h_XTs_dsamp`、`h_tn`、`h_J`、`h_ISI`、`h_w` 或已保存的 full response。workbook 保留獨立 selector；`num_trunc_ui` 只在 `truncated` 時合法。 |
 | B-006 *(pending D3p2 evidence)* | Pre-DTE ADC clipping | `policy.pre_dte_adc_clipping_convention` | `annex_d3`：完整 jitter，CDF tail=`P_qc/2` | `matlab_4_17_reference_only`：clipping PMF 使用 RJ-only，CDF tail=`P_qc` | 疑似源於 D3p2 差異；取得可核對規範前保留現況且不修改。`calculate_pre_dte_imp_at_pos()`、`_calculate_V_qc*()`、`_build_psd_adc_qn()`。只經 `V_qc → delta → S_qn` 影響 MMSE `R_n`；其他 jitter PSD 仍含 RJ+DDJ。 |
-| B-007 | Final COM ADC quantization | `policy.final_adc_quantization_convention` | `annex_d3`：selected-phase delta 與全部 FFE taps | `matlab_4_17_reference_only`：重建 final clipping PMF，略過主 tap | `calculate_COM_DFE()`／`_final_adc_clip_reference_only()`。與 B-006 是不同 stage，不得共用一個隱含 clipping 開關。 |
 | B-008 | Discrete-amplitude PMF creation | `policy.discrete_pmf_placement` | `linear`：質量線性分配至相鄰格點 | `nearest`：質量放入最近格點 | 只在離散 amplitude/tap PMF 的建立者使用；不得改成 `Pmf1D` 所有操作的全域量化規則。 |
 | B-009 | Interference PMF representation | `policy.interference_pmf_method` | `signal_fir`：由 signal PMF 經 tap FIR 建構 | `pam_atoms`：直接用 PAM amplitude atoms 卷積 | `_build_pmf_interference_178A()` 與 ADC/final PMF builders 選擇表示法；generic PMF utility 只執行被指定的 primitive。 |
 | B-010 | Gaussian PMF creation | `policy.gaussian_pmf_method` | `bin_integral`：以 bin probability 積分 | `reference_sample`：在 grid centers 取樣後正規化 | `_build_pmf_G()` 及各 stage Gaussian builder。不得同時暗改 support；support 由 B-014 獨立控制。 |
@@ -74,7 +71,6 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | B-012 | PMF amplitude scaling | `policy.pmf_scaling_method` | `mass_deposit`：縮放後重新 deposit probability mass | `interpolate_ordinates`：在縮放座標上插值 ordinates | `Pmf1D.scale_x()` 的呼叫者明示方法。不得作為通用隱藏 default 影響未選取的 stage。 |
 | B-013 | Final COM/MLSD PMF grid | `policy.final_pmf_grid` | `fine`：`min(dy_abs_max, dy_rel_As*As)` | `relative_As`：使用 `dy_rel_As*As` | `_resolve_final_com_pmf_config()` 擁有 final-domain grid。pre-DTE grid 仍由 run config 與 `_resolve_adc_input_pmf_config()` 控制。 |
 | B-014 | Gaussian support | `policy.gaussian_n_sigma_override` | `None`：使用 `COMPMFConfig.gaussian_n_sigma` | reference preset：`NormalDist().inv_cdf(1-DER_0)` | 只控制 Gaussian PMF support；不改 sigma、dy 或 tail probability 定義。 |
-| B-015 | Final ADC PMF projection | `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support`：reference support/tap projection | 只在 final ADC quantization PMF 生效，且必須搭配 B-007 reference convention；不得影響 pre-DTE ADC。 |
 | B-016 | MLSD added-noise PDF | `policy.added_noise_pdf` | `gaussian_addition`：依 Annex 加入 Gaussian component | `scaled_total_pdf`：縮放完整 DFE PDF 後求 `g_an` | `solve_g_an()` orchestration 選 `_build_scaled_total_pdf_added_noise()` 或 Annex flow。不得改 `S_isi`、`S_ni` 的定義。 |
 | B-017 | MLSD sequence termination | `policy.sequence_termination` | `fixed_length_sum`：固定 `trunc_len` 的 sequence contribution sum | `matlab_relative_tail`：reference CDF 與獨立 truncation-tail realization | `calculate_der_mlsd()` 擁有 sequence recurrence/truncation。Eq. 178A-49 的 `(-1)^(j+1)` 是共同正確公式，不是分支。 |
 | B-018 | MLSD reported DER | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation`：以算得的 MLSD increment 回到 baseline DFE PDF 評估 reported DER | `calculate_COM_MLSD()` 只改報告值的形成；raw sequence DER 必須另行保存，不能覆寫。 |
@@ -99,6 +95,7 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 |---|---|
 | `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。B-002 只決定此邊界外如何處理。 |
 | `policy.xtalk_pmf_accumulation` | **固定行為**。目前唯一合法值是 `pathwise_convolution`，沒有 A/B 分支能力；保留是待清理的 API 欄位。 |
+| B-007 final ADC quantization accumulation | **固定行為／等價實作**。Production 以 Dirac PMF 起始並 convolution 全部 RX FFE taps；reference code 以 unit-main-tap uniform PMF 起始後只迭代 non-main taps。兩者表示同一個 `sum(w[k]·e[k])`，不得建立 runtime selector。原 `final_adc_quantization_convention`、reference-only helper 與附屬 B-015 projection selector 已移除。 |
 | TX FFE discrete filter 與 `LinkSegment.cascade_ir()` | **等價實作**。對 oversampled pulse 做 shift-sum／convolution，不屬 CTLE branch。 |
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
 | RX package `reverse_ports()` | **共同正確流程**。die-to-channel network 建立後交換 two-port port orientation，不提供錯誤舊法作分支。 |

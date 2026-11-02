@@ -8,6 +8,7 @@ import numpy as np
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import COM
+from serdes_coding.utilities.pmf import Pmf1D
 from serdes_coding.utilities.psd import SampledPSD
 
 
@@ -87,28 +88,35 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             for name, value in saved.items():
                 setattr(post, name, value)
 
-    def test_final_adc_reference_policy_is_isolated_from_selected_mmse(self) -> None:
-        status = self.status
-        original_mse = status.dte.mse
-        original_delta = status.imp.post_ffe.adc_input.delta
-        reference_cfg = replace(
-            self.cfg,
-            policy=replace(
-                self.cfg.policy,
-                final_adc_quantization_convention="matlab_4_17_reference_only",
-            ),
+    def test_final_adc_all_taps_matches_reference_seeded_main_accumulation(self) -> None:
+        base = Pmf1D.multi_dirac(
+            np.array([-1.0, 0.0, 1.0]),
+            np.array([0.25, 0.5, 0.25]),
+            dx=0.25,
+            unit="volt",
         )
-        # The reference branch is tested here for stage isolation; a coarse
-        # final grid keeps this generic integration fixture inexpensive.
-        run_cfg = replace(reference_cfg.execution.search_final, pmf_dy_override=1e-3)
-        annex = self.model.calculate_COM_DFE(status.imp, status.eq_ch, status.dte, run_cfg)
-        alternate = COM(reference_cfg).calculate_COM_DFE(
-            status.imp, status.eq_ch, status.dte, run_cfg
+        taps = np.array([0.5, 1.0, 0.25])
+
+        # Project method: Dirac seed inside fir_filter(), then every tap.
+        all_taps = base.fir_filter(
+            taps,
+            keep_mass=1.0,
+            dx_ref=base.dx,
+            tap_abs_th=0.0,
         )
-        self.assertTrue(np.isfinite(alternate.COM))
-        self.assertNotAlmostEqual(alternate.COM, annex.COM, places=4)
-        self.assertEqual(status.dte.mse, original_mse)
-        self.assertEqual(status.imp.post_ffe.adc_input.delta, original_delta)
+
+        # Reference loop: the initial PMF already represents the unit main
+        # tap, so the loop adds only the non-main tap contributions.
+        seeded_main = base.copy()
+        for tap in (taps[0], taps[2]):
+            seeded_main = seeded_main.combine(
+                base.copy().scale_x(tap, keep_dx=True, dx_ref=base.dx)
+            )
+
+        np.testing.assert_allclose(all_taps.x, seeded_main.x, rtol=0.0, atol=0.0)
+        np.testing.assert_allclose(
+            all_taps.pmf, seeded_main.pmf, rtol=1e-13, atol=1e-15
+        )
 
 
 if __name__ == "__main__":

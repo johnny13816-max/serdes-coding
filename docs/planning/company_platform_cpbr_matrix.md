@@ -29,10 +29,9 @@
 | MMSE DTE | E-005 Floating FFE solve | `execution.<profile>.floating_mode` | 選擇 heuristic、simplified 或 spec-defined floating-tap placement flow。 |
 | MMSE DTE | E-006 Sampling-phase search | `execution.<profile>.pos_sweep_method`, `execution.<profile>.pos_coarse_stride` | 選擇 exhaustive 或 coarse/fine sampling-phase evaluation。 |
 | Post-FFE impairment | B-004 RX FFE record realization | `policy.rxffe_record_realization` | 選擇 fixed-grid linear convolution 或 finite-record circular shift-sum。 |
-| DFE COM / final PMF | B-007 Final ADC quantization convention | `policy.final_adc_quantization_convention` | 選擇 Annex D3 final quantization 或 reference-only clipping reconstruction。 |
 | DFE COM / final PMF | B-013 Final PMF grid | `policy.final_pmf_grid` | 選擇受 absolute/relative limit 約束的 fine grid，或直接 relative-to-`As` grid。 |
 | DFE COM / final PMF | B-014 Gaussian support | `policy.gaussian_n_sigma_override` | 使用 config Gaussian support 或明示的 reference-profile override。 |
-| DFE COM / final PMF | B-015 Final ADC PMF projection | `policy.final_adc_pmf_projection` | 選擇 Annex D3 或 reference-support/tap projection；後者要求 reference-only quantization convention。 |
+| DFE COM / final PMF | Fixed final ADC quantization accumulation | 無 project-config selector | 固定由 Dirac PMF 起始並 convolution 全部 RX FFE taps；reference 的 main-PMF seed＋non-main loop 僅作等價性對照。原 B-007／B-015 已移除。 |
 | MLSD COM | B-016 Added-noise PDF | `policy.added_noise_pdf` | 選擇 Annex Gaussian addition 或 scaled-total-DFE-PDF calibration。 |
 | MLSD COM | B-017 Sequence termination | `policy.sequence_termination` | 選擇 fixed-length sequence sum 或 reference relative-tail realization。 |
 | MLSD COM | B-018 Reported DER | `policy.reported_der` | 選擇 raw sequence-sum DER 或以 baseline PDF re-evaluate 的 reported DER。 |

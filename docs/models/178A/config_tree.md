@@ -57,7 +57,6 @@ COMConfig
 │   ├── out_of_measured
 │   ├── channel_renormalization_order
 │   ├── pre_dte_adc_clipping_convention
-│   ├── final_adc_quantization_convention
 │   ├── ctle_pulse_realization
 │   ├── rxffe_record_realization
 │   ├── eq_ch_imp_len
@@ -69,7 +68,6 @@ COMConfig
 │   ├── uniform_pmf_method
 │   ├── pmf_scaling_method
 │   ├── final_pmf_grid
-│   ├── final_adc_pmf_projection
 │   ├── gaussian_n_sigma_override
 │   ├── added_noise_pdf
 │   ├── mlsd_quantization_psd
@@ -147,7 +145,6 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
 | `channel_renormalization_order` | `COMConfig.policy` | `sdd_first` |
 | `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
-| `final_adc_quantization_convention` | `COMConfig.policy` | `annex_d3` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
 | `rxffe_record_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `linear_convolution` |
 | `eq_ch_imp_len` | `COMConfig.policy`（workbook 獨立曝露） | `full` |
@@ -217,14 +214,11 @@ PSD 仍含 random jitter 與 DDJ；切換只經 `V_qc → S_qn` 改變 `R_n`。
 控制該階段。reference-only 分支不是 general method；新版規範釐清後
 再決定是否合併。詳見 [TC-017](../../planning/tc017_pre_dte_adc_clipping_reference.md)。
 
-`final_adc_quantization_convention` 獨立選擇 final DFE COM 的 ADC
-量化算法，不改 pre-DTE `S_qn`、MMSE 或 post-FFE reporting PSD。
-`annex_d3` 沿用 selected-phase ADC-input `delta`，Eq. 178A-44 讓
-全部 RX FFE tap 參與量化 PMF。`matlab_4_17_reference_only` 以
-pre-FFE victim signal 與除以 RX FFE 主 tap gain 的 post-FFE
-ISI／XT／DDJ／Gaussian PMF 組成 clipping 輸入，取左尾 `P_qc` 得
-`V_qc`，再讓量化 PMF 通過非主 tap。此分支只供 reference 對照，
-不視為 D3.0 通用公式；兩個 clipping policy 可獨立設定。
+Final DFE COM 的 ADC quantization 沒有 runtime branch：它沿用
+selected-phase ADC-input `delta`，從 Dirac PMF 起始並讓全部 RX FFE
+taps 參與 convolution。Reference code 先以 unit-main-tap uniform PMF
+起始、再迭代 non-main taps，是同一數學運算的另一種累積順序；只作
+外部對照，不進入 project config。
 
 ## Channels
 

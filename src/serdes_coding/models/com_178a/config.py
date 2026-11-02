@@ -991,9 +991,6 @@ class COMPolicyConfig(COMDataclassText):
     pre_dte_adc_clipping_convention: Literal[
         "annex_d3", "matlab_4_17_reference_only"
     ] = "annex_d3"
-    final_adc_quantization_convention: Literal[
-        "annex_d3", "matlab_4_17_reference_only"
-    ] = "annex_d3"
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
     rxffe_record_realization: Literal[
         "linear_convolution", "finite_record_circshift"
@@ -1007,7 +1004,6 @@ class COMPolicyConfig(COMDataclassText):
     uniform_pmf_method: Literal["bin_integral", "nearest_centers"] = "bin_integral"
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit"
     final_pmf_grid: Literal["fine", "relative_As"] = "fine"
-    final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
     gaussian_n_sigma_override: Optional[float] = None
     added_noise_pdf: Literal["gaussian_addition", "scaled_total_pdf"] = "gaussian_addition"
     mlsd_quantization_psd: Literal[
@@ -1028,10 +1024,8 @@ class COMPolicyConfig(COMDataclassText):
             )),
             TextSection("Noise and ADC", (
                 self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
-                self._field("final_adc_quantization_convention", "final ADC quantization", stored_unit="policy"),
                 self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
                 self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
-                self._field("final_adc_pmf_projection", "final ADC PMF projection", stored_unit="policy"),
             )),
             TextSection("PMF methods", (
                 self._field("discrete_pmf_placement", "discrete placement", stored_unit="policy"),
@@ -1067,7 +1061,6 @@ class COMPolicyConfig(COMDataclassText):
             "out_of_measured": {"cosine_decay", "zero_padding"},
             "channel_renormalization_order": {"sdd_first", "s4p_first"},
             "pre_dte_adc_clipping_convention": {"annex_d3", "matlab_4_17_reference_only"},
-            "final_adc_quantization_convention": {"annex_d3", "matlab_4_17_reference_only"},
             "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
             "rxffe_record_realization": {"linear_convolution", "finite_record_circshift"},
             "eq_ch_imp_len": {"full", "truncated"},
@@ -1078,7 +1071,6 @@ class COMPolicyConfig(COMDataclassText):
             "uniform_pmf_method": {"bin_integral", "nearest_centers"},
             "pmf_scaling_method": {"mass_deposit", "interpolate_ordinates"},
             "final_pmf_grid": {"fine", "relative_As"},
-            "final_adc_pmf_projection": {"annex_d3", "reference_support"},
             "added_noise_pdf": {"gaussian_addition", "scaled_total_pdf"},
             "mlsd_quantization_psd": {"pre_dte_filtered", "main_tap_white"},
             "sequence_termination": {"fixed_length_sum", "matlab_relative_tail"},
@@ -1111,14 +1103,6 @@ class COMPolicyConfig(COMDataclassText):
                     "eq_ch_imp_len='truncated' requires even num_trunc_ui so the PSD includes Nyquist."
                 )
             object.__setattr__(self, "num_trunc_ui", int(self.num_trunc_ui))
-        if (
-            self.final_adc_pmf_projection == "reference_support"
-            and self.final_adc_quantization_convention != "matlab_4_17_reference_only"
-        ):
-            raise ValueError(
-                "final_adc_pmf_projection='reference_support' requires "
-                "final_adc_quantization_convention='matlab_4_17_reference_only'."
-            )
         if self.applied_config_profile is not None:
             object.__setattr__(self, "applied_config_profile", str(self.applied_config_profile))
         object.__setattr__(self, "config_profile_overrides", dict(self.config_profile_overrides))

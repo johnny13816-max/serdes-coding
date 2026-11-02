@@ -122,7 +122,7 @@ When quantization is enabled, `_build_adc_input_pmf_exact()` uses the selected p
 
 When `N_qb` or `P_qc` is absent, the ADC-input method is `disabled` and no `delta` is produced.
 
-This exact material is prepared regardless of the faster pre-DTE clipping method. Final DFE COM consumes its `delta` under the default `annex_d3` policy; the separate reference-only final policy reconstructs its own clipping amplitude in `calculate_COM_DFE()` without changing this stored selected-phase material.
+This exact material is prepared regardless of the pre-DTE clipping method. Final DFE COM always consumes this selected-phase `delta`; final quantization accumulation has no separate runtime convention.
 
 ### 7. Build reporting PSDs
 
