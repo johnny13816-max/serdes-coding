@@ -108,6 +108,9 @@ class COMPMFStatus(COMDataclassText):
 
     dy: float
     tap_abs_th: float
+    final_vqc_convention: Optional[str] = None
+    final_V_qc: Optional[float] = None
+    final_delta: Optional[float] = None
     p_ISI: Optional[Pmf1D] = None
     p_G: Optional[Pmf1D] = None
     p_DD: Optional[Pmf1D] = None
@@ -123,6 +126,11 @@ class COMPMFStatus(COMDataclassText):
             TextSection("Grid", (
                 self._field("dy", "PMF grid step", stored_unit="V", display_unit="mV", scale=1e3),
                 self._field("tap_abs_th", "tap threshold", stored_unit="V", display_unit="mV", scale=1e3),
+            )),
+            TextSection("Final ADC clipping", (
+                self._field("final_vqc_convention", "final V_qc convention", stored_unit="policy"),
+                self._field("final_V_qc", "final clipping voltage", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("final_delta", "final quantization step", stored_unit="V", display_unit="mV", scale=1e3),
             )),
             TextSection("Components", (
                 self._field("p_ISI", "ISI PMF", stored_unit="probability mass"),

@@ -343,15 +343,16 @@ def _calculate_V_qc(
     pmf_cfg: COMPMFRuntimeConfig,
     *,
     cdf_tail: Optional[float] = None,
-    L: Optional[int] = None,
     pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the exact ADC-input PMF chain and resolve V_qc from p_sn."""
-    if pmf_methods.interference_pmf_method == "pam_atoms" and L is None:
-        raise ValueError("Atomic ADC PMF construction requires PAM order L.")
     pmf_s = _build_pmf_interference_178A(
-        p_sig, h_dsamp, pmf_cfg, L or len(p_sig.pmf),
-        method=pmf_methods.interference_pmf_method, name="Noiseless signal",
+        p_sig,
+        h_dsamp,
+        pmf_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
+        name="Noiseless signal",
     )
 
     pmf_ga = Pmf1D.gaussian(
@@ -361,7 +362,7 @@ def _calculate_V_qc(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="Noise",
-        method=pmf_methods.gaussian_pmf_method,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
 
     pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal")
@@ -387,6 +388,7 @@ def _calculate_V_qc_gaussian_approx(
     pmf_cfg: COMPMFRuntimeConfig,
     *,
     cdf_tail: Optional[float] = None,
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """
     Fast approximation for 178A pre-DTE quantization clipping amplitude.
@@ -413,6 +415,7 @@ def _calculate_V_qc_gaussian_approx(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="ADC-input Gaussian approximation",
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
     return COMAdcInputPMF(
         p_sig=p_sig,
@@ -434,6 +437,7 @@ def _build_psd_adc_qn(
     cdf_tail: Optional[float] = None,
     L: Optional[int] = None,
     pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[SampledPSD, COMAdcInputPMF]:
 
     if vqc_method == "gaussian_approx":
@@ -444,6 +448,7 @@ def _build_psd_adc_qn(
             P_qc,
             pmf_cfg,
             cdf_tail=cdf_tail,
+            pdf_to_pmf_method=pdf_to_pmf_method,
         )
         V_qc = adc_input_pmf.V_qc
         if V_qc is None:
@@ -451,7 +456,8 @@ def _build_psd_adc_qn(
     elif vqc_method == "pmf_exact":
         adc_input_pmf = _calculate_V_qc(
             p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg, cdf_tail=cdf_tail,
-            L=L, pmf_methods=pmf_methods,
+            pmf_methods=pmf_methods,
+            pdf_to_pmf_method=pdf_to_pmf_method,
         )
         V_qc = adc_input_pmf.V_qc
         if V_qc is None:
@@ -870,24 +876,18 @@ def _resolve_final_com_pmf_config(
     )
 
 
-def _pam_levels(L: int) -> np.ndarray:
-    return np.array([2 * level / (L - 1) - 1 for level in range(L)], dtype=float)
-
-
-def _build_pmf_pam_L(
-    L: int,
-    pmf_cfg: COMPMFRuntimeConfig,
-    *,
-    placement: Literal["linear", "nearest"] = "linear",
-) -> Pmf1D:
-    # Base PAM4 signal pmf
-    return Pmf1D.multi_dirac(
-        values = _pam_levels(L),
-        probs = 1/L * np.ones(L),
-        dx = pmf_cfg.dy,
-        unit = "volt",
-        name = f"PAM{L}_signal",
-        placement=placement,
+def _build_pmf_pam_L(L: int) -> Pmf1D:
+    # Preserve exact PAM atoms on their natural dimensionless source grid.
+    # The source itself needs no B008 projection: its occupied integer grid
+    # indices are -(L-1), -(L-3), ..., +(L-1).
+    pmf = np.zeros(2 * L - 1, dtype=float)
+    pmf[::2] = 1.0 / L
+    return Pmf1D(
+        dx=1.0 / (L - 1),
+        st_idx=-(L - 1),
+        pmf=pmf,
+        unit="normalized symbol",
+        name=f"PAM{L}_signal",
     )
 
 
@@ -895,28 +895,20 @@ def _build_pmf_interference_178A(
     p_sig: Pmf1D,
     h: np.ndarray,
     pmf_cfg: COMPMFRuntimeConfig,
-    L: int,
     *,
-    method: Literal["signal_fir", "pam_atoms"] = "signal_fir",
+    projection_method: Literal["linear", "nearest"],
     name: Optional[str] = None,
 ) -> Pmf1D:
-    if method == "pam_atoms":
-        return Pmf1D.fir_filter_atoms(
-            _pam_levels(L), np.full(L, 1.0 / L), np.asarray(h, dtype=float),
-            dx=pmf_cfg.dy, keep_mass=pmf_cfg.keep_mass,
-            tap_abs_th=np.nextafter(pmf_cfg.dy, np.inf),
-            unit="volt", name=name or "",
-        )
-    if method == "signal_fir":
-        return p_sig.copy().fir_filter(
-            fir=h,
-            keep_mass=pmf_cfg.keep_mass,
-            dx_ref=pmf_cfg.dy,
-            tap_abs_th=pmf_cfg.tap_abs_th,
-            max_taps=None,
-            name=name,
-        )
-    raise ValueError("interference PMF method must be signal_fir or pam_atoms.")
+    return p_sig.fir_filter(
+        fir=h,
+        keep_mass=pmf_cfg.keep_mass,
+        dx_ref=pmf_cfg.dy,
+        tap_abs_th=np.nextafter(pmf_cfg.dy, np.inf),
+        max_taps=None,
+        name=name,
+        output_unit="volt",
+        projection_method=projection_method,
+    )
 
 
 def _build_pmf_w_XT_all(
@@ -924,49 +916,29 @@ def _build_pmf_w_XT_all(
     h_XTs_w: list[np.ndarray | SampledResponse],
     pmf_cfg: COMPMFRuntimeConfig,
     *,
-    L: Optional[int] = None,
-    methods: COMPolicyConfig = COMPolicyConfig(),
+    projection_method: Literal["linear", "nearest"],
 ) -> Pmf1D:
     responses = [value.ir if isinstance(value, SampledResponse) else value for value in h_XTs_w]
-    if methods.interference_pmf_method == "pam_atoms":
-        if L is None:
-            raise ValueError("Atomic crosstalk PMF construction requires PAM order L.")
-        result = Pmf1D.multi_dirac(
-            np.array([0.0]), np.array([1.0]), dx=pmf_cfg.dy,
-            unit="volt", name="XT_all", placement=methods.discrete_pmf_placement,
-        )
-        for response in responses:
-            result = result.combine(
-                _build_pmf_interference_178A(
-                    p_sig, response, pmf_cfg, L,
-                    method=methods.interference_pmf_method, name="XT",
-                ),
-                name="XT_all",
-            )
-        return result
-    if methods.interference_pmf_method == "signal_fir":
-        result = Pmf1D.multi_dirac(
-            np.array([0.0]),
-            np.array([1.0]),
-            dx=pmf_cfg.dy,
-            unit="volt",
+    result = Pmf1D.multi_dirac(
+        np.array([0.0]),
+        np.array([1.0]),
+        dx=pmf_cfg.dy,
+        unit="volt",
+        name="XT_all",
+        projection_method=projection_method,
+    )
+    for response in responses:
+        result = result.combine(
+            _build_pmf_interference_178A(
+                p_sig,
+                response,
+                pmf_cfg,
+                projection_method=projection_method,
+                name="XT",
+            ),
             name="XT_all",
         )
-        for response in responses:
-            result = result.combine(
-                _build_pmf_interference_178A(
-                    p_sig,
-                    response,
-                    pmf_cfg,
-                    L or len(p_sig.pmf),
-                    method="signal_fir",
-                    name="XT",
-                ),
-                name="XT_all",
-            )
-        result.name = "XT_all"
-        return result
-    raise ValueError("Unsupported crosstalk PMF construction method.")
+    return result
 
 def _build_adc_input_pmf_exact(
     p_sig: Pmf1D, 
@@ -979,26 +951,31 @@ def _build_adc_input_pmf_exact(
     N_qb: int,
     pmf_cfg: COMPMFRuntimeConfig,
     *,
-    L: Optional[int] = None,
     pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the selected-phase exact ADC-input PMF chain for final COM."""
-    if pmf_methods.interference_pmf_method == "pam_atoms" and L is None:
-        raise ValueError("Atomic ADC PMF construction requires PAM order L.")
-    pam_order = L or len(p_sig.pmf)
-    
     # noiseless signal
     pmf_s = _build_pmf_interference_178A(
-        p_sig, h_dsamp, pmf_cfg, pam_order,
-        method=pmf_methods.interference_pmf_method, name="Noiseless signal",
+        p_sig,
+        h_dsamp,
+        pmf_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
+        name="Noiseless signal",
     )
 
     pmf_XT = _build_pmf_w_XT_all(
-        p_sig, h_XTs_dsamp, pmf_cfg, L=pam_order, methods=pmf_methods,
+        p_sig,
+        h_XTs_dsamp,
+        pmf_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
     )
     pmf_DD = _build_pmf_interference_178A(
-        p_sig, A_DD * h_J, pmf_cfg, pam_order,
-        method=pmf_methods.interference_pmf_method, name="ADC-input Dual-Dirac",
+        p_sig,
+        A_DD * h_J,
+        pmf_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
+        name="ADC-input Dual-Dirac",
     )
 
     pmf_ga = Pmf1D.gaussian(
@@ -1008,7 +985,7 @@ def _build_adc_input_pmf_exact(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="Gaussian Noise",
-        method=pmf_methods.gaussian_pmf_method,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
     pmf_n = pmf_XT.combine(pmf_DD).combine(pmf_ga, name="ADC-input noise")
 
@@ -1032,7 +1009,7 @@ def _build_adc_input_pmf_exact(
 def _build_pmf_G(
     imp_status: COMImpairmentStatus, dte_status: COMDTEStatus,
     link_cfg: LinkConfig, pmf_cfg: COMPMFRuntimeConfig, *,
-    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> Pmf1D:
     del dte_status, link_cfg
     post_ffe = imp_status.post_ffe
@@ -1046,11 +1023,11 @@ def _build_pmf_G(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="Noise",
-        method=gaussian_method,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
 
 
-def _final_adc_clip_reference_only(
+def _reconstruct_final_vqc_sicopr(
     imp_status: COMImpairmentStatus,
     eq_ch: COMEqChannelStatus,
     L: int,
@@ -1060,8 +1037,9 @@ def _final_adc_clip_reference_only(
     P_qc: float,
     *,
     pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[float, COMPMFRuntimeConfig, Pmf1D]:
-    """MATLAB 4.17 comparison boundary: pre-FFE signal plus normalized final noise.
+    """Reconstruct the SiCoPR final-COM clipping distribution and V_qc.
 
     This is deliberately separate from the Annex D3 post-FFE ADC-input PMF.
     SiCoPR's final quantizer convolves the pre-FFE victim signal with the
@@ -1078,16 +1056,20 @@ def _final_adc_clip_reference_only(
         dy=pmf_cfg.dy / main_gain,
         tap_abs_th=pmf_cfg.tap_abs_th / main_gain,
     )
-    p_sig = _build_pmf_pam_L(
-        L, clip_cfg, placement=pmf_methods.discrete_pmf_placement,
-    )
+    p_sig = _build_pmf_pam_L(L)
     p_s = _build_pmf_interference_178A(
-        p_sig, eq_ch.h_dsamp.ir, clip_cfg, L,
-        method=pmf_methods.interference_pmf_method, name="ADC reference signal",
+        p_sig,
+        eq_ch.h_dsamp.ir,
+        clip_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
+        name="ADC reference signal",
     )
     p_isi = _build_pmf_interference_178A(
-        p_sig, eq_ch.h_ISI.ir / main_gain, clip_cfg, L,
-        method=pmf_methods.interference_pmf_method, name="ADC reference ISI",
+        p_sig,
+        eq_ch.h_ISI.ir / main_gain,
+        clip_cfg,
+        projection_method=pmf_methods.pmf_projection_method,
+        name="ADC reference ISI",
     )
     p_xt = _build_pmf_w_XT_all(
         p_sig,
@@ -1096,14 +1078,14 @@ def _final_adc_clip_reference_only(
             for path in (eq_ch.h_XTs_w or [])
         ],
         clip_cfg,
-        L=L,
-        methods=pmf_methods,
+        projection_method=pmf_methods.pmf_projection_method,
     )
     p_dd = _build_pmf_interference_178A(
         p_sig,
         A_DD * eq_ch.h_w_J.ir / main_gain,
         clip_cfg,
-        L, method=pmf_methods.interference_pmf_method, name="ADC reference Dual-Dirac",
+        projection_method=pmf_methods.pmf_projection_method,
+        name="ADC reference Dual-Dirac",
     )
     p_ga = Pmf1D.gaussian(
         mu=0.0,
@@ -1112,7 +1094,7 @@ def _final_adc_clip_reference_only(
         n_sigma=clip_cfg.gaussian_n_sigma,
         unit="volt",
         name="ADC reference Gaussian",
-        method=pmf_methods.gaussian_pmf_method,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
     p_noise = p_isi.combine(p_xt).combine(p_dd).combine(p_ga)
     p_sn = p_s.combine(p_noise)
@@ -1126,7 +1108,7 @@ def evaluate_delta_com_an(
     pmf_cfg: COMPMFRuntimeConfig,
     der_0: float,
     *,
-    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAddedNoiseStatus:
     """Evaluate the Annex 178A MLSD added-receiver-noise penalty.
 
@@ -1210,7 +1192,7 @@ def evaluate_delta_com_an(
         n_sigma=pmf_cfg.gaussian_n_sigma,
         unit="volt",
         name="Added receiver noise",
-        method=gaussian_method,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
     p_an = (
         pmf_dfe.p_ISI
@@ -1249,7 +1231,7 @@ def solve_g_an(
     *,
     cvg_th: float = 1e-2,
     max_iter: int = 64,
-    gaussian_method: Literal["bin_integral", "reference_sample"] = "bin_integral",
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAddedNoiseStatus:
     """Solve Eq. (178A-50) scale factor for a target added-noise penalty.
 
@@ -1297,7 +1279,8 @@ def solve_g_an(
         return candidate
 
     low = evaluate_delta_com_an(
-        0.0, post_ffe, pmf_dfe, pmf_cfg, der_0, gaussian_method=gaussian_method,
+        0.0, post_ffe, pmf_dfe, pmf_cfg, der_0,
+        pdf_to_pmf_method=pdf_to_pmf_method,
     )
     low.target_delta_com_an = target_delta_com_an
     low.residual_dB = low.delta_com_an_temp - target_delta_com_an
@@ -1317,7 +1300,7 @@ def solve_g_an(
     for iteration in range(1, max_iter + 1):
         candidate = evaluate_delta_com_an(
             high_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0,
-            gaussian_method=gaussian_method,
+            pdf_to_pmf_method=pdf_to_pmf_method,
         )
         candidate.target_delta_com_an = target_delta_com_an
         candidate.residual_dB = candidate.delta_com_an_temp - target_delta_com_an
@@ -1351,7 +1334,7 @@ def solve_g_an(
         mid_g_an = (low_g_an + high_g_an) / 2.0
         mid = evaluate_delta_com_an(
             mid_g_an, post_ffe, pmf_dfe, pmf_cfg, der_0,
-            gaussian_method=gaussian_method,
+            pdf_to_pmf_method=pdf_to_pmf_method,
         )
         mid.target_delta_com_an = target_delta_com_an
         mid.residual_dB = mid.delta_com_an_temp - target_delta_com_an
@@ -1394,6 +1377,7 @@ def _build_scaled_total_pdf_added_noise(
     der_0: float,
     *,
     scaling_method: Literal["mass_deposit", "interpolate_ordinates"],
+    projection_method: Literal["linear", "nearest"],
 ) -> COMAddedNoiseStatus:
     """Build the MATLAB 4.17 reference p_an by scaling the complete DFE PDF."""
     if pmf_dfe.p_combined is None:
@@ -1411,6 +1395,7 @@ def _build_scaled_total_pdf_added_noise(
         keep_dx=True,
         dx_ref=p_ref.dx,
         method=scaling_method,
+        projection_method=projection_method,
     )
     variance_ref = _pmf_variance(p_ref)
     variance_an = _pmf_variance(p_an)
@@ -1477,6 +1462,7 @@ def calculate_der_mlsd(
     b_lim_1: float,
     trunc_len: int,
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
+    pmf_projection_method: Literal["linear", "nearest"] = "linear",
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum",
 ) -> tuple[float, np.ndarray]:
     """Evaluate the truncated Annex 178A MLSD detector error ratio.
@@ -1539,6 +1525,7 @@ def calculate_der_mlsd(
         keep_dx=True,
         dx_ref=p_an.dx,
         method=pmf_scaling_method,
+        projection_method=pmf_projection_method,
     )
     p_later_term: Optional[Pmf1D] = None
     if trunc_len > 1:
@@ -1548,6 +1535,7 @@ def calculate_der_mlsd(
             keep_dx=True,
             dx_ref=p_an.dx,
             method=pmf_scaling_method,
+            projection_method=pmf_projection_method,
         )
 
     if sequence_termination not in {"fixed_length_sum", "matlab_relative_tail"}:
@@ -2263,9 +2251,7 @@ class COM:
         sigma_jn = S_jn.to_sigma()
 
         # quantization noise
-        p_sig = _build_pmf_pam_L(
-            L, pmf_cfg, placement=self.cfg.policy.discrete_pmf_placement,
-        )
+        p_sig = _build_pmf_pam_L(L)
         # Keep the full Eq. (178A-21)/(178A-22) jitter term in the MMSE
         # covariance. Only the ADC clipping input changes in the reference
         # comparison branch.
@@ -2299,6 +2285,7 @@ class COM:
                 cdf_tail=cdf_tail,
                 L=L,
                 pmf_methods=self.cfg.policy,
+                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
             )
         adc_input_pmf.clipping_convention = self.cfg.policy.pre_dte_adc_clipping_convention
         sigma_qn = S_qn.to_sigma()
@@ -2535,11 +2522,7 @@ class COM:
             run_cfg,
             gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
         )
-        p_sig = _build_pmf_pam_L(
-            self.cfg.L,
-            pmf_cfg_adc_input,
-            placement=self.cfg.policy.discrete_pmf_placement,
-        )
+        p_sig = _build_pmf_pam_L(self.cfg.L)
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
             adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
         else:
@@ -2553,8 +2536,8 @@ class COM:
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
                 pmf_cfg=pmf_cfg_adc_input,
-                L=self.cfg.L,
                 pmf_methods=self.cfg.policy,
+                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
             )
 
         # All pre/post-FFE PSDs share the run-level sampled grid.
@@ -2770,22 +2753,23 @@ class COM:
         As = imp_status.As
 
         # base pmf of PAM-L
-        p_sig = _build_pmf_pam_L(
-            self.cfg.L,
-            pmf_cfg_for_com,
-            placement=self.cfg.policy.discrete_pmf_placement,
-        )
+        p_sig = _build_pmf_pam_L(self.cfg.L)
 
         # pmf of ISI
         p_ISI = _build_pmf_interference_178A(
-            p_sig, eq_ch.h_ISI.ir, pmf_cfg_for_com, self.cfg.L,
-            method=self.cfg.policy.interference_pmf_method, name="ISI",
+            p_sig,
+            eq_ch.h_ISI.ir,
+            pmf_cfg_for_com,
+            projection_method=self.cfg.policy.pmf_projection_method,
+            name="ISI",
         )
 
         # pmf of XT (all combined)
         p_w_XT_all = _build_pmf_w_XT_all(
-            p_sig, eq_ch.h_XTs_w or [], pmf_cfg_for_com,
-            L=self.cfg.L, methods=self.cfg.policy,
+            p_sig,
+            eq_ch.h_XTs_w or [],
+            pmf_cfg_for_com,
+            projection_method=self.cfg.policy.pmf_projection_method,
         )
 
         # pmf of tx Dual-dirac jitter
@@ -2793,8 +2777,7 @@ class COM:
             p_sig,
             imp_cfg.A_DD * eq_ch.h_w_J.ir,
             pmf_cfg_for_com,
-            self.cfg.L,
-            method=self.cfg.policy.interference_pmf_method,
+            projection_method=self.cfg.policy.pmf_projection_method,
             name="Dual-Dirac",
         )
 
@@ -2812,6 +2795,7 @@ class COM:
                 dx=pmf_cfg_for_com.dy,
                 unit="volt",
                 name="ADC_QN",
+                projection_method=self.cfg.policy.pmf_projection_method,
             )
         else:
             if adc_input_pmf.method != "pmf_exact":
@@ -2825,11 +2809,13 @@ class COM:
                     "calculate_COM_DFE() requires COMDTEStatus.w_lim to be the "
                     f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_lim.shape}."
                 )
-            if self.cfg.policy.final_adc_quantization_convention == "matlab_4_17_reference_only":
-                # MATLAB 4.17 / SiCoPR final-PDF branch: P_qc at the ADC-input
-                # CDF and quantization noise through all non-main RX FFE taps.
+            if self.cfg.policy.final_com_vqc_convention == "sicopr_final_reconstruction":
+                # SiCoPR final-COM V_qc convention: reconstruct the clipping
+                # distribution and apply its P_qc tail rule. The existing tap
+                # accumulation is frozen for reference regression only; main-
+                # tap inclusion is not part of the B-007 branch definition.
                 main_gain = float(w_lim[self.cfg.dte.d_w])
-                V_qc, adc_grid_cfg, p_noise_adc = _final_adc_clip_reference_only(
+                V_qc, adc_grid_cfg, p_noise_adc = _reconstruct_final_vqc_sicopr(
                     imp_status,
                     eq_ch,
                     self.cfg.L,
@@ -2838,6 +2824,7 @@ class COM:
                     imp_cfg.A_DD,
                     imp_cfg.P_qc,
                     pmf_methods=self.cfg.policy,
+                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
                 )
                 delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
                 quantization_taps = w_lim.copy()
@@ -2846,7 +2833,7 @@ class COM:
                 # scaled tap to the final (post-FFE) PMF grid in fir_filter.
                 p_delta = Pmf1D.uniform(
                     delta, adc_grid_cfg,
-                    method=self.cfg.policy.uniform_pmf_method,
+                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
                     support=(
                         p_noise_adc
                         if self.cfg.policy.final_adc_pmf_projection == "reference_support"
@@ -2854,15 +2841,15 @@ class COM:
                     ),
                 )
             else:
-                # Annex 178A-44: every FFE tap contributes to final ADC
-                # quantization PMF; clipping remains at the post-FFE owner.
+                # Selected-phase ADC-input convention: reuse the Stage 5
+                # clipping result. Tap accumulation is not a B-007 decision.
                 if adc_input_pmf.delta is None:
                     raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
                 delta = adc_input_pmf.delta
                 quantization_taps = w_lim
                 p_delta = Pmf1D.uniform(
                     delta, pmf_cfg_for_com,
-                    method=self.cfg.policy.uniform_pmf_method,
+                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
                 )
             p_qn = p_delta.fir_filter(
                 quantization_taps,
@@ -2875,12 +2862,12 @@ class COM:
                 ),
                 max_taps = None,
                 name = "ADC_QN",
-                scaling_method=self.cfg.policy.pmf_scaling_method,
+                projection_method=self.cfg.policy.pmf_projection_method,
                 initial_bin_range=(
                     (p_noise_adc.st_idx, p_noise_adc.st_idx + len(p_noise_adc.pmf) - 1)
                     if self.cfg.policy.final_adc_pmf_projection == "reference_support"
-                    and self.cfg.policy.final_adc_quantization_convention
-                    == "matlab_4_17_reference_only"
+                    and self.cfg.policy.final_com_vqc_convention
+                    == "sicopr_final_reconstruction"
                     else None
                 ),
             )
@@ -2888,7 +2875,7 @@ class COM:
         # pmf of gaussian noise
         p_G = _build_pmf_G(
             imp_status, dte_status, self.cfg.link, pmf_cfg_for_com,
-            gaussian_method=self.cfg.policy.gaussian_pmf_method,
+            pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
         )
 
         # combined pmf, A_ni
@@ -2901,6 +2888,20 @@ class COM:
         return COMPMFStatus(
             dy=pmf_cfg_for_com.dy,
             tap_abs_th=pmf_cfg_for_com.tap_abs_th,
+            final_vqc_convention=self.cfg.policy.final_com_vqc_convention,
+            final_V_qc=(
+                None
+                if adc_input_pmf is None or adc_input_pmf.method == "disabled"
+                else float(V_qc)
+                if self.cfg.policy.final_com_vqc_convention
+                == "sicopr_final_reconstruction"
+                else adc_input_pmf.V_qc
+            ),
+            final_delta=(
+                None
+                if adc_input_pmf is None or adc_input_pmf.method == "disabled"
+                else float(delta)
+            ),
             p_ISI=p_ISI,
             p_G=p_G,
             p_DD=p_w_DD,
@@ -2974,6 +2975,7 @@ class COM:
                 pmf_dfe,
                 self.cfg.DER_0,
                 scaling_method=self.cfg.policy.pmf_scaling_method,
+                projection_method=self.cfg.policy.pmf_projection_method,
             )
         else:
             added_noise = solve_g_an(
@@ -2982,7 +2984,7 @@ class COM:
                 pmf_dfe,
                 pmf_cfg,
                 self.cfg.DER_0,
-                gaussian_method=self.cfg.policy.gaussian_pmf_method,
+                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
             )
         # Eq. (178A-54): build the MLSD noise PSD and autocorrelation.
         noise = self.build_mlsd_noise(imp_status, eq_ch, dte_status, added_noise)
@@ -2995,6 +2997,7 @@ class COM:
             b_lim_1=float(b_lim[0]),
             trunc_len=self.cfg.mlsd.trunc_len,
             pmf_scaling_method=self.cfg.policy.pmf_scaling_method,
+            pmf_projection_method=self.cfg.policy.pmf_projection_method,
             sequence_termination=self.cfg.policy.sequence_termination,
         )
         if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:

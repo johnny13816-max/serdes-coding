@@ -223,11 +223,14 @@ over its `pre_dte` and `post_ffe` children for calculation/report compatibility.
 |---|---|
 | `dy` | V, PMF grid step |
 | `tap_abs_th` | V, PMF tap threshold |
+| `final_vqc_convention` | selected B-007 policy value |
+| `final_V_qc`, `final_delta` | optional V scalars actually used by final COM |
 | `p_ISI`, `p_G`, `p_DD`, `p_XT`, `p_qn`, `p_combined` | optional `Pmf1D` |
 | `y0`, `A_ni` | optional V scalars |
 | `COM` | optional dB scalar |
 
-The stage returns a completed object, but individual PMF fields remain optional
+The three final-clipping fields provide observability only; they do not feed
+back into the calculation. The stage returns a completed object, but individual PMF fields remain optional
 in the 178A dataclass to support incremental stage construction and reporting.
 
 ## MLSD status

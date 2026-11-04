@@ -26,7 +26,9 @@ TC-019 的 reference preset 會在 adapter 展開成具名 PMF methods。此 sta
 依這些方法讓 ISI／XT／DD 由原始 PAM 振幅乘 tap 後最近落格；Gaussian grid support 由
 `NormalDist().inv_cdf(1-DER_0)` 決定並在 grid 取樣；ADC uniform
 使用最近端點和 clipping-noise PMF 的完整 support，RX FFE tap 縮放
-採 ordinate interpolation。final `dy=dy_rel_As*As` 以未正規化的
+採 B-008 的 mass deposit 與 projection method。B-012 的 ordinate
+interpolation 僅適用於 MLSD direct scalar-PMF resampling，不傳入此 FIR
+construction。final `dy=dy_rel_As*As` 以未正規化的
 RX FFE 電壓座標表示，除以主 tap gain 後即為 reference 的 grid。
 模型只傳遞已解析的方法，通用 PMF utility 與此 stage
 都不包含 SiCoPR 專用 boolean。此選用方法不替代 D3.0 一般模式。
@@ -107,9 +109,18 @@ The stage reads `sigma_G` directly. It does not derive Gaussian noise from post-
 
 When quantization is disabled, `p_qn` is a unit-mass PMF at zero.
 
-When enabled, the `annex_d3` stage requires the exact selected-phase ADC-input material prepared earlier. It consumes `delta`, builds a uniform quantization-error PMF, and applies the selected full zero-filled FFE vector (Eq. 178A-44).
+`policy.final_com_vqc_convention` is the B-007 boundary. With
+`selected_phase_adc_input`, the stage reuses the exact selected-phase ADC-input
+`V_qc` and `delta` prepared in Stage 5. With `sicopr_final_reconstruction`, it
+reconstructs the final clipping distribution from the pre-FFE victim signal and
+post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE
+main gain, then applies the SiCoPR `P_qc` tail rule to obtain `V_qc` and `delta`.
 
-The separate `matlab_4_17_reference_only` policy follows the reference final-PDF calculation: it forms the clipping PMF from the pre-FFE victim signal and post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE main gain. The clipping PMF grid and tap threshold are referred back by the same gain. Its left-tail CDF target is `P_qc`; its uniform quantization error is built on that ADC-input grid, then scaled through all RX FFE taps except the main tap onto the final PDF grid. This branch is for calibration against MATLAB/SiCoPR, not a replacement for the D3.0 default. The two policies share the already selected phase, FFE/DFE, and non-quantization final PMFs.
+B-007 does not select whether the later FIR accumulation includes the main tap.
+That is a deferred realization issue involving the PMF seed and B-015
+projection/support. The current production ordering is frozen so that this
+reclassification cannot change COM. Both V_qc conventions share the selected
+phase, FFE/DFE, and non-quantization final PMFs.
 
 The pre-DTE quantization PSD exists to support the MMSE solve. It is not substituted for this final quantization PMF.
 
@@ -119,6 +130,9 @@ The pre-DTE quantization PSD exists to support the MMSE solve. It is not substit
 COMPMFStatus
 ├── dy
 ├── tap_abs_th
+├── final_vqc_convention
+├── final_V_qc
+├── final_delta
 ├── p_ISI
 ├── p_G
 ├── p_DD

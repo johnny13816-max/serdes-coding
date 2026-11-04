@@ -77,12 +77,12 @@ COM                                                   [Root: model]
             │   └── _build_eq_ch_imp_psd()            [Shared L3; B-005]
             ├── ADC-input / quantization              [L3]
             │   ├── _resolve_adc_input_pmf_config()   [L4: E003/E004, B014]
-            │   ├── _build_pmf_pam_L()                [L4: B008]
+            │   ├── _build_pmf_pam_L()                [L4: exact PAM source]
             │   ├── clipping PSD/tail selection        [L4: B006]
             │   └── _build_psd_adc_qn()               [L4: E002 dispatcher]
             │       ├── _calculate_V_qc_gaussian_approx() [L4: E002]
             │       └── _calculate_V_qc()             [L4: E002 exact path]
-            │           ├── _build_pmf_interference_178A() [L4: B009]
+            │           ├── _build_pmf_interference_178A() [L4: B008 projection]
             │           └── Pmf1D.gaussian()          [L4: B010]
             └── total-noise covariance                [L3]
                 └── SampledPSD.add() / to_autocorrelation() [L4]
@@ -97,9 +97,8 @@ cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 | Candidate | L3 owner | L4 decision point | Status for this stage |
 |---|---|---|---|
 | B006 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending for specification evidence.** 疑似源於 D3p2 差異；在取得可核對文件前保留現況且不修改。它不改變 full-jitter MMSE covariance。 |
-| B008 discrete-PMF placement | ADC-input / quantization | `_build_pmf_pam_L()` | **Pending.** The `linear` / `nearest` placement changes the base PAM mass representation used by both ADC methods. |
-| B009 interference-PMF representation | ADC-input / quantization | `_calculate_V_qc()` → `_build_pmf_interference_178A()` | **Pending, conditional.** Used only by the `pmf_exact` path. |
-| B010 Gaussian-PMF creation | ADC-input / quantization | `_calculate_V_qc()` → `Pmf1D.gaussian()` | **Pending, conditional.** Used only by the `pmf_exact` path; it is distinct from the Gaussian approximation selected by E002. |
+| B008 discrete-PMF projection | ADC-input / quantization | `_build_pmf_interference_178A()` → `Pmf1D._project_to_grid()` | **Closed 2026-11-03.** PAM source 固定保存在 exact natural grid；`linear`／`nearest`只在 tap scaling 後的 target-grid projection 生效。Selector 由 project policy 明示傳入每個 projection operation，不保存於 PMF object；stage 不得自行重新選擇。B012 ordinate interpolation 不受此分支影響。SiCoPR DFE/final COM golden 不變。 |
+| B010/B011 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule；也涵蓋 `gaussian_approx` 建立的觀察用 PMF。B014 support、B008 projection、B012 scaling、E002 path selection 仍獨立。 |
 | B014 Gaussian support | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending, conditional.** Controls the finite Gaussian PMF support for the exact path. |
 | E002 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending classification.** Chooses `gaussian_approx` or `pmf_exact`; review must decide whether it is retained as an execution-quality control or promoted to an algorithm branch. |
 | E003/E004 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending classification.** Numerical accuracy/cost controls, not automatically algorithm branches. |

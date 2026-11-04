@@ -57,16 +57,14 @@ COMConfig
 │   ├── out_of_measured
 │   ├── channel_renormalization_order
 │   ├── pre_dte_adc_clipping_convention
-│   ├── final_adc_quantization_convention
+│   ├── final_com_vqc_convention
 │   ├── ctle_pulse_realization
 │   ├── rxffe_record_realization
 │   ├── eq_ch_imp_len
 │   ├── num_trunc_ui
-│   ├── discrete_pmf_placement
-│   ├── interference_pmf_method
+│   ├── pmf_projection_method
 │   ├── xtalk_pmf_accumulation
-│   ├── gaussian_pmf_method
-│   ├── uniform_pmf_method
+│   ├── pdf_to_pmf_method
 │   ├── pmf_scaling_method
 │   ├── final_pmf_grid
 │   ├── final_adc_pmf_projection
@@ -147,11 +145,13 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
 | `channel_renormalization_order` | `COMConfig.policy` | `sdd_first` |
 | `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
-| `final_adc_quantization_convention` | `COMConfig.policy` | `annex_d3` |
+| `final_com_vqc_convention` | `COMConfig.policy` | `selected_phase_adc_input` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
 | `rxffe_record_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `linear_convolution` |
 | `eq_ch_imp_len` | `COMConfig.policy`（workbook 獨立曝露） | `full` |
 | `num_trunc_ui` | `COMConfig.policy`（僅 `truncated` 適用） | blank / `None` |
+| `pmf_projection_method` | `COMConfig.policy`（workbook 獨立曝露） | `linear` |
+| `pdf_to_pmf_method` | `COMConfig.policy`（由 profile 或 Python 設定） | `bin_integral` |
 
 All listed PMF controls and `missing_dc_policy` are labeled `policy`. There is
 no `quantization_vqc_method` row in the 178A project template: it has no 178A
@@ -217,14 +217,24 @@ PSD 仍含 random jitter 與 DDJ；切換只經 `V_qc → S_qn` 改變 `R_n`。
 控制該階段。reference-only 分支不是 general method；新版規範釐清後
 再決定是否合併。詳見 [TC-017](../../planning/tc017_pre_dte_adc_clipping_reference.md)。
 
-`final_adc_quantization_convention` 獨立選擇 final DFE COM 的 ADC
-量化算法，不改 pre-DTE `S_qn`、MMSE 或 post-FFE reporting PSD。
-`annex_d3` 沿用 selected-phase ADC-input `delta`，Eq. 178A-44 讓
-全部 RX FFE tap 參與量化 PMF。`matlab_4_17_reference_only` 以
-pre-FFE victim signal 與除以 RX FFE 主 tap gain 的 post-FFE
-ISI／XT／DDJ／Gaussian PMF 組成 clipping 輸入，取左尾 `P_qc` 得
-`V_qc`，再讓量化 PMF 通過非主 tap。此分支只供 reference 對照，
-不視為 D3.0 通用公式；兩個 clipping policy 可獨立設定。
+`final_com_vqc_convention` 獨立選擇 final DFE COM 的 clipping-voltage
+來源，不改 pre-DTE `S_qn`、MMSE 或 post-FFE reporting PSD。
+`selected_phase_adc_input` 沿用 Stage 5 exact selected-phase ADC-input
+`V_qc`／`delta`。`sicopr_final_reconstruction` 以 pre-FFE victim signal
+與除以 RX FFE 主 tap gain 的 post-FFE ISI／XT／DDJ／Gaussian PMF
+重建 final clipping input，取左尾 `P_qc` 得
+`V_qc`／`delta`。B-007 到此為止，不定義後續量化 PMF 的 RX FFE
+main-tap accumulation；該實作問題已另列 deferred issue。此分支在
+D3p2 evidence 到手前維持 pending；pre-DTE 與 final-COM clipping policy
+仍可獨立設定。
+
+`pdf_to_pmf_method` 是 B-010/B-011 的 shared L3 policy。值
+`bin_integral` 以 distribution 的 bin probability/overlap 建立 PMF；
+`pmf_sample` 則使用 SiCoPR 的 grid-center rule：Gaussian sample 後
+正規化，uniform 選取 `±delta/2` 的最近 centers（含端點）並等權重。
+`COM` orchestration 將此值明示傳入 pre-DTE、final COM、MLSD 的 L2
+helpers；`Pmf1D` 只執行建構，不保存 policy。Gaussian support 仍由 B-014
+控制，不能藉此 selector 改變。
 
 ## Channels
 

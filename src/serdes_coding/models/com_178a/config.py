@@ -991,20 +991,18 @@ class COMPolicyConfig(COMDataclassText):
     pre_dte_adc_clipping_convention: Literal[
         "annex_d3", "matlab_4_17_reference_only"
     ] = "annex_d3"
-    final_adc_quantization_convention: Literal[
-        "annex_d3", "matlab_4_17_reference_only"
-    ] = "annex_d3"
+    final_com_vqc_convention: Literal[
+        "selected_phase_adc_input", "sicopr_final_reconstruction"
+    ] = "selected_phase_adc_input"
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
     rxffe_record_realization: Literal[
         "linear_convolution", "finite_record_circshift"
     ] = "linear_convolution"
     eq_ch_imp_len: Literal["full", "truncated"] = "full"
     num_trunc_ui: Optional[int] = None
-    discrete_pmf_placement: Literal["linear", "nearest"] = "linear"
-    interference_pmf_method: Literal["signal_fir", "pam_atoms"] = "signal_fir"
+    pmf_projection_method: Literal["linear", "nearest"] = "linear"
     xtalk_pmf_accumulation: Literal["pathwise_convolution"] = "pathwise_convolution"
-    gaussian_pmf_method: Literal["bin_integral", "reference_sample"] = "bin_integral"
-    uniform_pmf_method: Literal["bin_integral", "nearest_centers"] = "bin_integral"
+    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral"
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit"
     final_pmf_grid: Literal["fine", "relative_As"] = "fine"
     final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
@@ -1028,17 +1026,15 @@ class COMPolicyConfig(COMDataclassText):
             )),
             TextSection("Noise and ADC", (
                 self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
-                self._field("final_adc_quantization_convention", "final ADC quantization", stored_unit="policy"),
+                self._field("final_com_vqc_convention", "final COM V_qc convention", stored_unit="policy"),
                 self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
                 self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("final_adc_pmf_projection", "final ADC PMF projection", stored_unit="policy"),
             )),
             TextSection("PMF methods", (
-                self._field("discrete_pmf_placement", "discrete placement", stored_unit="policy"),
-                self._field("interference_pmf_method", "interference PMF", stored_unit="policy"),
+                self._field("pmf_projection_method", "PMF projection method", stored_unit="policy"),
                 self._field("xtalk_pmf_accumulation", "crosstalk accumulation", stored_unit="policy"),
-                self._field("gaussian_pmf_method", "Gaussian PMF", stored_unit="policy"),
-                self._field("uniform_pmf_method", "uniform PMF", stored_unit="policy"),
+                self._field("pdf_to_pmf_method", "PDF-to-PMF discretization", stored_unit="policy"),
                 self._field("pmf_scaling_method", "PMF scaling", stored_unit="policy"),
                 self._field("final_pmf_grid", "final PMF grid", stored_unit="policy"),
                 self._field("gaussian_n_sigma_override", "Gaussian support override", stored_unit="sigma count"),
@@ -1067,15 +1063,15 @@ class COMPolicyConfig(COMDataclassText):
             "out_of_measured": {"cosine_decay", "zero_padding"},
             "channel_renormalization_order": {"sdd_first", "s4p_first"},
             "pre_dte_adc_clipping_convention": {"annex_d3", "matlab_4_17_reference_only"},
-            "final_adc_quantization_convention": {"annex_d3", "matlab_4_17_reference_only"},
+            "final_com_vqc_convention": {
+                "selected_phase_adc_input", "sicopr_final_reconstruction"
+            },
             "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
             "rxffe_record_realization": {"linear_convolution", "finite_record_circshift"},
             "eq_ch_imp_len": {"full", "truncated"},
-            "discrete_pmf_placement": {"linear", "nearest"},
-            "interference_pmf_method": {"signal_fir", "pam_atoms"},
+            "pmf_projection_method": {"linear", "nearest"},
             "xtalk_pmf_accumulation": {"pathwise_convolution"},
-            "gaussian_pmf_method": {"bin_integral", "reference_sample"},
-            "uniform_pmf_method": {"bin_integral", "nearest_centers"},
+            "pdf_to_pmf_method": {"bin_integral", "pmf_sample"},
             "pmf_scaling_method": {"mass_deposit", "interpolate_ordinates"},
             "final_pmf_grid": {"fine", "relative_As"},
             "final_adc_pmf_projection": {"annex_d3", "reference_support"},
@@ -1113,11 +1109,11 @@ class COMPolicyConfig(COMDataclassText):
             object.__setattr__(self, "num_trunc_ui", int(self.num_trunc_ui))
         if (
             self.final_adc_pmf_projection == "reference_support"
-            and self.final_adc_quantization_convention != "matlab_4_17_reference_only"
+            and self.final_com_vqc_convention != "sicopr_final_reconstruction"
         ):
             raise ValueError(
                 "final_adc_pmf_projection='reference_support' requires "
-                "final_adc_quantization_convention='matlab_4_17_reference_only'."
+                "final_com_vqc_convention='sicopr_final_reconstruction'."
             )
         if self.applied_config_profile is not None:
             object.__setattr__(self, "applied_config_profile", str(self.applied_config_profile))

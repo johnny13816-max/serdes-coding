@@ -14,10 +14,9 @@
 | `rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | **獨立 post-FFE record policy**。前者保留 overflow guard；後者重現 reference 的有限記錄 shift-sum。 |
 | Eq-channel impairment length | `full`，保留完整 one-sample/UI response 供 PSD | `truncated`；Akinwale `num_trunc_ui=4096` | **獨立 B-005 policy**。Shared L3 供 Stage 2/3/5/7 使用；只在 PSD 前改 record，不修改 XT phase、channel/pulse grid 或 status 中的 full response。workbook 保留獨立控制。 |
 | pre-DTE clipping | 取獨立欄位；預設 D3 `P_qc/2`＋完整 jitter | 強制 MATLAB 4.17 `P_qc`＋RJ-only clipping；MMSE 保留完整 jitter | **可留在 reference algorithm preset**。這是已確認、僅為對照的公式差異；須保持與 final-stage 選擇在邏輯上可區分。 |
-| final ADC quantization | 取獨立欄位；預設 D3 selected-phase delta＋全部 FFE taps | 強制 MATLAB 4.17 final-PMF clipping＋略過主 tap | **可留在 reference algorithm preset**。這是另一 stage 的公式差異，不能假定與 pre-DTE 是同一條公式。 |
-| 離散 tap PMF 格點 | 線性質量分配 | 最近格點 | **可留在 reference numerical preset**；只適用離散幅度建構，不應改成 `Pmf1D` 全部操作共用的量化規則。 |
-| Gaussian PMF | bin integral；固定 `gaussian_n_sigma` | grid sample；依 `DER_0` 決定支撐範圍 | **可留在 reference numerical preset**，但截尾誤差／支撐範圍應另做數值收斂驗證。 |
-| uniform PMF／PMF scaling | bin integral／mass deposit | nearest centers／ordinate interpolation | **可留在 reference numerical preset**；方法由 PMF 建立者按來源選擇，generic utility 僅提供可重用操作。 |
+| final COM `V_qc` convention | `selected_phase_adc_input`：沿用 Stage 5 exact `V_qc/delta` | `sicopr_final_reconstruction`：Stage 6 依 SiCoPR composition 與 `P_qc` 重建 | **B-007 pending D3p2 evidence**。只控制 clipping voltage convention；main-tap accumulation 已移出 B-007，另列 deferred issue。 |
+| 離散 tap PMF projection | 線性質量分配 | 最近格點 | **B-008 獨立 numerical policy**；`policy.pmf_projection_method` 由 caller 明示傳入會重新投影 grid 的 operation，`Pmf1D` 不保存 policy。PAM source atoms 在自然 grid 精確保存，tap scaling 後才套用 projection。 |
+| PDF→PMF discretization（B-010/B-011） | `bin_integral`：Gaussian bin integral、uniform bin overlap | `pmf_sample`：Gaussian grid-center sample、uniform nearest-center inclusive sample | **shared L3 policy** `policy.pdf_to_pmf_method`；各 distribution 保留自己的 rule。Gaussian support、PMF scaling 分別仍由 B-014、B-012 擁有。 |
 | final PMF grid | `fine` | `dy_rel_As × As`，再依主 tap gain 換算 | **建議拆成明確的 final PMF grid/domain policy**。這是數值座標與精度，不是物理公式；reference preset 可選它，但不能讓 boolean 取代單位／domain 契約。 |
 | `COMRunConfig` PMF 執行設定 | 保留 `pre_dte_pmf_method`、`pmf_grid_quality`、`pmf_keep_mass`、`pmf_dy_override` | 強制 `pmf_exact`、`fine`、`keep_mass=1`、`pmf_dy_override=None` | **保留為具名 run-level 控制**。這些是精度／速度／收斂設定；reference preset 為了可重現 golden comparison 明確覆蓋，且 export 記錄 raw／effective／profile，不能成為 model 內的隱藏分支。 |
 

@@ -209,10 +209,15 @@ def test_178a_pre_dte_adc_clipping_policy_rejects_unknown_method(reference_cfg):
         _with_methods(reference_cfg, pre_dte_adc_clipping_convention="unknown")
 
 
-def test_178a_final_adc_quantization_policy_rejects_unknown_method(reference_cfg):
-    assert reference_cfg.policy.final_adc_quantization_convention == "matlab_4_17_reference_only"
-    with pytest.raises(ValueError, match="final_adc_quantization_convention"):
-        _with_methods(reference_cfg, final_adc_quantization_convention="unknown")
+def test_178a_final_com_vqc_policy_rejects_unknown_method(reference_cfg):
+    assert reference_cfg.policy.final_com_vqc_convention == "sicopr_final_reconstruction"
+    with pytest.raises(ValueError, match="final_com_vqc_convention"):
+        _with_methods(reference_cfg, final_com_vqc_convention="unknown")
+
+
+def test_178a_pdf_to_pmf_policy_rejects_unknown_method(reference_cfg):
+    with pytest.raises(ValueError, match="pdf_to_pmf_method"):
+        _with_methods(reference_cfg, pdf_to_pmf_method="unknown")
 
 
 def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference_cfg, tmp_path):
@@ -228,7 +233,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "out_of_measured": "cosine_decay",
         "channel_renormalization_order": "sdd_first",
         "pre_dte_adc_clipping_convention": "annex_d3",
-        "final_adc_quantization_convention": "annex_d3",
+        "final_com_vqc_convention": "selected_phase_adc_input",
     }
     for row in fixed.iter_rows(min_row=4):
         name = row[1].value
@@ -254,15 +259,14 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.out_of_measured == "zero_padding"
     assert policy.channel_renormalization_order == "s4p_first"
     assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
-    assert policy.final_adc_quantization_convention == "matlab_4_17_reference_only"
+    assert policy.final_com_vqc_convention == "sicopr_final_reconstruction"
     assert policy.ctle_pulse_realization == "bilinear_iir"
     assert policy.rxffe_record_realization == "finite_record_circshift"
     assert policy.eq_ch_imp_len == "truncated"
     assert policy.num_trunc_ui == 4096
-    assert policy.discrete_pmf_placement == "nearest"
-    assert policy.interference_pmf_method == "pam_atoms"
-    assert policy.gaussian_pmf_method == "reference_sample"
-    assert policy.uniform_pmf_method == "nearest_centers"
+    assert policy.pmf_projection_method == "nearest"
+    assert not hasattr(policy, "interference_pmf_method")
+    assert policy.pdf_to_pmf_method == "pmf_sample"
     assert policy.pmf_scaling_method == "interpolate_ordinates"
     assert policy.added_noise_pdf == "scaled_total_pdf"
     assert policy.mlsd_quantization_psd == "main_tap_white"
@@ -284,7 +288,8 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert final_grid.dy == pytest.approx(aligned.pmf.dy_rel_As * aligned.imp.R_LM / (aligned.L - 1))
     assert final_grid.gaussian_n_sigma == pytest.approx(policy.gaussian_n_sigma_override)
     exported = aligned.to_export_dict()["derived"]
-    assert exported["policy"]["discrete_pmf_placement"] == "nearest"
+    assert exported["policy"]["pmf_projection_method"] == "nearest"
+    assert "interference_pmf_method" not in exported["policy"]
     assert exported["policy"]["applied_config_profile"] == "sicopr_reference_v1"
     overrides = exported["policy"]["config_profile_overrides"]
     assert overrides["policy.out_of_measured"] == {
@@ -302,9 +307,9 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "effective": "finite_record_circshift",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.gaussian_pmf_method"] == {
+    assert overrides["policy.pdf_to_pmf_method"] == {
         "raw": "bin_integral",
-        "effective": "reference_sample",
+        "effective": "pmf_sample",
         "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.mlsd_quantization_psd"] == {
@@ -352,7 +357,7 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert "noise_grid_num_ui" not in fields
     for old_field in (
         "out_of_measured", "channel_renormalization_order",
-        "pre_dte_adc_clipping_convention", "final_adc_quantization_convention",
+        "pre_dte_adc_clipping_convention", "final_com_vqc_convention",
     ):
         assert old_field not in fields
 

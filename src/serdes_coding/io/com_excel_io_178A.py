@@ -184,8 +184,8 @@ def _resolve_project_profile_178A(
         pre_dte_adc_clipping_convention=str(
             fixed.get("pre_dte_adc_clipping_convention", "annex_d3")
         ).strip(),
-        final_adc_quantization_convention=str(
-            fixed.get("final_adc_quantization_convention", "annex_d3")
+        final_com_vqc_convention=str(
+            fixed.get("final_com_vqc_convention", "selected_phase_adc_input")
         ).strip(),
         # This branch is intentionally not exposed as an individual workbook
         # row. The general project profile uses the continuous Eq. 178A-14
@@ -225,16 +225,14 @@ def _resolve_project_profile_178A(
         out_of_measured="zero_padding",
         channel_renormalization_order="s4p_first",
         pre_dte_adc_clipping_convention="matlab_4_17_reference_only",
-        final_adc_quantization_convention="matlab_4_17_reference_only",
+        final_com_vqc_convention="sicopr_final_reconstruction",
         ctle_pulse_realization="bilinear_iir",
         rxffe_record_realization="finite_record_circshift",
         eq_ch_imp_len="truncated",
         num_trunc_ui=4096,
-        discrete_pmf_placement="nearest",
-        interference_pmf_method="pam_atoms",
+        pmf_projection_method="nearest",
         xtalk_pmf_accumulation="pathwise_convolution",
-        gaussian_pmf_method="reference_sample",
-        uniform_pmf_method="nearest_centers",
+        pdf_to_pmf_method="pmf_sample",
         pmf_scaling_method="interpolate_ordinates",
         final_pmf_grid="relative_As",
         final_adc_pmf_projection="reference_support",
@@ -327,7 +325,7 @@ def _read_project_execution_profile(
         "out_of_measured",
         "channel_renormalization_order",
         "pre_dte_adc_clipping_convention",
-        "final_adc_quantization_convention",
+        "final_com_vqc_convention",
         "eq_ch_imp_len",
         "num_trunc_ui",
     }

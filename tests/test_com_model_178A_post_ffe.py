@@ -87,7 +87,7 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             for name, value in saved.items():
                 setattr(post, name, value)
 
-    def test_final_adc_reference_policy_is_isolated_from_selected_mmse(self) -> None:
+    def test_final_com_vqc_policy_is_isolated_from_selected_mmse(self) -> None:
         status = self.status
         original_mse = status.dte.mse
         original_delta = status.imp.post_ffe.adc_input.delta
@@ -95,7 +95,7 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             self.cfg,
             policy=replace(
                 self.cfg.policy,
-                final_adc_quantization_convention="matlab_4_17_reference_only",
+                final_com_vqc_convention="sicopr_final_reconstruction",
             ),
         )
         # The reference branch is tested here for stage isolation; a coarse
@@ -107,6 +107,12 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         )
         self.assertTrue(np.isfinite(alternate.COM))
         self.assertNotAlmostEqual(alternate.COM, annex.COM, places=4)
+        self.assertEqual(annex.final_vqc_convention, "selected_phase_adc_input")
+        self.assertEqual(annex.final_V_qc, status.imp.post_ffe.adc_input.V_qc)
+        self.assertEqual(annex.final_delta, original_delta)
+        self.assertEqual(alternate.final_vqc_convention, "sicopr_final_reconstruction")
+        self.assertIsNotNone(alternate.final_V_qc)
+        self.assertIsNotNone(alternate.final_delta)
         self.assertEqual(status.dte.mse, original_mse)
         self.assertEqual(status.imp.post_ffe.adc_input.delta, original_delta)
 

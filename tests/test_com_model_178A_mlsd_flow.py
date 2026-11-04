@@ -20,7 +20,6 @@ class TestMLSDFlow178A(unittest.TestCase):
             np.array([-0.2, -0.1, 0.0]),
             np.array([0.2, 0.3, 0.5]),
             dx=0.1,
-            placement="nearest",
         )
         self.assertAlmostEqual(_reference_cdf_ev(pmf, 0.15), 0.5, places=15)
 

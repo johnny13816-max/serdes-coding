@@ -39,6 +39,9 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     np.testing.assert_allclose(status.dte.mse, 0.0061912610245255335, rtol=0.0, atol=1e-14)
     np.testing.assert_allclose(status.dte.b, [0.8420106292760028], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.imp.As, 0.31666666666666665, rtol=0.0, atol=1e-15)
+    assert status.pmf.final_vqc_convention == "sicopr_final_reconstruction"
+    np.testing.assert_allclose(status.pmf.final_V_qc, 0.043139428270345365, rtol=0.0, atol=1e-15)
+    np.testing.assert_allclose(status.pmf.final_delta, 0.0013695056593760434, rtol=0.0, atol=1e-15)
     np.testing.assert_allclose(status.pmf.A_ni, 0.2656833333333335, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.pmf.COM, 1.5247607834259893, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.mlsd.delta_COM, 1.3711379014472564, rtol=0.0, atol=1e-12)

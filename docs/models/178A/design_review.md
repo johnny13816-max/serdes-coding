@@ -34,7 +34,7 @@ COM 的模型。平台必須能同時支援：
 |---|---|---|---|
 | P1 | 產品邊界與演進模型 | public baseline、internal fork、research extension 的依賴規則 | **pass** — `evolution_strategy.md` 定義三條產品路徑與回饋邊界 |
 | P2 | software layers 與 function call tree | entry/adaptor/orchestrator/stage/utility/reporting 的 owner 與合法依賴 | **pass** — 178A 不再依賴 93A concrete implementation |
-| P3 | Workbook 與設定映射門面 | Ad Hoc → project → runtime mapping、profile、validation、provenance、UX | **next / not reviewed as a whole** — 已有實作與局部證據，尚缺使用者門面及完整 mapping review |
+| P3 | Workbook 與設定映射門面 | Ad Hoc → project → runtime mapping、profile、validation、provenance、UX | **pass（current SiCoPR scope）** — `sicopr_akinwale_vendorx_22db` 的完整門面與 mapping evidence 已審查；歷史 C2M workbooks 不屬於 current-case 完成判定 |
 | P4 | config/status dataclass trees | 分層、生命週期、可選欄位、重複欄位、過度分支與 serialization | **partial** — 已完成 version ownership 與 semantic text，尚缺完整 tree review |
 | P5 | stage extension framework | 新 CDR、equalizer、noise、MLSD 等 stage method 的加入流程 | **partial** — checklist 已定義，尚未逐 stage 驗證 extension seam |
 | P6 | utility extension framework | S4P、grid、PSD、PMF 等底層方法的介面與不變量 | **partial** — 已有多項 utility contract，尚缺整體 invariant/API review |
@@ -54,6 +54,25 @@ COM 的模型。平台必須能同時支援：
 
 如果審查發現演算法問題，應另行分類成 confirmed error 或 named parallel method，
 依專案 change-contract 規則處理；不得在架構整理中順手改變數學模型。
+
+## P3 review record — workbook/config interface
+
+P3 只審查目前與專案同步的
+`cases/sicopr_akinwale_vendorx_22db/178A`；C2M workbooks 是歷史記錄，
+不作為 current runnable case 或 P3 pass/fail 的依據。
+
+| Boundary | Verdict | Evidence |
+|---|---|---|
+| Ad Hoc → project | Pass | source workbook 存在且 SHA-256 與 `config.conversion.json` 一致；audit 沒有 source issue。 |
+| project workbook facade | Pass | `fixed_config`、`search_config`、`channels`、`run_config` 都存在；`run_config.control.execution_profile` 明確為 `sicopr_reference_v1`。 |
+| project → runtime | Pass | `com_excel_io_178A` 成功建立 typed config；profile 在 adapter 展開，不由 model 讀取 workbook switch。 |
+| profile provenance | Pass | runtime policy 記錄 `sicopr_reference_v1` 與 32 項 raw/effective override；model 不保留 legacy `align_to_ref` switch。 |
+| requiredness/error UX | Pass | mapping audit 保留原始 `mlsd_trunc_len` 缺值及其明示 override；不靜默套用 `128`。 |
+
+驗證：`test_com_model_178A_policy_branches.py` 的 profile/legacy 子集 3 passed；
+`test_mapping_contract.py` 的 mapping/provenance 子集 3 passed；
+`test_conversion_status_view.py` 14 passed；`test_adhoc_format_detection.py` 2 passed。
+P3 不宣稱所有歷史 workbook 已遷移，也不改變 93A current-schema 或 release gate 狀態。
 
 ## 初步文件盤點
 
@@ -88,11 +107,11 @@ branch rationale，但 repository branch registry 與 code contract 仍是實作
 
 ## Current review conclusion
 
-178A 的 numerical production baseline 與 version ownership 已有強證據；P3–P9 仍需以使用者門面、
-dataclass/call tree、extension seam、reporting、documentation 與 release readiness 為主逐章審查。
+178A 的 numerical production baseline、version ownership 與 current SiCoPR workbook/config interface 已有強證據；
+P4–P9 仍需以 dataclass/call tree、extension seam、reporting、documentation 與 release readiness 為主逐章審查。
 目前不得開始 93A foundation 修改，也不得在後續工作中恢復 178A 對 93A concrete classes 的依賴。
 
-已通過的範圍限於 **P1 product boundary 與 P2 version ownership/decoupling**，不代表：
+已通過的範圍限於 **P1 product boundary、P2 version ownership/decoupling，以及 current SiCoPR scope 的 P3 workbook/config interface**，不代表：
 
 - v1.0 package/tag 已可發布；
 - 93A current-schema production path 已有 golden；

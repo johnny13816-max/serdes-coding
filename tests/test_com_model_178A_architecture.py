@@ -95,7 +95,6 @@ def test_178a_migrated_leaf_field_contracts_match_the_previous_boundary() -> Non
         (COMPMFConfig, com_93A.COMPMFConfig),
         (COMPMFRuntimeConfig, com_93A.COMPMFRuntimeConfig),
         (COMPath, com_93A.COMPath),
-        (COMPMFStatus, com_93A.COMPMFStatus),
         (COMSearchCandidate, com_93A.COMSearchCandidate),
         (COMSearchConfig, com_93A.COMSearchConfig),
     ):
@@ -107,6 +106,14 @@ def test_178a_migrated_leaf_field_contracts_match_the_previous_boundary() -> Non
         *[item.name for item in fields(com_93A.COMSharedPath)],
         "ctle_iir",
         "ctle_pulse_realization",
+    ]
+    assert [item.name for item in fields(COMPMFStatus)] == [
+        "dy",
+        "tap_abs_th",
+        "final_vqc_convention",
+        "final_V_qc",
+        "final_delta",
+        *[item.name for item in fields(com_93A.COMPMFStatus)][2:],
     ]
 
 
