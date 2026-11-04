@@ -21,7 +21,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage branch review | **B-012 implemented / validation passed; Git integration pending** | B-012 僅控制 direct scalar-PMF `scale_x()`；`fir_filter()` tap×PAM construction 固定採 B-008 `mass_deposit + pmf_projection_method`。B-008 已 close；B-009 selector 已移除；B-010/B-011 已完成 technical closure（`policy.pdf_to_pmf_method`，Git integration pending）。 | 在可隔離 working tree 建立 B-012 protected-boundary commit，或開始下一個 branch review |
+| CP-BR — 178A stage-by-stage branch review | **B-008/B-009、B-010/B-011、B-012 committed / remote-synced** | B-012 僅控制 direct scalar-PMF `scale_x()`；`fir_filter()` tap×PAM construction 固定採 B-008 `mass_deposit + pmf_projection_method`。B-008 已 close；B-009 selector 已移除；B-010/B-011 使用 `policy.pdf_to_pmf_method`。上述 PMF policy migration 已由 `4870669` 推送至 `origin/main`。 | 開始下一個 branch review；B-007 仍待 D3p2 evidence |
 | B-005 — Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
@@ -43,7 +43,7 @@ reporting、C2M migration 或 release 工作。
 | 178A P3 — Workbook/config interface review | current SiCoPR scope complete；evidence in `docs/models/178A/design_review.md` |
 | B-005 — Eq-channel impairment length | SiCoPR golden DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB`；`187 passed`, `1 deselected`, `2 subtests passed` |
 | B-008 — Discrete-amplitude PMF projection | `Pmf1D` 不保存 projection policy；`policy.pmf_projection_method` 只明示注入 projection operation。PMF／policy 專項 `35 passed`；SiCoPR golden DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 不變。 |
-| B-010/B-011 — PDF→PMF discretization | User-approved technical closure 2026-11-03。`policy.pdf_to_pmf_method` 統一 `bin_integral/pmf_sample`；涵蓋 pre-DTE exact/approx、final COM、MLSD。focused tests `29 passed`、Python 3.7 export passed、SiCoPR golden final COM `2.895898684873246 dB` 不變。Git integration pending，尚非 isolated-commit/push closure。 |
+| B-010/B-011 — PDF→PMF discretization | User-approved technical closure 2026-11-03。`policy.pdf_to_pmf_method` 統一 `bin_integral/pmf_sample`；涵蓋 pre-DTE exact/approx、final COM、MLSD。focused tests `29 passed`、Python 3.7 export passed、SiCoPR golden final COM `2.895898684873246 dB` 不變。PMF policy migration `4870669` 已推送至 `origin/main`。 |
 
 ## Status rules
 
