@@ -6,23 +6,28 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-01 Asia/Taipei
+Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
-Source revision: 1b97834
-Active task: CP-BR B-007 final COM ADC quantization review
-Current phase: B-005 closed; B-006 pending for D3p2 evidence; B-007 discussion only
+Source revision: a1dbc2d
+Active task: CP-BR B-013 final PMF grid numerical-control review
+Current phase: review complete; protected-model implementation contract pending
 Collaboration mode: Co-Build branch review
-Approved boundary: explain and decide B-007 behavior, ownership, config exposure and validation; no B-006/B-007 code change before decision
-Completed: B-002, B-003, Stage 2/3 boundary, B-005 implementation and closure
-In progress: B-007 behavior review
-Blocked: none
-Next recommended action: compare B-007 Annex D3 final quantization with the MATLAB 4.17 reference-only reconstruction and decide its ownership and config exposure
-Next action owner: Agent explains; user decides
-Stop point: do not enter B-008 or modify B-006/B-007 until the user accepts the applicable formal change contract
-Evidence links: docs/models/178A/stages/README.md; docs/models/178A/stages/pre_dte.md;
-                docs/models/178A/branch_behavior_registry.md; docs/planning/tc022_mmse_noise_grid.md
-Dirty-state summary: existing reference_data deletions/additions and results/ untouched; do not mix into commits
+Approved boundary: B-013 is a final DFE/MLSD numerical control. SiCoPR alignment uses
+                   `min(As/1000, 10 uV)`; pre-DTE PMF grid behavior remains independent and unchanged.
+Completed: B-008, B-010/B-011 and B-012 are committed and remote-synced; obsolete reference data removed.
+In progress: define the B-013 Core Model Change Contract for the final-grid profile correction.
+Blocked: protected `com_model_178A.py` behavior cannot change before explicit contract approval.
+Next recommended action: present and approve the minimal B-013 Core Model Change Contract.
+Next action owner: Agent drafts contract; user approves protected-model scope.
+Stop point: do not edit the final PMF resolver or reference profile before contract approval.
+Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/com_dfe.md;
+                tests/test_com_model_178A_policy_branches.py
+Dirty-state summary: only rule-session governance changes remain; project changes are committed.
 ```
+
+B-013 reference evidence confirms that final DFE/MLSD uses the capped relative grid;
+the current aligned profile incorrectly selects relative-only spacing. The current fixed-case
+COM golden remains the validation baseline; no B-013 production change has been made yet.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。
