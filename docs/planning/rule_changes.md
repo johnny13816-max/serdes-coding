@@ -3,6 +3,37 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261104-002 — Project Config classification and evolution
+
+- 日期／狀態：2026-11-04／Implemented；暫存提案依使用者指示移除；尚未 commit 或 Closed。
+- 問題：config domains、profile/mode、source identity、numerical controls 與 execution 易混在同一層；
+  演進規則亦須明確保護既有 Python API/workbook。
+- 依據：使用者要求整合 temp proposal 的分類、mode/preset、block_source、algorithm-review gate 與漸進遷移。
+- 衝突檢查：保留現行 workbook `Parameter Class` (`intrinsic`/`policy`/`derived`) 作為獨立分類軸；
+  沿用 `execution_profile`，不新增 mode；profile 不得默默覆蓋物理輸入、block source、search 或 execution。
+  algorithm-review skill 的 ownership、profile、baseline gates 相容，另由 project workflow 提供前置分類。
+- 決策：domain/exposure 與既有 class 分離；新 config 先補 metadata，再以單一核准 family 漸進遷移，
+  保留 legacy Python/workbook 介面與 adapter；不授權 dataclass、workbook 或 runtime 修改。
+- 修改範圍：AGENTS.md、project_workflow.md、configuration_architecture.md、本紀錄。
+- 驗證：diff whitespace 與本地連結檢查通過；人工情境確認 domain 不取代 Parameter Class、
+  execution_profile 沿用且無新 mode、override 需標示 custom/deviation、block source 不等於算法、
+  只可逐 family 經核准遷移；本次僅改規則文件，未改 API/dataclass/workbook/runtime。
+- Commit evidence：尚未提交；未變更 dataclass、workbook schema、mode 或 runtime code。
+- 暫存來源處置：規則已整合後，使用者同意移除 `docs/planning/temp_rule_config_architecture_proposal.md`；
+  該檔原為 untracked proposal，已刪除，未保留重複副本。
+
+## RC-20261104-001 — Main-first continuous synchronization
+
+- 日期／狀態：2026-11-04／Implemented；尚未 commit 或 Closed。
+- 問題：已完成且驗證的 boundary 長期留在 local commits／dirty tree，造成遠端落後與還原點不清。
+- 情境／證據：使用者提交 main-first、boundary 即時 push、Agent 負責分類提交及 dirty-state 避免混入的提案。
+- 決策：接受 main-first；Git branch/worktree 僅在 main 有具體安全／技術障礙且使用者明確同意時使用。
+- 影響：完成且可分離的 boundary 即 commit/push；remote sync 成為 Closed gate；不明 external data 預設不 push。
+- 修改範圍：AGENTS.md、project_workflow.md、本紀錄。未碰觸現有 project dirty changes，未進行 push。
+- 驗證：五個治理檔 diff 已逐項核對，`git diff --check` 通過；工作樹僅包含本次治理修改，
+  `main` 與 `origin/main` 起始點一致。提交與 remote sync 於本次 closure 完成。
+- Commit evidence：尚未提交。
+
 ## RC-20261029-001 — 技術文件同步結案檢查
 
 - 日期／狀態：2026-10-29／Closed。

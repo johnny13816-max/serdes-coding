@@ -31,6 +31,11 @@ AGENTS.md
   OneDrive 或 repository root。
 - 新增頂層檔案或目錄前，必須符合
   [`docs/architecture/project_structure.md`](docs/architecture/project_structure.md) 的 allowlist。
+- 新增 Project Config 欄位或啟動 algorithm/config review 前，先依
+  [`project_workflow.md` classification gate](docs/architecture/project_workflow.md#algorithm-and-config-classification-gate)
+  分類並填齊 config inventory metadata；僅更新分類／inventory 不授權修改 Python API、dataclass、
+  workbook schema、mode 或 runtime behavior。維持既有介面的漸進式遷移，細則見
+  [`configuration_architecture.md`](docs/architecture/configuration_architecture.md)。
 
 ## 2. Workflow integrity
 
@@ -78,6 +83,13 @@ AGENTS.md
   [`reference_change_workflow.md`](docs/architecture/reference_change_workflow.md)。
 - protected behavior change 必須有獨立 commit，不得混入搬檔、格式化、reporting、search、
   workbook、CI 或無關 refactor。
+- 功能／算法 review boundary 完成契約、驗證與文件同步後，必須獨立 commit 至本機 `main` 並 push
+  `origin/main`；未確認 remote 已包含該 commit，不得標 `Closed`。不得自行建立 Git branch/worktree；
+  直接在 `main` 有具體安全／技術障礙時，先取得使用者明確同意。分類、stage、commit 與 push 由 Agent 負責。
+- 僅提交可歸屬且公開安全的 boundary。`.venv`、`results/`、cache、temporary/rebuildable output 不提交；
+  external/reference data 須先確認來源、license、provenance 與 public-safe boundary，無法確認時不 push。
+  既有 dirty state 不得 reset、stash、刪除、覆蓋或混入無關變更；詳細同步與結案流程見
+  [`project_workflow.md` 的 Main-first Git integration](docs/architecture/project_workflow.md#main-first-git-integration)。
 
 ## 4. Evidence and verification
 

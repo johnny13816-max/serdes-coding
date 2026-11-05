@@ -66,6 +66,40 @@ public API/workbook schema/serialization、兩個以上合理 root cause、證�
 | 測試／驗證 | boundary → run → diagnose → evidence | Standard | 全代理 | acceptance 已判定或需要新修改 |
 | Release | gate → clean candidate → regression → artifact → review → publish | Critical Review | 全代理至發布 gate | tag/publish/merge 前停止 |
 
+## Algorithm and config classification gate
+
+Every new algorithm review or proposed Project Config field begins by classifying
+the decision before discussing candidate values or changing a schema:
+
+```text
+algorithm_policy | numerical_control | block_source | execution
+```
+
+- `algorithm_policy` selects a mathematical/numerical method. Review whether
+  the project should converge on one method or retain a semantically named
+  branch; identify the coding-layer owner and all production consumers.
+- `numerical_control` sets precision, resolution, convergence, truncation, or
+  cost. Review accuracy/cost effects, reference settings, and override behavior;
+  do not mislabel it as a different algorithm unless the underlying method changes.
+- `block_source` selects a block's data/design artifact. Review identity,
+  provenance, format, units, interface compatibility, and hash; keep this
+  separate from method selection and physical model inputs.
+- `execution` controls scheduling/run flow. Confirm it does not change
+  mathematical results. If it can, reclassify the affected decision or document
+  the numerical effect and required validation before proceeding.
+
+Record the classification, owner, affected scope, exclusions, and evidence in
+the branch/config review record. Mixed-scope proposals must be split into
+independent decisions or explicitly describe each classified component. Do not
+start implementation or propose workbook/API exposure while classification,
+owner, or scope is unresolved.
+
+For any new config field, apply the required inventory metadata and
+mode/preset/override rules in
+[`configuration_architecture.md`](configuration_architecture.md#configuration-domains-and-classes)
+before schema exposure. This gate does not itself authorize adding a field,
+mode, dataclass, workbook row, or runtime behavior.
+
 ## 一般執行流程
 
 ### 1. Preflight
@@ -117,14 +151,28 @@ Open questions:
 ### 5. Implementation
 
 - 限定在批准範圍；dependency search/read 可批次並行，mutation、approval 與 dependent steps 依序執行。
+- 算法契約執行固定為三項：依契約改程式、將已實作契約同步至相關權威技術文件、檢查既定 baseline。
+  契約列明的測試屬程式修改；不自動擴大成額外審查或行政整理。
+- 開始編輯前一次辨認契約涉及的 production call sites、必要 tests、文件 owner 與驗收項目；
+  同批完成程式及文件後再驗證。不得把已發現的漏查留到昂貴驗證後才補查。
+- 不順手重構、修復歷史問題、掃描無關模組、重算無關 tracker/workbook、render 或重建已可用環境。
+  只做契約明列或完成三項工作直接必要的操作；額外工作先說明原因與成本，取得使用者同意再做。
 - confirmed error 修正 baseline；合法 design diff 使用具核心概念的 named parallel method；experiment 不改 default。
 - 不在高層直接修補低層結果。選擇策略的層、傳遞設定的層與執行數值操作的 owner 必須分清。
 - 同一責任邊界同步 code、tests、authoritative docs 與 tracker。
 
 ### 6. Verification
 
-依序做最小 invariant/focused test、fixed golden intermediate/final value、affected regression，必要時才做
-small/full search。已通過的檢查不因形式而重跑；只有新變更、failure 或未解風險才擴大驗證。
+程式與必要文件完成後才做最終驗證。依契約執行 focused tests 與既定 COM baseline；使用固定 case、
+profile、candidate、revision 邊界與既有 tolerance，記錄預期值、實際值及 pass/fail。額外 regression、
+search 或 golden 只有契約明列，或有具體風險證據且使用者同意時才執行。
+
+每次 production code 修改後，須判斷既有驗證是否因此失效；失效的項目在最後重跑一次。文件、日期、
+tracker、render 或 commit 變更不使數值驗證失效，不得因此重跑昂貴 golden。相同測試未結束時不得重複啟動；
+完成最終 baseline 後，不因純行政收尾再次執行。
+
+若 baseline 失敗，只定位本次修改造成的差異；不改 golden、不放寬 tolerance，也不擴大到未核准算法。
+若失敗原因尚未分類，不得標 Closed；保存證據並回報下一個決策點。
 
 ### 7. Git and closure
 
@@ -132,8 +180,37 @@ small/full search。已通過的檢查不因形式而重跑；只有新變更、
   核對受影響技術文件與實作的同步情況，記錄已同步文件或無需更新的理由；必要文件未同步不得 Closed。
 - 每個可獨立 review/rollback 的責任邊界一個 commit；protected behavior 必須獨立 commit。
 - 不提交無法安全歸屬的既有 dirty changes。需要 GitHub sync 的 workflow 在切換下一項前先 push。
-- `Closed` 需要 implementation、focused/applicable regression、required docs、tracker reconciliation、
+- `Closed` 需要契約修改、適用驗證、必要技術文件、最小狀態紀錄、
   isolated commit，以及工作流要求時的 push。討論、draft、counterfactual 或 passing test 都不是 closure。
+
+## Main-first Git integration
+
+本節規範功能／算法 review boundary 的整合；protected model、文件同步與其他適用 gate 仍須一併滿足。
+
+- `main` 是預設開發與整合 branch。runtime algorithm branch 是程式內的算法選項，與 Git branch 無關。
+  Agent 不得自行建立 local/remote Git branch 或 temporary worktree。只有直接在 `main` 有可說明的
+  安全或技術障礙時，先向使用者列原因、替代方案與成本，取得明確同意後才建立。
+- 一個可獨立理解、驗證及還原的 boundary 完成核准範圍、適用驗證、文件同步與公開安全分類後，
+  Agent 應立即將 boundary commit 至本機 `main` 並 push 至 `origin/main`；不等整個 roadmap 或更大主題完成。
+  不完整工作留在工作樹並清楚標示，不為了製造乾淨狀態而提前提交。
+- Agent 負責盤點、分類、stage、commit 與 push，不要求使用者逐檔指定。提交前核對 branch、HEAD、
+  remote tracking state 與 dirty diff；僅 stage 已確認屬於該 boundary 的檔案／hunk。不同 boundary 分開 commit。
+- 可提交項目限於有來源依據、符合 license/public-safe 規則且屬於 boundary 的 source、tests、技術文件、
+  必要 config 與可重現 validation evidence。`.venv`、`results/`、cache、temporary artifact、下載副本及
+  可重建 local output 不提交。external/reference data 必須確認來源、license、provenance 與公開界線；
+  有任一項無法判定時先排除，不 push。只有來源、license、刪除語意或 public/local-only 歸屬確實無法
+  由現有 evidence 判定時，才向使用者提出具體決策問題。
+- 遇到既有 dirty state，先保留 Git status、diff 與檔案分類等可恢復證據，再依 contract、檔案內容與
+  既有 evidence 分離可安全歸屬的已完成 boundary，以最小 commit 同步。不得 reset、checkout 覆蓋、stash、
+  刪除或移動任何既有變更；無法安全分離時不提交該部分，明確標示 blocker 與證據，不把整個工作樹推上去。
+- push 前先確認 `main` 與 `origin/main` 關係。若遠端前進，fetch 後檢查差異並以不丟失任一方工作的
+  fast-forward 整合方式處理；遇衝突、非 fast-forward 原因不明或權限失敗時停止，不 force-push、不覆寫遠端，
+  保留本機 commit 並標記 `remote sync pending`。
+- 狀態分別記 `Implemented`、`validation passed`、`committed`、`remote sync pending`、`Closed`。
+  `Closed` 必須確認：boundary commit 在 local `main`；push 成功；`origin/main` 包含該 commit；該 boundary
+  無未提交變更；並滿足本 workflow 其餘驗證、文件與狀態要求。結案回報 commit SHA、push 結果與 remote-sync 狀態。
+- 每個 boundary 以 commit 作為可還原單位；release／里程碑如需穩定版本識別，依 release workflow 建立 tag。
+  不把一般功能 commit 升格成 release claim。
 
 ## Active-item document lifecycle
 

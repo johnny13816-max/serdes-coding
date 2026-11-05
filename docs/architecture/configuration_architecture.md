@@ -32,6 +32,111 @@ The project workbook format is stable within each COM version. Similar presentat
 
 ## Configuration domains and classes
 
+`domain` describes the user's intent for a setting; workbook `Parameter Class`
+describes its source/runtime treatment. These are independent axes and must not
+be substituted for one another. For example, `algorithm_policy` may use the
+existing `policy` class; `physical_input` may be `intrinsic`; a read-only
+resolved value may have domain `derived` while its schema treatment follows
+the version contract.
+
+Every user-configurable field has exactly one primary domain, plus a separate
+exposure level:
+
+| Domain | Meaning |
+|---|---|
+| `physical_input` | System, specification, and physical conditions being modeled. |
+| `block_source` | Data/design variant selected for a named block, including its identity and provenance. |
+| `search` | Search objective, variables, and candidate ranges. |
+| `algorithm_policy` | Choice of mathematical or numerical method. |
+| `numerical_control` | Resolution, convergence, truncation, precision, and computational-cost controls. |
+| `execution` | Scheduling and run-flow controls that do not change mathematical results. |
+| `provenance` | Case, source, selected preset, override, and effective-setting record. |
+| `derived` | Runtime-resolved values that are not directly user-settable. |
+
+Each field also has exposure `frequent`, `advanced`, or `internal_readonly`.
+Exposure describes who normally edits or views the value; it does not change
+the domain, ownership, or effect of that value. A field with multiple effects
+still receives one primary domain, with secondary consequences recorded in its
+`effect` metadata.
+
+Before a new config field is added to a project schema or exposed through an
+API/workbook, its version config inventory must record:
+
+```text
+domain:                 exactly one domain above
+exposure:               frequent | advanced | internal_readonly
+owner:                  config resolver, adapter, manifest, or production owner
+effect:                 physical model | source | method | accuracy | cost | scheduling
+scope:                  production consumers and explicit exclusions
+raw value:              supplied workbook/API/user value, including source
+effective value:        value after preset/profile resolution and overrides
+profile membership:     presets/profiles that set, lock, or inherit the value
+override semantics:     allowed override, validation, and resulting mode/provenance
+reporting metadata:     raw/effective/source identity exposed in results/status
+```
+
+If a field is internal and read-only, record why it is not directly configurable
+and how its effective value is reported. Do not add a field when owner, scope,
+effect, or override behavior is unresolved; record the gap and resolve it before
+implementation. Required metadata is documentation and review evidence; this
+rule alone does not authorize adding runtime fields or workbook columns.
+
+### Progressive config migration
+
+Config architecture evolves in approved, reviewable steps:
+
+1. **Inventory:** classify existing fields and fill known metadata; mark unknowns
+   as unresolved. Do not change runtime behavior, Python API, or workbook schema.
+2. **Presentation:** improve config trees and result/status presentation while
+   preserving current dataclasses, workbook fields, and parser behavior.
+3. **Preset resolution:** document a reviewed mode matrix and raw/effective
+   provenance using current profile selectors and legacy values; do not add a
+   new mode solely to complete the taxonomy.
+4. **Family migration:** migrate one config family per approved contract. Name
+   compatibility adapters and deprecation behavior, keep existing Python and
+   workbook inputs working during the transition, and validate the established
+   fixed baseline before removing a legacy path.
+
+Do not batch-move dataclass fields, rename workbook columns, force direct paths
+into manifest variants, or remove a legacy API/workbook entry as part of
+classification or inventory work. Such changes require a separate approved
+migration contract with compatibility behavior, affected consumers, and
+baseline acceptance.
+
+### Mode and preset contract
+
+Use the existing versioned `execution_profile` as the compatibility-preserving
+selector for named simulation modes/presets. This is a resolution and provenance
+boundary, not a numerical algorithm method or execution scheduler. This rule
+does not introduce any new mode or rename the existing selector.
+
+- A mode/preset has a reviewed matrix listing each included `algorithm_policy`
+  and `numerical_control`, its resolved value, and whether it is inherited,
+  fixed, or overridable.
+- A preset cannot silently change `physical_input`, `block_source`, search
+  ranges, execution target, or orchestration controls. Any proposed exception
+  needs an explicit contract describing the semantics and compatibility impact.
+- `fast_exploration` cannot claim reference alignment. A `sicopr_reference`
+  profile may claim alignment only for the named, validated scope and only when
+  all applicable reference methods/settings are selected.
+- An override of a guarantee made by the selected profile must resolve to
+  `custom`, or be reported as an explicit deviation. A deviated result cannot
+  claim reference alignment.
+- Preserve legacy `execution_profile` values and Python/workbook interfaces
+  during migration. Adapters resolve legacy inputs into the same raw/effective
+  provenance model; do not change runtime algorithms merely to implement this
+  classification contract.
+
+### Block source contract
+
+`block_source` identifies which data/design artifact a block consumes; it does
+not choose the algorithm that processes it or the numerical precision used.
+Record the selected variant, artifact identity/revision, format, units,
+interface compatibility, and content hash in resolved provenance/results.
+Existing direct-path fields remain supported during migration and are recorded
+as legacy source bindings. Moving paths into a manifest or variant selector
+requires a separate approved contract and compatibility plan.
+
 ### Case config
 
 Case identity and provenance describe the case, not a runtime COM parameter. Keep `case_id`, source identity/note, and case warnings in the case-config domain. They must not be labeled `intrinsic` or passed into `COMConfig` unless an explicit runtime field is defined.
