@@ -19,17 +19,15 @@
 | Multiple stages involved / Shared L3 (Stages 2, 3, 5, 7) | B-005 Eq-channel impairment length | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | 完整 one-sample/UI impairment eq-channel 先形成；PSD 前統一選 `full` 或依 `num_trunc_ui` 做 `truncated`。Stage 7 的 MLSD `S_isi` 也走同一入口；workbook 獨立控制。 |
 | Pre-DTE impairment / ADC | B-006 Pre-DTE ADC clipping convention | `policy.pre_dte_adc_clipping_convention` | 選擇 Annex D3 clipping 或 reference-only RJ/tail convention。 |
 | Pre-DTE impairment / ADC | E-002 ADC-input PMF method | `execution.<profile>.pre_dte_pmf_method` | 選擇 Gaussian approximation 或 exact PMF flow 的 pre-DTE clipping。 |
-| Pre-DTE impairment / PMF | B-008 Discrete-amplitude placement | `policy.discrete_pmf_placement` | 選擇 linear mass deposition 或 nearest-bin placement。 |
-| Pre-DTE impairment / PMF | B-009 Interference PMF representation | `policy.interference_pmf_method` | 選擇 signal-FIR 或 PAM-atom interference PMF construction。 |
-| Pre-DTE impairment / PMF | B-010 Gaussian PMF creation | `policy.gaussian_pmf_method` | 選擇 bin-integral 或 reference-sampled Gaussian discretization。 |
-| Pre-DTE impairment / PMF | B-011 Uniform PMF creation | `policy.uniform_pmf_method` | 選擇 bin-integral 或 nearest-center uniform discretization。 |
+| Multiple PMF stages / shared L3 + PMF utility | B-008 Discrete-amplitude projection | `policy.pmf_projection_method` | `Pmf1D` 只保存 PMF data；各 stage 把同一 project policy 明示傳入 projection operation，exact PAM atoms 先乘 tap，再由唯一 utility decision point 選 linear mass deposition 或 nearest-bin projection。B-009 平行 FIR path 已移除。 |
+| Multiple PMF stages / shared L3 + PMF utility | B-010/B-011 PDF→PMF discretization | `policy.pdf_to_pmf_method` | `bin_integral` 或 `pmf_sample`；Gaussian／uniform 各自執行 SiCoPR 對應的離散化 rule。 |
 | Pre-DTE impairment / PMF | B-012 PMF amplitude scaling | `policy.pmf_scaling_method` | 在 PMF scaling 時選擇 mass deposition 或 ordinate interpolation。 |
 | Pre-DTE impairment / PMF | E-003 PMF grid quality | `execution.<profile>.pmf_grid_quality` | 選擇 coarse 或 fine derived PMF grid。 |
 | Pre-DTE impairment / PMF | E-004 PMF convergence controls | `execution.<profile>.pmf_keep_mass`, `execution.<profile>.pmf_dy_override` | 選擇 retained mass，並可用明示值取代 derived grid spacing。 |
 | MMSE DTE | E-005 Floating FFE solve | `execution.<profile>.floating_mode` | 選擇 heuristic、simplified 或 spec-defined floating-tap placement flow。 |
 | MMSE DTE | E-006 Sampling-phase search | `execution.<profile>.pos_sweep_method`, `execution.<profile>.pos_coarse_stride` | 選擇 exhaustive 或 coarse/fine sampling-phase evaluation。 |
 | Post-FFE impairment | B-004 RX FFE record realization | `policy.rxffe_record_realization` | 選擇 fixed-grid linear convolution 或 finite-record circular shift-sum。 |
-| DFE COM / final PMF | B-007 Final ADC quantization convention | `policy.final_adc_quantization_convention` | 選擇 Annex D3 final quantization 或 reference-only clipping reconstruction。 |
+| DFE COM / final PMF | B-007 Final COM `V_qc` convention *(pending D3p2)* | `policy.final_com_vqc_convention` | 選擇沿用 Stage 5 selected-phase ADC-input `V_qc/delta`，或依 SiCoPR final composition 重建。main-tap accumulation 不屬此分支。 |
 | DFE COM / final PMF | B-013 Final PMF grid | `policy.final_pmf_grid` | 選擇受 absolute/relative limit 約束的 fine grid，或直接 relative-to-`As` grid。 |
 | DFE COM / final PMF | B-014 Gaussian support | `policy.gaussian_n_sigma_override` | 使用 config Gaussian support 或明示的 reference-profile override。 |
 | DFE COM / final PMF | B-015 Final ADC PMF projection | `policy.final_adc_pmf_projection` | 選擇 Annex D3 或 reference-support/tap projection；後者要求 reference-only quantization convention。 |

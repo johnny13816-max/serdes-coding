@@ -162,17 +162,13 @@
 
 ## PMF Handler
 
-25. PMF cleanup
-   - 移除或實作殘留 public API：`fir_filtered_pmf()`。
-   - 確認 public methods 全部是 immutable style。
-
-26. PMF debug / plot tools
+25. PMF debug / plot tools
    - plot PMF/PDF-like view。
    - plot CDF。
    - main cursor normalized view。
    - tail probability debug view。
 
-27. PMF numerical validation
+26. PMF numerical validation
    - 檢查 `combine()` round-trip / mass conservation。
    - 檢查 `resample_dx()` mass conservation。
    - 檢查 `fir_filter()` tap pruning 與 93A threshold。
