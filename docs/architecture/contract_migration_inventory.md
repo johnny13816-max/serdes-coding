@@ -36,12 +36,12 @@ Do not copy mathematical statements from this inventory into authoritative model
 - `Pmf1D`
 - PMF transform methods
 - PMF helper functions
-- 保留中的 module-level `fir_filtered_pmf()` 不得回傳 placeholder；未實作時必須明確拋出 `NotImplementedError`。`Pmf1D.uniform()` 已是完整的 bin-integrated uniform PMF constructor。
+- `Pmf1D.fir_filter()` 是唯一 FIR-PMF public API；舊 module-level `fir_filtered_pmf()` 與 `fir_filter_atoms()` 已移除。`Pmf1D.uniform()` 是完整的 bin-integrated uniform PMF constructor。
 
 目前邊界：
 
 - `Pmf1D` 保持獨立 module。
-- `fir_filter()` / `combine()` 等 immutable transform 保留在 `Pmf1D`。
+- `fir_filter()` / `combine()` 等 immutable transform 保留在 `Pmf1D`；grid projection method 由實際執行 projection 的 operation 顯式接收，`Pmf1D` 不保存 project policy。
 - 只被單一 method 使用的檢查邏輯留在 method 內部或 private nested function。
 - module-level helper 只保留多個 function/class 會共用的東西。
 
