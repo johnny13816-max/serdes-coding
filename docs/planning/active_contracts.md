@@ -21,7 +21,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage branch review | **B-008/B-009、B-010/B-011、B-012 committed / remote-synced** | B-012 僅控制 direct scalar-PMF `scale_x()`；`fir_filter()` tap×PAM construction 固定採 B-008 `mass_deposit + pmf_projection_method`。B-008 已 close；B-009 selector 已移除；B-010/B-011 使用 `policy.pdf_to_pmf_method`。上述 PMF policy migration 已由 `4870669` 推送至 `origin/main`。 | 開始下一個 branch review；B-007 仍待 D3p2 evidence |
+| CP-BR — 178A stage-by-stage branch review | **B-008/B-009、B-010/B-011、B-012 committed / remote-synced；B-013 closed no-code** | B-012 僅控制 direct scalar-PMF `scale_x()`；`fir_filter()` tap×PAM construction 固定採 B-008 `mass_deposit + pmf_projection_method`。B-013 確認 current `relative_As` 已正確映射 SiCoPR final-grid domain，不修改 production behavior。 | 審查 E-003 pre-DTE PMF grid；`pmf_keep_mass` 留待 E-004；B-007 仍待 D3p2 evidence |
 | B-005 — Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |

@@ -8,26 +8,27 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
-Source revision: a1dbc2d
-Active task: CP-BR B-013 final PMF grid numerical-control review
-Current phase: review complete; evidence supports no production change
+Source revision: 6d0c7df
+Active task: CP-BR E-003 pre-DTE PMF grid numerical-control review
+Current phase: normal review; define reference behavior, scope, and override semantics
 Collaboration mode: Co-Build branch review
-Approved boundary: B-013 is a final DFE/MLSD numerical control. SiCoPR's grid is mapped
-                   into the project's unnormalized post-FFE voltage domain; pre-DTE remains independent.
-Completed: B-008, B-010/B-011 and B-012 are committed and remote-synced; obsolete reference data removed.
-In progress: user closure decision for B-013; no Core Model Change Contract is warranted.
+Approved boundary: B-013 is closed no-code. E-003 owns pre-DTE/selected-phase ADC-input grid
+                   resolution and explicit dy override; E-004 retains separate PMF mass control.
+Completed: B-008, B-010/B-011 and B-012 are remote-synced; B-013 is closed no-code.
+In progress: compare project coarse/fine/explicit dy behavior with SiCoPR pre-DTE `OP.BinSize`.
 Blocked: none.
-Next recommended action: close B-013 as no-code alignment and introduce the next branch review.
-Next action owner: User confirms B-013 closure.
-Stop point: do not change the correct `relative_As` reference-profile selection.
-Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/com_dfe.md;
+Next recommended action: decide whether the reference profile should use a derived grid or explicit fixed dy.
+Next action owner: User selects E-003 reference-alignment behavior after evidence review.
+Stop point: do not modify pre-DTE runtime controls before the E-003 decision.
+Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/pre_dte.md;
+                docs/models/178A/stages/post_ffe.md;
                 tests/test_com_model_178A_policy_branches.py
-Dirty-state summary: only rule-session governance changes remain; project changes are committed.
+Dirty-state summary: B-013 closure record pending this documentation commit; no production-code change.
 ```
 
-B-013 reference evidence confirms that SiCoPR `A_s≈5.3743 mV` resolves `dy≈5.3743 uV`.
-Mapping through the project's unnormalized post-FFE gain gives `dy≈316.667 uV`, exactly
-the current `relative_As` setting. Applying the project-domain `10 uV` cap would not align.
+B-013 closed with no production change: SiCoPR `dy≈5.3743 uV` maps through the
+project's unnormalized post-FFE gain to `≈316.667 uV`, exactly `relative_As`.
+E-003 now reviews the separate pre-DTE grid consumers; E-004 `pmf_keep_mass` is excluded.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。
