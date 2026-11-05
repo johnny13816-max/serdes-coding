@@ -8,28 +8,26 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
-Source revision: missing-DC classification correction and selectable-control reindex on main
-Active task: CP-BR; ALG-001 missing-DC handling review
-Current phase: Missing-DC reclassified from physical input to algorithm policy; ALG-001 normal-mode review active
+Source revision: ALG-001 implementation commit 7c256b2 on origin/main
+Active task: CP-BR; next stage-ordered review not started
+Current phase: ALG-001 closed; ready to introduce NUM-001
 Collaboration mode: Co-Build branch review
-Approved boundary: NUM-004 owns the ADC-input grid function set; NUM-005 independently owns the
-                   final-grid function set. NUM-006 retains separate PMF mass control.
-Completed: ALG-002, ALG-003, ALG-004, NUM-004 and NUM-005.
-In progress: ALG-001 normal-mode review; no implementation authorized.
+Approved boundary: none for NUM-001; review introduction and boundary definition only.
+Completed: ALG-001, ALG-002, ALG-003, ALG-004, NUM-004 and NUM-005.
+In progress: none; NUM-001 review has not started.
 Blocked: none.
-Next recommended action: continue ALG-001 option/owner/reference evidence review after the approved classification correction.
-Next action owner: Codex completes the ALG-001 evidence report; user decides its behavior contract.
-Stop point: do not modify any pending selector or consumer before its review contract is approved.
-Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/pre_dte.md;
-                docs/models/178A/stages/post_ffe.md; docs/planning/e003_pmf_grid_numerical_control.md;
-                tests/test_com_model_178A_policy_branches.py; tests/test_com_model_178A_golden.py
-Dirty-state summary: clean after the selectable-control reindex commit/push.
+Next recommended action: introduce NUM-001 in plain language, then show options, impact scope and discussion items.
+Next action owner: Codex presents the review introduction; user confirms the review boundary.
+Stop point: do not modify NUM-001 or another pending control before its review contract is approved.
+Evidence links: docs/models/178A/branch_behavior_registry.md; docs/planning/alg001_missing_dc_completion.md;
+                docs/models/178A/stages/path_construction.md; tests/test_com_model_178A_golden.py
+Dirty-state summary: ALG-001 closure-document update pending one documentation-only commit.
 ```
 
-NUM-004／NUM-005 closure evidence (legacy E-003／B-013): focused policy/text tests `37 passed`; fixed SiCoPR golden
-`COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
-Workbook inspection confirms eight canonical grid fields, no legacy run-level shared grid rows,
-and no formula errors. NUM-006 `pmf_keep_mass` remains excluded and unmodified.
+ALG-001 closure evidence: focused tests `59 passed`; Python 3.7 utility export
+validator passed；fixed SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`
+and final `COM=2.895898684873246 dB` unchanged. Boundary commit `7c256b2` is on
+`origin/main`.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。

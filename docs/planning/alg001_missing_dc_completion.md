@@ -1,7 +1,12 @@
 # ALG-001 missing-DC completion contract
 
-Status: Implemented; validation passed; integration pending  
-Classification: `algorithm_policy`  
+Historical / non-authoritative closure evidence. Current behavior is owned by
+[`branch_behavior_registry.md`](../models/178A/branch_behavior_registry.md),
+[`path_construction.md`](../models/178A/stages/path_construction.md), and
+[`sparameter_model_contract.md`](../architecture/sparameter_model_contract.md).
+
+Status: Closed 2026-11-05
+Classification: `algorithm_policy`
 Control: `channel.missing_dc_policy`
 
 ## Goal and boundary
@@ -56,5 +61,6 @@ Project workbook default remains `skrf`. The `sicopr_reference_v1` profile selec
 - Fixed acceptance values:
   - `COM_DFE = 1.5247607834259893 dB`
   - final `COM = 2.895898684873246 dB`
-- Rollback boundary: the isolated ALG-001 commit produced by this contract.
+- Boundary and rollback commit: `7c256b239ae633afe918f0a9cb1eedc989e0824e`;
+  pushed to `origin/main`.
 

@@ -40,7 +40,8 @@ v1.0 foundation
 
 CP-BR 依 stage-by-stage layered call tree 審查 selectable controls。NUM-003
 （legacy B-005）已於 2026-11-01 關閉；ALG-001（legacy B-019）missing-DC handling
-為目前 active normal-mode review。ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
+已於 2026-11-05 關閉。下一個未開始的 stage-ordered review 是 NUM-001。
+ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
 C2M migration 與 public release 維持暫停。
 
 ## 與其他狀態文件的分工
