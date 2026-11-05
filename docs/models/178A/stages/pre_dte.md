@@ -76,7 +76,7 @@ COM                                                   [Root: model]
             │   ├── _calculate_tx_jitter_eq_ch()      [L4]
             │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
             ├── ADC-input / quantization              [L3]
-            │   ├── _resolve_adc_input_pmf_config()   [L4: NUM-004/NUM-005/NUM-002]
+            │   ├── _resolve_adc_input_pmf_config()   [L4: NUM-004/NUM-006/NUM-002]
             │   ├── _build_pmf_pam_L()                [L4: exact PAM source]
             │   ├── clipping PSD/tail selection        [L4: ALG-007]
             │   └── _build_psd_adc_qn()               [L4: ALG-008 dispatcher]
@@ -101,7 +101,7 @@ cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 | ALG-002 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule；也涵蓋 `gaussian_approx` 建立的觀察用 PMF。NUM-002 support、ALG-001 projection、ALG-003 scaling、ALG-008 path selection 仍獨立。 |
 | NUM-002 Gaussian support | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending, conditional.** Controls the finite Gaussian PMF support for the exact path. |
 | ALG-008 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending review.** Chooses `gaussian_approx` or `pmf_exact`; it is classified by its algorithm-path effect, independent of runtime storage. |
-| NUM-004/NUM-005 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | Numerical accuracy/cost controls. NUM-004 grid domains are closed; NUM-005 retention remains pending. |
+| NUM-004/NUM-006 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | Numerical accuracy/cost controls. NUM-004 ADC-input grid is closed; NUM-006 retention remains pending. |
 
 Quantization disabled when `N_qb`／`P_qc` is absent is input/configuration
 availability handling, not a branch behavior.
@@ -250,7 +250,7 @@ Every stored `S_*` value is a `SampledPSD`. Every stored `h_*` value is a `Sampl
 `adc_input_pmf_grid` owns `rule`, `dy_rel_As`, `dy_abs_max`, and optional
 `dy_override`. The override has highest priority; otherwise the rule selects
 relative-only or relative-with-cap resolution. `pmf_keep_mass` remains the
-separate NUM-005 retention control. These numerical controls do not affect final
+separate NUM-006 retention control. These numerical controls do not affect final
 DFE/MLSD PMFs.
 
 workbook `execution_profile=sicopr_reference_v1` 時，adapter 已將各 run profile 展開為 exact

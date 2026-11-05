@@ -17,6 +17,10 @@ input-boundary 或 orchestration control 列為 Stage 0；跨多 stage 的控制
 但 impact scope 必須列出全部 consumers。若後續 evidence 改變 scope，ID 允許隨 stage order 重排，
 並須在同一變更同步本表、stage 文件及 legacy mapping。
 
+一個 branch behavior 對應某個 coding layer 的一個 function set 分支，並可由一個或多個
+RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 RG 使用相同 dataclass 或數值
+公式，只要它們由不同 function set 擁有、作用於不同 stage／impact boundary，仍是不同分支。
+
 - `ALG` — `algorithm_policy`：相同物理輸入可選擇兩種以上具名數學或數值實作。
 - `NUM` — `numerical_control`：精度、解析度、截斷、收斂或計算成本。
 - `PHY` — `physical_input`／input boundary：描述 case 或輸入資料邊界。
@@ -81,8 +85,9 @@ input-boundary 或 orchestration control 列為 Stage 0；跨多 stage 的控制
 | `SRCH-001` | `search` | Stage 3 — phase scheduling | E-006 | `pos_sweep_method`, `pos_coarse_stride` | `each_phase`／`coarse_fine` | Selects evaluated phases; every visited candidate enters the same Stage 4 solver. |
 | `ALG-007` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `annex_d3`／`matlab_4_17_reference_only` | Changes clipping PMF/tail convention and therefore `V_qc → delta → S_qn`; other jitter PSD remains RJ+DDJ. Pending D3p2 evidence. |
 | `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | E-002 | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | Selects the approximate or complete PMF flow used to obtain ADC-input `V_qc`; reference profile selects exact. |
-| `NUM-004` | `numerical_control` | Stage 3 — earliest grid consumer | E-003 + B-013 | `numerical_control.adc_input_pmf_grid.*`, `numerical_control.final_pmf_grid.*` | independent `relative_As`／`relative_As_with_cap` plus override | ADC-input owner is `_resolve_adc_input_pmf_config()`; final owner is `_resolve_final_com_pmf_config()`. Earliest consumer is Stage 3; final-domain control remains independent. |
-| `NUM-005` | `numerical_control` | Stage 3 — ADC-input PMF convergence | E-004 | `pmf_keep_mass` | `1-1e-5`／reference `1.0` | Controls ADC-input convolution retained mass only; it does not own grid spacing. |
+| `NUM-004` | `numerical_control` | Stage 3 — ADC-input PMF grid | E-003 | `numerical_control.adc_input_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_adc_input_pmf_config()` owns the ADC-input grid function set used by pre-DTE and selected-phase ADC-input PMF. It must not control the final domain. |
+| `NUM-005` | `numerical_control` | Stage 6 — final PMF grid | B-013 | `numerical_control.final_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_final_com_pmf_config()` owns the final DFE/MLSD grid function set. It shares the control shape with NUM-004 but not its RG group or impact boundary. |
+| `NUM-006` | `numerical_control` | Stage 3 — ADC-input PMF convergence | E-004 | `pmf_keep_mass` | `1-1e-5`／reference `1.0` | Controls ADC-input convolution retained mass only; it does not own grid spacing. |
 | `ALG-009` | `algorithm_policy` | Stage 4 — MMSE DTE | E-005 | `floating_mode` | `heuristic/simplified/spec-defined` | `COM_MMSE_DTE.run()` selects the floating-tap/group solve flow; fixed tap limiter definition remains unchanged. |
 | `ALG-010` | `algorithm_policy` | Stage 5 — post-FFE impairment | B-004 | `policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | `_apply_rxffe_response()` owns the record realization; RX FFE taps, MMSE solve and pre-FFE response remain unchanged. |
 | `ALG-011` | `algorithm_policy` | Stage 6 — DFE COM | B-007 | `policy.final_com_vqc_convention` | `selected_phase_adc_input`／`sicopr_final_reconstruction` | Controls final-COM clipping voltage convention only. Main-tap accumulation is the separate deferred issue below. Pending D3p2 evidence. |
@@ -94,7 +99,8 @@ input-boundary 或 orchestration control 列為 Stage 0；跨多 stage 的控制
 
 `COMRunConfig.pmf_grid_quality` and `COMRunConfig.pmf_dy_override` remain legacy
 compatibility fields only. Canonical effective grid fields are
-`COMRunConfig.adc_input_pmf_grid` and `COMRunConfig.final_pmf_grid` under `NUM-004`.
+`COMRunConfig.adc_input_pmf_grid` under `NUM-004` and
+`COMRunConfig.final_pmf_grid` under `NUM-005`.
 
 The former E-007 final-quantization tap-accumulation item has no selectable
 runtime control, so it receives no selectable-control ID. It remains a deferred
@@ -110,10 +116,10 @@ contribution, projection/support, and `ALG-012` interaction are resolved.
 | B-008 | `ALG-001` | Stage 0 shared PMF utility |
 | B-009 | — | Retired selector; historical ID only |
 | B-010/B-011 | `ALG-002` | Merged shared PDF→PMF control |
-| B-012 / B-013 / B-014 / B-015 | `ALG-003` / `NUM-004` / `NUM-002` / `ALG-012` | B-013 merged with former E-003 grid family |
+| B-012 / B-013 / B-014 / B-015 | `ALG-003` / `NUM-005` / `NUM-002` / `ALG-012` | B-013 remains the independent Stage 6 final-grid function set |
 | B-016 / B-017 / B-018 | `ALG-013` / `ALG-015` / `ALG-016` | Stage 7 ordering follows production flow |
 | B-019 / B-020 / B-021 | `PHY-001` / `NUM-001` / `ALG-014` | Stage 0 input/utility plus Stage 7 PSD |
-| E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-008` / `NUM-004` / `NUM-005` | Reclassified by actual effect |
+| E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-008` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |
 | E-005 / E-006 / E-007 | `ALG-009` / `SRCH-001` / — | E-007 is a deferred non-selectable issue |
 
 ## 不是分支的項目

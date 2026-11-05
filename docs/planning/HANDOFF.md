@@ -9,13 +9,13 @@ Handoff state: ACTIVE
 Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
 Source revision: selectable-control reindex commit on main
-Active task: CP-BR; next item PHY-001 missing-DC handling review
-Current phase: ID migration complete; PHY-001 introduction not started
+Active task: CP-BR; PHY-001 missing-DC handling review
+Current phase: ID migration complete; PHY-001 normal-mode review starting
 Collaboration mode: Co-Build branch review
-Approved boundary: NUM-004 separates ADC-input and final PMF-grid numerical controls while retaining
-                   their existing resolver owners. NUM-005 retains separate PMF mass control.
-Completed: ALG-001, ALG-002, ALG-003 and NUM-004; legacy B-013 is merged into NUM-004.
-In progress: none; PHY-001 has not entered technical review.
+Approved boundary: NUM-004 owns the ADC-input grid function set; NUM-005 independently owns the
+                   final-grid function set. NUM-006 retains separate PMF mass control.
+Completed: ALG-001, ALG-002, ALG-003, NUM-004 and NUM-005.
+In progress: PHY-001 normal-mode review; no implementation authorized.
 Blocked: none.
 Next recommended action: introduce PHY-001 in plain language, then show its scope tree, options,
                          current project behavior and SiCoPR/reference evidence.
@@ -27,10 +27,10 @@ Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/s
 Dirty-state summary: clean after the selectable-control reindex commit/push.
 ```
 
-NUM-004 closure evidence (legacy E-003 + B-013): focused policy/text tests `37 passed`; fixed SiCoPR golden
+NUM-004／NUM-005 closure evidence (legacy E-003／B-013): focused policy/text tests `37 passed`; fixed SiCoPR golden
 `COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
 Workbook inspection confirms eight canonical grid fields, no legacy run-level shared grid rows,
-and no formula errors. NUM-005 `pmf_keep_mass` remains excluded and unmodified.
+and no formula errors. NUM-006 `pmf_keep_mass` remains excluded and unmodified.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。

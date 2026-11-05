@@ -26,10 +26,11 @@
 | Stage 3 / phase scheduling | `SRCH-001` search | `execution.<profile>.pos_sweep_method`, `pos_coarse_stride` | Exhaustive 或 coarse/fine phase evaluation。 |
 | Stage 3 / per-phase ADC | `ALG-007` algorithm policy | `policy.pre_dte_adc_clipping_convention` | Annex D3 或 reference-only RJ/tail clipping。 |
 | Stage 3 / per-phase ADC | `ALG-008` algorithm policy | `execution.<profile>.pre_dte_pmf_method` | Gaussian approximation 或 exact PMF flow。 |
-| Stage 3 / earliest grid consumer | `NUM-004` numerical control | `numerical_control.adc_input_pmf_grid.*`, `final_pmf_grid.*` | ADC-input/final families 獨立解析；跨 Stage 3 與 Stage 6。 |
-| Stage 3 / ADC-input PMF | `NUM-005` numerical control | `execution.<profile>.pmf_keep_mass` | Retained-mass convergence；不擁有 grid spacing。 |
+| Stage 3 / ADC-input PMF grid | `NUM-004` numerical control | `numerical_control.adc_input_pmf_grid.*` | `_resolve_adc_input_pmf_config()` function set；只影響 ADC-input domain。 |
+| Stage 3 / ADC-input PMF | `NUM-006` numerical control | `execution.<profile>.pmf_keep_mass` | Retained-mass convergence；不擁有 grid spacing。 |
 | Stage 4 / MMSE DTE | `ALG-009` algorithm policy | `execution.<profile>.floating_mode` | Heuristic、simplified 或 spec-defined floating-tap solve。 |
 | Stage 5 / post-FFE | `ALG-010` algorithm policy | `policy.rxffe_record_realization` | Fixed-grid linear convolution 或 finite-record circular shift-sum。 |
+| Stage 6 / final PMF grid | `NUM-005` numerical control | `numerical_control.final_pmf_grid.*` | `_resolve_final_com_pmf_config()` function set；只影響 final DFE／MLSD domain。 |
 | Stage 6 / DFE COM | `ALG-011` algorithm policy | `policy.final_com_vqc_convention` | 沿用 selected-phase `V_qc/delta` 或重建 final clipping PMF。 |
 | Stage 6 / final ADC PMF | `ALG-012` algorithm policy | `policy.final_adc_pmf_projection` | Annex D3 或 reference-support/tap projection。 |
 | Stage 7 / MLSD added noise | `ALG-013` algorithm policy | `policy.added_noise_pdf` | Gaussian addition 或 scaled-total-PDF calibration。 |

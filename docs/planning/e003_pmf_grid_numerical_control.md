@@ -1,4 +1,4 @@
-# NUM-004 — PMF grid numerical-control separation
+# NUM-004／NUM-005 — PMF grid numerical-control separation
 
 Legacy review IDs: E-003 + B-013.
 
@@ -48,7 +48,7 @@ execution_profile
 ```
 
 The SiCoPR reference profile resolves ADC-input `dy_override=10e-6 V` and final
-`rule=relative_As` with no final override. NUM-005 mass retention, PMF projection,
+`rule=relative_As` with no final override. NUM-006 mass retention, PMF projection,
 scaling, Gaussian support, convolution, and 93A are excluded.
 
 ## Compatibility and validation

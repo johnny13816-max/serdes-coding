@@ -66,7 +66,7 @@ NEXT2 佔 crosstalk `ΔR[0]` 的大部分。兩邊已知使用不同的高頻與
 
 ## 錯誤與平行作法的歸類
 
-**已證實的專案數值錯誤（NUM-005，legacy E-004／TC-005 草案）**：pre-DTE `pmf_exact` 要求 `P_qc=1e-7` 的尾部機率，卻用 `tap_abs_th=0.316667 mV` 跳過小 tap，並在每次 PMF 卷積只保留 `0.99999` 質量。同一個本次 time-aligned 專案 `h_dsamp` 與 `sigma_ga`，僅將 tap 門檻收緊至 `dy=0.01 mV`、保留質量改為 1，`V_qc` 即由 `41.07` 變成 `41.94 mV`；其餘 spec 公式與輸入不變。這證明目前 `S_qn` 有自身數值精度問題。相應 RMS 控制值約 `0.384350 mV`，甚至高於 SiCoPR 的 `0.381418 mV`，故不能把「向 reference 靠近」當作修正標準。核心修正須依已列出的 TC-005 獨立批准。
+**已證實的專案數值錯誤（NUM-006，legacy E-004／TC-005 草案）**：pre-DTE `pmf_exact` 要求 `P_qc=1e-7` 的尾部機率，卻用 `tap_abs_th=0.316667 mV` 跳過小 tap，並在每次 PMF 卷積只保留 `0.99999` 質量。同一個本次 time-aligned 專案 `h_dsamp` 與 `sigma_ga`，僅將 tap 門檻收緊至 `dy=0.01 mV`、保留質量改為 1，`V_qc` 即由 `41.07` 變成 `41.94 mV`；其餘 spec 公式與輸入不變。這證明目前 `S_qn` 有自身數值精度問題。相應 RMS 控制值約 `0.384350 mV`，甚至高於 SiCoPR 的 `0.381418 mV`，故不能把「向 reference 靠近」當作修正標準。核心修正須依已列出的 TC-005 獨立批准。
 
 **平行／reference policy 差異**：SiCoPR Slow clipping 用 `CDF=P_qc` 與 random-only jitter，專案按所持 D3.0 Eq. 178A-27 至 29 用 `CDF=P_qc/2` 與完整 `S_jn`。這兩項不能為了追齊 SiCoPR 而當作專案錯誤修改。SiCoPR 本案 `flim=67 GHz` 後 zero-pad，專案保留至 100 GHz 量測並使用既有延伸；先前受控 A/B 已把這個差異定位為 NEXT1／NEXT2 waveform 的主要來源。SiCoPR 的離散 MMSE PSD／SBR 使用 4096-UI 視窗，專案使用 10626-UI sampled grid；此差異也使完整 solver 向量尾部不相同。SiCoPR 的 boxcar pulse 與 3T_r 延遲、專案的連續 sinc pulse 與現行時間原點，則以比較用時間對齊處理，剩下的振幅差仍需保留在證據中。
 
