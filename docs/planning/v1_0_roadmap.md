@@ -39,8 +39,10 @@ v1.0 foundation
 ## Current company-platform focus
 
 CP-BR 依 stage-by-stage layered call tree 審查 selectable controls。NUM-003
-（legacy B-005）已於 2026-11-01 關閉；ALG-001（legacy B-019）missing-DC handling
-已於 2026-11-05 關閉。下一個未開始的 stage-ordered review 是 NUM-001。
+（legacy B-005）與 NUM-005（legacy B-013）已關閉；ALG-001（legacy B-019）
+missing-DC handling 已於 2026-11-05 關閉；ALG-011（legacy B-004）RX FFE
+record realization 已於 2026-11-06 關閉。原 NUM-001 已確認不是 selectable
+branch。下一個未開始的 stage-ordered review 是 ALG-012。
 ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
 C2M migration 與 public release 維持暫停。
 

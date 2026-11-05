@@ -1,10 +1,12 @@
 # ALG-011 — RX FFE record realization
 
-狀態：**approved and implemented；closure validation pending**
+狀態：**Closed 2026-11-06**
 
 日期：2026-11-06
 
 Legacy ID：B-004
+
+Implementation commit：`565ccba`（已推送 `origin/main`）
 
 ## 白話定義
 
@@ -85,3 +87,15 @@ MLSD 沒有另一個 ALG-011 selector，只能消費 Stage 5 已解析並記錄�
 5. template config、branch matrix、registry、stage/call-tree 與 Python 3.7 utility export 同步。
 6. SiCoPR case：`COM_DFE=1.5247607834259893 dB`、final
    `COM=2.895898684873246 dB`，不得改變 baseline。
+
+## Closure evidence
+
+- ALG-011／NUM-003／MLSD focused：`59 passed`；唯一 failure 是 Stage 4
+  MSE 舊 golden 的 `3.45e-14` 差異，發生在 Stage 5 之前且不由本契約修改。
+- Full regression：`186 passed, 17 skipped`；其餘 failures 是既有
+  architecture/B-008 mock、已排除 reference data、sandbox temp 及 fingerprint
+  expectations，無 ALG-011 新路徑 failure。
+- SiCoPR production golden：`1 passed`，上述 DFE/final COM 與 intermediate
+  digests 不變。
+- Python 3.7 export validator passed；workbook formula/error scan 為 0，兩份
+  workbook 均完成 visual inspection。
