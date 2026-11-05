@@ -899,7 +899,7 @@ def _resolve_final_com_pmf_config(
 
 def _build_pmf_pam_L(L: int) -> Pmf1D:
     # Preserve exact PAM atoms on their natural dimensionless source grid.
-    # The source itself needs no ALG-001 projection: its occupied integer grid
+    # The source itself needs no ALG-002 projection: its occupied integer grid
     # indices are -(L-1), -(L-3), ..., +(L-1).
     pmf = np.zeros(2 * L - 1, dtype=float)
     pmf[::2] = 1.0 / L
@@ -2834,7 +2834,7 @@ class COM:
                 # SiCoPR final-COM V_qc convention: reconstruct the clipping
                 # distribution and apply its P_qc tail rule. The existing tap
                 # accumulation is frozen for reference regression only; main-
-                # tap inclusion is not part of the ALG-011 branch definition.
+                # tap inclusion is not part of the ALG-012 branch definition.
                 main_gain = float(w_lim[self.cfg.dte.d_w])
                 V_qc, adc_grid_cfg, p_noise_adc = _reconstruct_final_vqc_sicopr(
                     imp_status,
@@ -2863,7 +2863,7 @@ class COM:
                 )
             else:
                 # Selected-phase ADC-input convention: reuse the Stage 5
-                # clipping result. Tap accumulation is not an ALG-011 decision.
+                # clipping result. Tap accumulation is not an ALG-012 decision.
                 if adc_input_pmf.delta is None:
                     raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
                 delta = adc_input_pmf.delta

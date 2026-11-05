@@ -23,7 +23,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 
 - `ALG` — `algorithm_policy`：相同物理輸入可選擇兩種以上具名數學或數值實作。
 - `NUM` — `numerical_control`：精度、解析度、截斷、收斂或計算成本。
-- `PHY` — `physical_input`／input boundary：描述 case 或輸入資料邊界。
+- `PHY` — `physical_input`：選擇 case 的物理條件或實際輸入資料邊界；不包含缺失資料的數值補值／延伸方法。
 - `SRC` — `block_source`：選擇 block 的資料／設計 artifact；目前 178A review set 無此類 ID。
 - `SRCH` — `search`：搜尋目標、候選覆蓋與搜尋策略。
 - `EXE` — `execution`：run extent、排程與 stage gate，不改已執行 stage 的公式。
@@ -71,31 +71,31 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 
 | ID | Class | Representative stage | Legacy ID | Control | Project default／alternate | Responsibility boundary |
 |---|---|---|---|---|---|---|
-| `PHY-001` | `physical_input` | Stage 0 — input boundary | B-019 | `channel.missing_dc_policy` | workbook `skrf`／constructor `error`；另有 `hold` | S-parameter ingestion owns missing-DC completion. It is not controlled by the execution profile and must not be mixed with out-of-measured high-frequency behavior. |
+| `ALG-001` | `algorithm_policy` | Stage 0 — S-parameter ingestion | B-019 | `channel.missing_dc_policy` | workbook `skrf`／constructor `error`；另有 `hold` | S-parameter ingestion owns the selectable missing-DC completion method. The actual measured-frequency boundary remains a physical input fact. This branch is not controlled by the execution profile and must not be mixed with out-of-measured high-frequency behavior. |
 | `NUM-001` | `numerical_control` | Stage 0 — shared response utility | B-020 | `cascade_ir(..., force_grid=...)` | `True` keeps the original cfg and checks discarded tail／`False` keeps the complete linear record | `LinkSegment`／`SampledResponse` utility owns the grid result. No implicit COM regrid. Classification remains reviewable because this is not a Project Config field today. |
 | `NUM-002` | `numerical_control` | Stage 0 — shared PMF utility | B-014 | `policy.gaussian_n_sigma_override` | config support／reference `NormalDist().inv_cdf(1-DER_0)` | Controls Gaussian support only; sigma, dy and tail-probability definitions remain unchanged. Earliest owner is the shared Gaussian PMF constructor. |
-| `ALG-001` | `algorithm_policy` | Stage 0 — shared PMF utility | B-008 | `policy.pmf_projection_method` | `linear`／`nearest` | The projection operation receives the method explicitly; `Pmf1D` stores data, not policy. Applies only when an operation deposits onto a target grid. |
-| `ALG-002` | `algorithm_policy` | Stage 0 — shared PMF utility | B-010/B-011 | `policy.pdf_to_pmf_method` | `bin_integral`／`pmf_sample` | Shared Gaussian/uniform PDF→PMF construction across pre-DTE, final COM and MLSD. Each distribution retains its own applicable rule. |
-| `ALG-003` | `algorithm_policy` | Stage 0 — shared PMF utility | B-012 | `policy.pmf_scaling_method` | `mass_deposit`／`interpolate_ordinates` | Direct scalar-PMF resampling only. `mass_deposit` delegates grid placement to `ALG-001`; FIR tap construction does not receive this selector. |
+| `ALG-002` | `algorithm_policy` | Stage 0 — shared PMF utility | B-008 | `policy.pmf_projection_method` | `linear`／`nearest` | The projection operation receives the method explicitly; `Pmf1D` stores data, not policy. Applies only when an operation deposits onto a target grid. |
+| `ALG-003` | `algorithm_policy` | Stage 0 — shared PMF utility | B-010/B-011 | `policy.pdf_to_pmf_method` | `bin_integral`／`pmf_sample` | Shared Gaussian/uniform PDF→PMF construction across pre-DTE, final COM and MLSD. Each distribution retains its own applicable rule. |
+| `ALG-004` | `algorithm_policy` | Stage 0 — shared PMF utility | B-012 | `policy.pmf_scaling_method` | `mass_deposit`／`interpolate_ordinates` | Direct scalar-PMF resampling only. `mass_deposit` delegates grid placement to `ALG-002`; FIR tap construction does not receive this selector. |
 | `EXE-001` | `execution` | Stage 0 — pipeline gate | E-001 | `COMRunConfig.target` | `mse/dfe/mlsd/full` | Selects run extent only; it does not change formulas in stages that execute. |
-| `ALG-004` | `algorithm_policy` | Stage 1 — path construction | B-001 | `policy.channel_renormalization_order` | `sdd_first`／`s4p_first` | `_build_channel_under_test()` owns the ordered representation operations. Pending draft/reference evidence; `_build_path()` must not renormalize again. |
-| `ALG-005` | `algorithm_policy` | Stage 1 — path construction | B-002 | `policy.out_of_measured` | `cosine_decay`／`zero_padding` | Applies only beyond the effective measured boundary of scalar `H_21`; it must not change `S_ch`, `S_all`, or the case frequency limit. |
-| `ALG-006` | `algorithm_policy` | Stage 1 — path construction | B-003 | `policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | CTLE pulse realization under shared-path construction; TX FFE and continuous VTF ownership remain separate. |
+| `ALG-005` | `algorithm_policy` | Stage 1 — path construction | B-001 | `policy.channel_renormalization_order` | `sdd_first`／`s4p_first` | `_build_channel_under_test()` owns the ordered representation operations. Pending draft/reference evidence; `_build_path()` must not renormalize again. |
+| `ALG-006` | `algorithm_policy` | Stage 1 — path construction | B-002 | `policy.out_of_measured` | `cosine_decay`／`zero_padding` | Applies only beyond the effective measured boundary of scalar `H_21`; it must not change `S_ch`, `S_all`, or the case frequency limit. |
+| `ALG-007` | `algorithm_policy` | Stage 1 — path construction | B-003 | `policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | CTLE pulse realization under shared-path construction; TX FFE and continuous VTF ownership remain separate. |
 | `NUM-003` | `numerical_control` | Stage 2 — common impairment | B-005 | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`／`truncated` | Shared L3 used by Stages 2, 3, 5 and 7. Only the PSD/correlation record may change; full responses, phase selection and channel grids remain unchanged. |
 | `SRCH-001` | `search` | Stage 3 — phase scheduling | E-006 | `pos_sweep_method`, `pos_coarse_stride` | `each_phase`／`coarse_fine` | Selects evaluated phases; every visited candidate enters the same Stage 4 solver. |
-| `ALG-007` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `annex_d3`／`matlab_4_17_reference_only` | Changes clipping PMF/tail convention and therefore `V_qc → delta → S_qn`; other jitter PSD remains RJ+DDJ. Pending D3p2 evidence. |
-| `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | E-002 | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | Selects the approximate or complete PMF flow used to obtain ADC-input `V_qc`; reference profile selects exact. |
+| `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `annex_d3`／`matlab_4_17_reference_only` | Changes clipping PMF/tail convention and therefore `V_qc → delta → S_qn`; other jitter PSD remains RJ+DDJ. Pending D3p2 evidence. |
+| `ALG-009` | `algorithm_policy` | Stage 3 — per-phase ADC input | E-002 | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | Selects the approximate or complete PMF flow used to obtain ADC-input `V_qc`; reference profile selects exact. |
 | `NUM-004` | `numerical_control` | Stage 3 — ADC-input PMF grid | E-003 | `numerical_control.adc_input_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_adc_input_pmf_config()` owns the ADC-input grid function set used by pre-DTE and selected-phase ADC-input PMF. It must not control the final domain. |
 | `NUM-005` | `numerical_control` | Stage 6 — final PMF grid | B-013 | `numerical_control.final_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_final_com_pmf_config()` owns the final DFE/MLSD grid function set. It shares the control shape with NUM-004 but not its RG group or impact boundary. |
 | `NUM-006` | `numerical_control` | Stage 3 — ADC-input PMF convergence | E-004 | `pmf_keep_mass` | `1-1e-5`／reference `1.0` | Controls ADC-input convolution retained mass only; it does not own grid spacing. |
-| `ALG-009` | `algorithm_policy` | Stage 4 — MMSE DTE | E-005 | `floating_mode` | `heuristic/simplified/spec-defined` | `COM_MMSE_DTE.run()` selects the floating-tap/group solve flow; fixed tap limiter definition remains unchanged. |
-| `ALG-010` | `algorithm_policy` | Stage 5 — post-FFE impairment | B-004 | `policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | `_apply_rxffe_response()` owns the record realization; RX FFE taps, MMSE solve and pre-FFE response remain unchanged. |
-| `ALG-011` | `algorithm_policy` | Stage 6 — DFE COM | B-007 | `policy.final_com_vqc_convention` | `selected_phase_adc_input`／`sicopr_final_reconstruction` | Controls final-COM clipping voltage convention only. Main-tap accumulation is the separate deferred issue below. Pending D3p2 evidence. |
-| `ALG-012` | `algorithm_policy` | Stage 6 — final ADC PMF | B-015 | `policy.final_adc_pmf_projection` | `annex_d3`／`reference_support` | Final ADC quantization PMF only; reference support requires the reference final-`V_qc` convention and must not affect pre-DTE ADC. |
-| `ALG-013` | `algorithm_policy` | Stage 7 — MLSD added noise | B-016 | `policy.added_noise_pdf` | `gaussian_addition`／`scaled_total_pdf` | `solve_g_an()` selects added-noise PDF construction; `S_isi` and `S_ni` definitions remain separate. |
-| `ALG-014` | `algorithm_policy` | Stage 7 — MLSD noise PSD | B-021 | `policy.mlsd_quantization_psd` | `pre_dte_filtered`／`main_tap_white` | `build_mlsd_noise()` owns Eq. 178A-54 composition; MMSE noise, RxFFE taps, `S_an`, `S_isi` and DER solver remain unchanged. |
-| `ALG-015` | `algorithm_policy` | Stage 7 — MLSD DER recurrence | B-017 | `policy.sequence_termination` | `fixed_length_sum`／`matlab_relative_tail` | `calculate_der_mlsd()` owns recurrence termination; the shared Eq. 178A-49 sign is not a branch. |
-| `ALG-016` | `algorithm_policy` | Stage 7 — MLSD reported result | B-018 | `policy.reported_der` | `raw_sequence_sum`／`baseline_pdf_re_evaluation` | Changes reported DER formation only; raw sequence DER must remain separately recorded. |
+| `ALG-010` | `algorithm_policy` | Stage 4 — MMSE DTE | E-005 | `floating_mode` | `heuristic/simplified/spec-defined` | `COM_MMSE_DTE.run()` selects the floating-tap/group solve flow; fixed tap limiter definition remains unchanged. |
+| `ALG-011` | `algorithm_policy` | Stage 5 — post-FFE impairment | B-004 | `policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | `_apply_rxffe_response()` owns the record realization; RX FFE taps, MMSE solve and pre-FFE response remain unchanged. |
+| `ALG-012` | `algorithm_policy` | Stage 6 — DFE COM | B-007 | `policy.final_com_vqc_convention` | `selected_phase_adc_input`／`sicopr_final_reconstruction` | Controls final-COM clipping voltage convention only. Main-tap accumulation is the separate deferred issue below. Pending D3p2 evidence. |
+| `ALG-013` | `algorithm_policy` | Stage 6 — final ADC PMF | B-015 | `policy.final_adc_pmf_projection` | `annex_d3`／`reference_support` | Final ADC quantization PMF only; reference support requires the reference final-`V_qc` convention and must not affect pre-DTE ADC. |
+| `ALG-014` | `algorithm_policy` | Stage 7 — MLSD added noise | B-016 | `policy.added_noise_pdf` | `gaussian_addition`／`scaled_total_pdf` | `solve_g_an()` selects added-noise PDF construction; `S_isi` and `S_ni` definitions remain separate. |
+| `ALG-015` | `algorithm_policy` | Stage 7 — MLSD noise PSD | B-021 | `policy.mlsd_quantization_psd` | `pre_dte_filtered`／`main_tap_white` | `build_mlsd_noise()` owns Eq. 178A-54 composition; MMSE noise, RxFFE taps, `S_an`, `S_isi` and DER solver remain unchanged. |
+| `ALG-016` | `algorithm_policy` | Stage 7 — MLSD DER recurrence | B-017 | `policy.sequence_termination` | `fixed_length_sum`／`matlab_relative_tail` | `calculate_der_mlsd()` owns recurrence termination; the shared Eq. 178A-49 sign is not a branch. |
+| `ALG-017` | `algorithm_policy` | Stage 7 — MLSD reported result | B-018 | `policy.reported_der` | `raw_sequence_sum`／`baseline_pdf_re_evaluation` | Changes reported DER formation only; raw sequence DER must remain separately recorded. |
 
 `COMRunConfig.pmf_grid_quality` and `COMRunConfig.pmf_dy_override` remain legacy
 compatibility fields only. Canonical effective grid fields are
@@ -105,50 +105,50 @@ compatibility fields only. Canonical effective grid fields are
 The former E-007 final-quantization tap-accumulation item has no selectable
 runtime control, so it receives no selectable-control ID. It remains a deferred
 technical issue: production ordering is frozen until PMF seed, main-tap
-contribution, projection/support, and `ALG-012` interaction are resolved.
+contribution, projection/support, and `ALG-013` interaction are resolved.
 
 ### Legacy ID mapping
 
 | Legacy ID | Current ID | Note |
 |---|---|---|
-| B-001 / B-002 / B-003 | `ALG-004` / `ALG-005` / `ALG-006` | Stage 1 path construction |
-| B-004 / B-005 / B-006 / B-007 | `ALG-010` / `NUM-003` / `ALG-007` / `ALG-011` | Reordered by earliest stage and class |
-| B-008 | `ALG-001` | Stage 0 shared PMF utility |
+| B-001 / B-002 / B-003 | `ALG-005` / `ALG-006` / `ALG-007` | Stage 1 path construction |
+| B-004 / B-005 / B-006 / B-007 | `ALG-011` / `NUM-003` / `ALG-008` / `ALG-012` | Reordered by earliest stage and class |
+| B-008 | `ALG-002` | Stage 0 shared PMF utility |
 | B-009 | — | Retired selector; historical ID only |
-| B-010/B-011 | `ALG-002` | Merged shared PDF→PMF control |
-| B-012 / B-013 / B-014 / B-015 | `ALG-003` / `NUM-005` / `NUM-002` / `ALG-012` | B-013 remains the independent Stage 6 final-grid function set |
-| B-016 / B-017 / B-018 | `ALG-013` / `ALG-015` / `ALG-016` | Stage 7 ordering follows production flow |
-| B-019 / B-020 / B-021 | `PHY-001` / `NUM-001` / `ALG-014` | Stage 0 input/utility plus Stage 7 PSD |
-| E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-008` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |
-| E-005 / E-006 / E-007 | `ALG-009` / `SRCH-001` / — | E-007 is a deferred non-selectable issue |
+| B-010/B-011 | `ALG-003` | Merged shared PDF→PMF control |
+| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / `NUM-002` / `ALG-013` | B-013 remains the independent Stage 6 final-grid function set |
+| B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
+| B-019 / B-020 / B-021 | `ALG-001` / `NUM-001` / `ALG-015` | Stage 0 input/utility plus Stage 7 PSD |
+| E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-009` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |
+| E-005 / E-006 / E-007 | `ALG-010` / `SRCH-001` / — | E-007 is a deferred non-selectable issue |
 
 ## 不是分支的項目
 
 | 項目 | 分類與原因 |
 |---|---|
-| `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。`ALG-005` 只決定此邊界外如何處理。 |
+| `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。`ALG-006` 只決定此邊界外如何處理。 |
 | `policy.xtalk_pmf_accumulation` | **固定行為**。目前唯一合法值是 `pathwise_convolution`，沒有 A/B 分支能力；保留是待清理的 API 欄位。 |
 | TX FFE discrete filter 與 `LinkSegment.cascade_ir()` | **等價實作**。對 oversampled pulse 做 shift-sum／convolution，不屬 CTLE branch。 |
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
 | RX package `reverse_ports()` | **共同正確流程**。die-to-channel network 建立後交換 two-port port orientation，不提供錯誤舊法作分支。 |
 | Eq. 178A-49 `(-1)^(j+1)` | **共同公式修正**。不是 Annex/reference 平行方法。 |
-| final quantization FIR 是否「包含 main tap」 | **不是 `ALG-011` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
+| final quantization FIR 是否「包含 main tap」 | **不是 `ALG-012` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
 | B-009 `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供 B-009 selector。 |
 | `SampledPSD.filtered_by()` grid matching | **固定 utility contract**。輸入 grid 不一致即由 caller 先處理；沒有隱藏 auto-regrid branch。 |
 
-### `ALG-001`／retired B-009 coding-layer review
+### `ALG-002`／retired B-009 coding-layer review
 
 | Layer | Owner | Contract / review result |
 |---|---|---|
-| Project config | `COMPolicyConfig.pmf_projection_method` | `ALG-001` 保留唯一 workbook selector；SiCoPR preset 選 `nearest`，project default 為 `linear`。B-009 selector 已從 config、preset 與 runtime dispatcher 移除。 |
+| Project config | `COMPolicyConfig.pmf_projection_method` | `ALG-002` 保留唯一 workbook selector；SiCoPR preset 選 `nearest`，project default 為 `linear`。B-009 selector 已從 config、preset 與 runtime dispatcher 移除。 |
 | Shared L3 function set | PMF construction across pre-DTE、selected-phase ADC-input、final COM | 各 stage 從同一 project policy 把 `projection_method` 明示傳入會重新投影 grid 的 helper；stage 不自行實作 `linear`／`nearest`。 |
 | L4 model helper | `_build_pmf_pam_L()`、`_build_pmf_interference_178A()`、`_build_pmf_w_XT_all()` | PAM source 固定為 exact natural-grid atoms；interference helper 在 tap scaling 後明示 target-grid projection method。這些是無 COM instance state 的 pure auxiliary functions，因此保留為 module functions，而不是 `COM` methods。 |
-| PMF utility | `Pmf1D._project_to_grid()`、`Pmf1D.multi_dirac()`、`Pmf1D.scale_x()`、`Pmf1D.resample_dx()`、`Pmf1D.fir_filter()` | Private `_project_to_grid()` 是唯一底層 projection decision point。`Pmf1D` 本身不保存 policy；`copy/shift/combine` 只處理資料。`ALG-003` 的 `interpolate_ordinates` 不呼叫 projection decision point。B-009 移除後只保留一個 public FIR-filter path。 |
+| PMF utility | `Pmf1D._project_to_grid()`、`Pmf1D.multi_dirac()`、`Pmf1D.scale_x()`、`Pmf1D.resample_dx()`、`Pmf1D.fir_filter()` | Private `_project_to_grid()` 是唯一底層 projection decision point。`Pmf1D` 本身不保存 policy；`copy/shift/combine` 只處理資料。`ALG-004` 的 `interpolate_ordinates` 不呼叫 projection decision point。B-009 移除後只保留一個 public FIR-filter path。 |
 
-Coding-layer conclusion: `ALG-001` 的 branch decision point 位於 PMF utility，model
+Coding-layer conclusion: `ALG-002` 的 branch decision point 位於 PMF utility，model
 layer 只負責在每個 projection operation 明示注入同一個 project policy；B-009 已不再形成
 平行 call path。`tap_abs_th`／PMF retained-mass 等 numerical controls 是另一個
-契約，不屬於 `ALG-001` placement 或已移除的 B-009 ordering。
+契約，不屬於 `ALG-002` placement 或已移除的 B-009 ordering。
 
 ## 實作入口與驗證證據
 

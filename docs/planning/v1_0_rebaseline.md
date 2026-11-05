@@ -87,7 +87,7 @@ when they are selected as a company use case.
 | ARC-REPORT-001 plot refinement | Paused | Select reporting as a CP-0 scenario and provide the exact user-facing defect or need. |
 | C2M workbook migration | Not planned | Explicitly promote a named historical case to a supported case. |
 
-`open_issues.xlsx` uses the current control IDs: NUM-003 is Closed and ALG-007
+`open_issues.xlsx` uses the current control IDs: NUM-003 is Closed and ALG-008
 is the single Approved
 review item. `active_contracts.md` is the authority for the active CP-BR
 boundary and the remaining paused workstreams.

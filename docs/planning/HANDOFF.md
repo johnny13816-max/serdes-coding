@@ -8,18 +8,17 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
-Source revision: selectable-control reindex commit on main
-Active task: CP-BR; PHY-001 missing-DC handling review
-Current phase: ID migration complete; PHY-001 normal-mode review starting
+Source revision: missing-DC classification correction and selectable-control reindex on main
+Active task: CP-BR; ALG-001 missing-DC handling review
+Current phase: Missing-DC reclassified from physical input to algorithm policy; ALG-001 normal-mode review active
 Collaboration mode: Co-Build branch review
 Approved boundary: NUM-004 owns the ADC-input grid function set; NUM-005 independently owns the
                    final-grid function set. NUM-006 retains separate PMF mass control.
-Completed: ALG-001, ALG-002, ALG-003, NUM-004 and NUM-005.
-In progress: PHY-001 normal-mode review; no implementation authorized.
+Completed: ALG-002, ALG-003, ALG-004, NUM-004 and NUM-005.
+In progress: ALG-001 normal-mode review; no implementation authorized.
 Blocked: none.
-Next recommended action: introduce PHY-001 in plain language, then show its scope tree, options,
-                         current project behavior and SiCoPR/reference evidence.
-Next action owner: Codex presents the PHY-001 review opening; user decides its contract.
+Next recommended action: continue ALG-001 option/owner/reference evidence review after the approved classification correction.
+Next action owner: Codex completes the ALG-001 evidence report; user decides its behavior contract.
 Stop point: do not modify any pending selector or consumer before its review contract is approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/pre_dte.md;
                 docs/models/178A/stages/post_ffe.md; docs/planning/e003_pmf_grid_numerical_control.md;

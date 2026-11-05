@@ -14,11 +14,11 @@
 | `rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | **獨立 post-FFE record policy**。前者保留 overflow guard；後者重現 reference 的有限記錄 shift-sum。 |
 | Eq-channel impairment length | `full`，保留完整 one-sample/UI response 供 PSD | `truncated`；Akinwale `num_trunc_ui=4096` | **獨立 NUM-003 numerical control**。Shared L3 供 Stage 2/3/5/7 使用；只在 PSD 前改 record，不修改 XT phase、channel/pulse grid 或 status 中的 full response。workbook 保留獨立控制。 |
 | pre-DTE clipping | 取獨立欄位；預設 D3 `P_qc/2`＋完整 jitter | 強制 MATLAB 4.17 `P_qc`＋RJ-only clipping；MMSE 保留完整 jitter | **可留在 reference algorithm preset**。這是已確認、僅為對照的公式差異；須保持與 final-stage 選擇在邏輯上可區分。 |
-| final COM `V_qc` convention | `selected_phase_adc_input`：沿用 Stage 5 exact `V_qc/delta` | `sicopr_final_reconstruction`：Stage 6 依 SiCoPR composition 與 `P_qc` 重建 | **ALG-011 pending D3p2 evidence**。只控制 clipping voltage convention；main-tap accumulation 已移出 ALG-011，另列 deferred issue。 |
-| 離散 tap PMF projection | 線性質量分配 | 最近格點 | **ALG-001 algorithm policy**；`policy.pmf_projection_method` 由 caller 明示傳入會重新投影 grid 的 operation，`Pmf1D` 不保存 policy。PAM source atoms 在自然 grid 精確保存，tap scaling 後才套用 projection。 |
-| PDF→PMF discretization（ALG-002） | `bin_integral`：Gaussian bin integral、uniform bin overlap | `pmf_sample`：Gaussian grid-center sample、uniform nearest-center inclusive sample | **shared L3 policy** `policy.pdf_to_pmf_method`；各 distribution 保留自己的 rule。Gaussian support、PMF scaling 分別仍由 NUM-002、ALG-003 擁有。 |
+| final COM `V_qc` convention | `selected_phase_adc_input`：沿用 Stage 5 exact `V_qc/delta` | `sicopr_final_reconstruction`：Stage 6 依 SiCoPR composition 與 `P_qc` 重建 | **ALG-012 pending D3p2 evidence**。只控制 clipping voltage convention；main-tap accumulation 已移出 ALG-012，另列 deferred issue。 |
+| 離散 tap PMF projection | 線性質量分配 | 最近格點 | **ALG-002 algorithm policy**；`policy.pmf_projection_method` 由 caller 明示傳入會重新投影 grid 的 operation，`Pmf1D` 不保存 policy。PAM source atoms 在自然 grid 精確保存，tap scaling 後才套用 projection。 |
+| PDF→PMF discretization（ALG-003） | `bin_integral`：Gaussian bin integral、uniform bin overlap | `pmf_sample`：Gaussian grid-center sample、uniform nearest-center inclusive sample | **shared L3 policy** `policy.pdf_to_pmf_method`；各 distribution 保留自己的 rule。Gaussian support、PMF scaling 分別仍由 NUM-002、ALG-004 擁有。 |
 | ADC-input／final PMF grid | NUM-004 `adc_input_pmf_grid.*`／NUM-005 `final_pmf_grid.*` | ADC-input `10 µV` override；final `relative_As` 且無 override | **兩個獨立 function-set branches**。兩者共用 field shape，但 RG group、owner、stage 與 reference preset 不互相洩漏。 |
-| `COMRunConfig` PMF 執行設定 | 保留 ALG-008 `pre_dte_pmf_method`、NUM-006 `pmf_keep_mass` 等 runtime-effective controls | reference preset 展開對齊行為 | `pmf_grid_quality`／`pmf_dy_override` 已降為 legacy compatibility；canonical grid controls 由 NUM-004／NUM-005 分別展開至 runtime。 |
+| `COMRunConfig` PMF 執行設定 | 保留 ALG-009 `pre_dte_pmf_method`、NUM-006 `pmf_keep_mass` 等 runtime-effective controls | reference preset 展開對齊行為 | `pmf_grid_quality`／`pmf_dy_override` 已降為 legacy compatibility；canonical grid controls 由 NUM-004／NUM-005 分別展開至 runtime。 |
 
 `align_to_ref=False` **不是單一「spec 模式」**：它仍允許舊 workbook 個別 `out_of_measured`、renormalization 和 ADC convention 欄位，且 run policy 各自獨立。`True` 由 adapter 覆蓋成 reference 具名值；`COMConfig.to_export_dict()` 匯出 effective policy／execution、profile 名稱及 raw/effective override。
 
@@ -28,7 +28,7 @@
 | --- | --- |
 | S4P 檔案、port order、reference impedance、`sparam_frequency_limit_GHz` | **case 輸入與 provenance**。TC-021 已將 SiCoPR `flim` 建模為獨立輸入；Akinwale 原檔 100 GHz、case limit 67 GHz。`zero_padding` 從有效 67 GHz 邊界後生效。 |
 | `missing_dc_policy` | channel/utility 的量測缺口 policy。 |
-| `pmf_keep_mass`、`pre_dte_pmf_method` | 前者是 NUM-006 numerical control，後者是 ALG-008 algorithm policy；不同 single/search profile 可展開不同有效值並應記錄。PMF grid spacing 由 NUM-004／NUM-005 各自的 function set 擁有。 |
+| `pmf_keep_mass`、`pre_dte_pmf_method` | 前者是 NUM-006 numerical control，後者是 ALG-009 algorithm policy；不同 single/search profile 可展開不同有效值並應記錄。PMF grid spacing 由 NUM-004／NUM-005 各自的 function set 擁有。 |
 | `floating_mode`、`pos_sweep_method`／stride | MMSE／sampling-phase 搜尋演算法或加速 policy；不是 reference 物理公式。 |
 | `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；TC-013 尚未結案。 |
 | `SampledPSD.filtered_by()` 的 grid 檢查 | utility 一致性契約，無隱藏 regrid 分支。 |

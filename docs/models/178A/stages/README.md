@@ -37,18 +37,18 @@ and in the [branch registry](../branch_behavior_registry.md).
 
 | Stage | Layered call tree | Closed decisions | Pending / next |
 |---|---|---|---|
-| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-001, ALG-002, ALG-003 | PHY-001, NUM-001, NUM-002, EXE-001 |
-| 1 Path construction | Recorded | ALG-005, ALG-006 | ALG-004 external evidence |
+| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-002, ALG-003, ALG-004 | ALG-001, NUM-001, NUM-002, EXE-001 |
+| 1 Path construction | Recorded | ALG-006, ALG-007 | ALG-005 external evidence |
 | 2 Common impairment | Recorded | NUM-003 shared-L3 ownership and config exposure；legacy B-009 removed | No additional Stage 2 owner |
-| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid | SRCH-001, ALG-007, ALG-008, NUM-006 |
-| 4 MMSE DTE | Recorded | None under current CP-BR pass | ALG-009 |
-| 5 Post-FFE impairment | Recorded | NUM-003 shared-L3 consumer | ALG-010 |
-| 6 DFE COM | Recorded | NUM-005 final-grid domain | ALG-011 pending D3p2 evidence；ALG-012 |
-| 7 MLSD COM | Recorded | NUM-003 `S_isi` shared-L3 consumer | ALG-013, ALG-014, ALG-015, ALG-016 |
+| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid | SRCH-001, ALG-008, ALG-009, NUM-006 |
+| 4 MMSE DTE | Recorded | None under current CP-BR pass | ALG-010 |
+| 5 Post-FFE impairment | Recorded | NUM-003 shared-L3 consumer | ALG-011 |
+| 6 DFE COM | Recorded | NUM-005 final-grid domain | ALG-012 pending D3p2 evidence；ALG-013 |
+| 7 MLSD COM | Recorded | NUM-003 `S_isi` shared-L3 consumer | ALG-014, ALG-015, ALG-016, ALG-017 |
 
 NUM-003 (legacy B-005) closed on 2026-11-01 after implementation,
 documentation/workbook sync, unchanged SiCoPR golden COM values, branch
-isolation tests, and full non-GUI regression. ALG-007 and ALG-011 are pending
-D3p2 evidence. ALG-011's RG name and observability status are recorded without
+isolation tests, and full non-GUI regression. ALG-008 and ALG-012 are pending
+D3p2 evidence. ALG-012's RG name and observability status are recorded without
 changing its numerical flow; main-tap accumulation is a separate deferred
-issue, not an ALG-011 option.
+issue, not an ALG-012 option.

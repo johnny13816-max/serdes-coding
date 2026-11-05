@@ -223,7 +223,7 @@ over its `pre_dte` and `post_ffe` children for calculation/report compatibility.
 |---|---|
 | `dy` | V, PMF grid step |
 | `tap_abs_th` | V, PMF tap threshold |
-| `final_vqc_convention` | selected ALG-011 policy value |
+| `final_vqc_convention` | selected ALG-012 policy value |
 | `final_V_qc`, `final_delta` | optional V scalars actually used by final COM |
 | `p_ISI`, `p_G`, `p_DD`, `p_XT`, `p_qn`, `p_combined` | optional `Pmf1D` |
 | `y0`, `A_ni` | optional V scalars |
