@@ -156,7 +156,7 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `final_pmf_grid.dy_override` | same | blank / `None` |
 | `tap_rel_As` | `COMPMFConfig` | 0.001 |
 | `gaussian_n_sigma` | `COMPMFConfig` | 8 |
-| `missing_dc_policy` | `COMChannelConfig` | `skrf` |
+| `missing_dc_policy` | `COMChannelConfig` | `skrf`; reference profile selects `mag_phase_trend_to_dc` |
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
@@ -192,7 +192,7 @@ control.
 `project_standard` 使用專案預設，
 `custom` 讀取 workbook 明示的 advanced/legacy method；`sicopr_reference_v1` 由
 `com_excel_io_178A` 在建構 runtime config 前展開為 SiCoPR／MATLAB 4.17
-具名方法：`zero_padding`、`s4p_first`、`bilinear_iir`、
+具名方法：`mag_phase_trend_to_dc`、`zero_padding`、`s4p_first`、`bilinear_iir`、
 `finite_record_circshift`、pre-DTE/final ADC reference 分支，
 `truncated` eq-channel impairment record（本案 4096 UI）、
 以及 `COMPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑

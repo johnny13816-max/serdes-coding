@@ -2,6 +2,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 from scipy.signal import freqz, lfilter
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
@@ -145,6 +146,15 @@ def test_ctle_realization_is_separate_from_common_unit_pulse_application():
     np.testing.assert_allclose(bilinear.ir, expected_record, rtol=1e-13, atol=1e-15)
 
 
+def test_reference_fd_to_td_requires_alg001_completed_dc_input():
+    cfg = _small_cfg()
+    freqs = cfg.freqs[1:20]
+    response = np.exp(-1j * 2.0 * np.pi * freqs * 15e-12)
+
+    with pytest.raises(ValueError, match="ALG-001 completed input with DC"):
+        _reference_fd_to_td_record(freqs, response, cfg)
+
+
 def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
     root = Path(__file__).resolve().parents[1]
     cfg = excel_to_config_178A(
@@ -174,6 +184,8 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
         np.testing.assert_array_equal(lhs.S_tx.sdd, rhs.S_tx.sdd)
         np.testing.assert_array_equal(lhs.S_ch.sdd, rhs.S_ch.sdd)
         np.testing.assert_array_equal(lhs.S_all.sdd, rhs.S_all.sdd)
+        np.testing.assert_array_equal(lhs.H_21_measured_freqs, rhs.H_21_measured_freqs)
+        np.testing.assert_array_equal(lhs.H_21_measured_tf, rhs.H_21_measured_tf)
         np.testing.assert_array_equal(lhs.H_21.tf, rhs.H_21.tf)
         np.testing.assert_array_equal(lhs.H_all.tf, rhs.H_all.tf)
         assert np.max(np.abs(lhs.pulse.ir - rhs.pulse.ir)) > 0.0

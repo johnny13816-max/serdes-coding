@@ -21,7 +21,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage selectable-control review | **Missing-DC classification corrected；ALG-001 review active** | `channel.missing_dc_policy` 選擇缺失 DC 的數值處理方法，因此由 `PHY-001` 改列 `ALG-001`；既有 ALG IDs 依 stage-first 規則順延。ADC-input 與 final PMF grid 仍分列 NUM-004／NUM-005。 | 繼續 Stage 0 `ALG-001` normal-mode review，確認 options、owner、reference evidence 與是否需要保留全部方法；未核准前不修改 runtime behavior。 |
+| CP-BR — 178A stage-by-stage selectable-control review | **ALG-001 implemented；validation passed；integration pending** | [`ALG-001 contract`](alg001_missing_dc_completion.md)：四種 missing-DC methods 已收斂至 `SparamModel.completed_voltage_transfer_function()`；analysis-grid 與 bilinear-IIR 共用 completed H21，reference profile 選 `mag_phase_trend_to_dc`。Focused regression `59 passed`；SiCoPR golden `1 passed`，COM values 與 digests 不變；Python 3.7 export validator passed。 | 完成 diff review、獨立 commit 並 push；remote 確認後標 Closed。 |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |

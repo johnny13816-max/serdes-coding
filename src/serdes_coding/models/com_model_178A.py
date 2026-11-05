@@ -216,9 +216,9 @@ def _calculate_tx_noise_eq_ch(
     measured_pre_ctle = None
     if ctle_pulse_realization == "bilinear_iir":
         measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(
-            victim.S_all,
+            victim.H_21_measured_freqs,
+            victim.H_21_measured_tf,
             link_cfg,
-            channel_cfg,
             ft_cfg,
             kind="victim",
             include_txffe=False,

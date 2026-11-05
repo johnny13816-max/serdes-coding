@@ -85,6 +85,16 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
         der_0,
         execution_profile,
     )
+    if execution_profile == "sicopr_reference_v1":
+        raw_missing_dc_policy = channel.missing_dc_policy
+        channel = replace(channel, missing_dc_policy="mag_phase_trend_to_dc")
+        if raw_missing_dc_policy != channel.missing_dc_policy:
+            profile_overrides = dict(profile_overrides)
+            profile_overrides["channel.missing_dc_policy"] = {
+                "raw": raw_missing_dc_policy,
+                "effective": channel.missing_dc_policy,
+                "overridden_by_profile": execution_profile,
+            }
 
     link_cfg = LinkConfig(
         fb=_fixed_float(fixed, "fb"),

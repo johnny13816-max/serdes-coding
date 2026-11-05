@@ -68,7 +68,9 @@ class COMChannelConfig(_LeafConfigText):
     port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # unit: zero-based S4P port order
     gamma_src: complex = field(init=False)                  # unit: dimensionless, derived from R_d_tx and R0
     gamma_load: complex = field(init=False)                 # unit: dimensionless, derived from R_d_rx and R0
-    missing_dc_policy: Literal["error", "hold", "skrf"] = "error"
+    missing_dc_policy: Literal[
+        "error", "hold", "skrf", "mag_phase_trend_to_dc"
+    ] = "error"
     sparam_frequency_limit_Hz: Optional[float] = None       # unit: Hz; measured-record boundary
 
     def __post_init__(self) -> None:
@@ -80,8 +82,13 @@ class COMChannelConfig(_LeafConfigText):
 
         self.gamma_src = complex((self.R_d_tx - self.R0) / (self.R_d_tx + self.R0))
         self.gamma_load = complex((self.R_d_rx - self.R0) / (self.R_d_rx + self.R0))
-        if self.missing_dc_policy not in {"error", "hold", "skrf"}:
-            raise ValueError("missing_dc_policy must be error, hold, or skrf.")
+        if self.missing_dc_policy not in {
+            "error", "hold", "skrf", "mag_phase_trend_to_dc"
+        }:
+            raise ValueError(
+                "missing_dc_policy must be error, hold, skrf, or "
+                "mag_phase_trend_to_dc."
+            )
         if self.sparam_frequency_limit_Hz is not None:
             value = float(self.sparam_frequency_limit_Hz)
             if not np.isfinite(value) or value <= 0.0:

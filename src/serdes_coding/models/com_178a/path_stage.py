@@ -699,6 +699,10 @@ def _reference_fd_to_td_record(measured_freqs: np.ndarray, measured_tf: np.ndarr
         raise ValueError('measured CTLE input TF must be finite and match its frequency grid.')
     if len(freqs) < 3:
         raise ValueError('reference FD-to-TD realization requires at least three frequency points.')
+    if not np.isclose(freqs[0], 0.0):
+        raise ValueError(
+            'reference FD-to-TD realization requires ALG-001 completed input with DC.'
+        )
     measured_df = float(freqs[2] - freqs[1])
     if measured_df <= 0.0:
         raise ValueError('reference FD-to-TD realization requires positive frequency spacing.')
@@ -706,12 +710,6 @@ def _reference_fd_to_td_record(measured_freqs: np.ndarray, measured_tf: np.ndarr
     output_freqs = np.arange(n_steps + 1, dtype=float) * (link_cfg.f_nyq / n_steps)
     magnitude = np.abs(response)
     phase = np.unwrap(np.angle(response))
-    if freqs[0] > 0.0:
-        low_count = min(10, len(freqs))
-        magnitude_at_dc = float(np.polyval(np.polyfit(freqs[:low_count], magnitude[:low_count], 1), 0.0))
-        freqs = np.r_[0.0, freqs]
-        magnitude = np.r_[max(magnitude_at_dc, np.finfo(float).eps), magnitude]
-        phase = np.r_[0.0, phase]
     in_band = output_freqs <= freqs[-1]
     interpolated = np.zeros(output_freqs.shape, dtype=complex)
     magnitude_i = np.interp(output_freqs[in_band], freqs, magnitude)
@@ -726,10 +724,14 @@ def _reference_fd_to_td_record(measured_freqs: np.ndarray, measured_tf: np.ndarr
         return raw_record[:1].copy()
     return raw_record[:int(retained[-1]) + 1].copy()
 
-def _evaluate_pre_ctle_on_measured_grid(S_all: SparamModel, link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, *, kind: Literal['victim', 'next', 'fext'], include_txffe: bool=True) -> tuple[np.ndarray, np.ndarray]:
-    """Build the composite pre-CTLE TF on the measured S-parameter grid."""
-    freqs = S_all.freqs
-    H_21 = S_all.voltage_transfer_function(gamma_src=channel_cfg.gamma_src, gamma_load=channel_cfg.gamma_load)
+def _evaluate_pre_ctle_on_measured_grid(freqs: np.ndarray, H_21: np.ndarray, link_cfg: LinkConfig, ft_cfg: COMFilterConfig, *, kind: Literal['victim', 'next', 'fext'], include_txffe: bool=True) -> tuple[np.ndarray, np.ndarray]:
+    """Build the composite pre-CTLE TF from ALG-001 completed H21 samples."""
+    freqs = LinkConfig.validate_freqs(freqs)
+    H_21 = np.asarray(H_21, dtype=complex)
+    if H_21.shape != freqs.shape or not np.all(np.isfinite(H_21)):
+        raise ValueError('completed H21 must be finite and match its frequency grid.')
+    if not np.isclose(freqs[0], 0.0):
+        raise ValueError('completed H21 must include DC.')
     if not include_txffe:
         txfir = np.array([1.0])
         num_pre = 0
@@ -803,11 +805,11 @@ def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_c
     pulse_record[:len(pulse_ir)] = pulse_ir
     return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
 
-def _realize_ctle_pulse_for_path(shared: COMSharedPath, H_pre: LinkSegment, S_all: SparamModel, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig) -> LinkSegment:
+def _realize_ctle_pulse_for_path(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig) -> LinkSegment:
     """Realize one path pulse using the method resolved in shared path state."""
     measured_freqs = measured_pre_ctle = None
     if shared.ctle_pulse_realization == 'bilinear_iir':
-        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(S_all, link_cfg, channel_cfg, ft_cfg, kind=kind)
+        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(H_21_measured_freqs, H_21_measured_tf, link_cfg, ft_cfg, kind=kind)
     post_ctle, pulse_domain = _realize_ctle_response(H_pre, shared.H_ctf, link_cfg, shared.ctle_pulse_realization, shared.ctle_iir, measured_freqs=measured_freqs, measured_tf=measured_pre_ctle)
     return _apply_rectangular_unit_pulse(post_ctle, X, link_cfg, amplitude, pulse_domain)
 
@@ -875,11 +877,22 @@ def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COM
     else:
         raise ValueError(f'Unsupported COM path kind: {kind}')
     S_all = S_tx.cascade_com(S_ch).cascade_com(shared.S_rx)
-    H_21 = S_all.to_LinkSegment(link_cfg, gamma_src=channel_cfg.gamma_src, gamma_load=channel_cfg.gamma_load, dc=channel_cfg.missing_dc_policy, out_of_measured=out_of_measured)
+    H_21_measured_freqs, H_21_measured_tf = S_all.completed_voltage_transfer_function(
+        gamma_src=channel_cfg.gamma_src,
+        gamma_load=channel_cfg.gamma_load,
+        dc=channel_cfg.missing_dc_policy,
+    )
+    H_21 = LinkSegment.from_tf(
+        H_21_measured_freqs,
+        H_21_measured_tf,
+        link_cfg,
+        dc='error',
+        out_of_measured=out_of_measured,
+    )
     H_pre = H_ffe.cascade_tf(shared.H_t).cascade_tf(H_21).cascade_tf(shared.H_r)
     H_all = H_pre.cascade_tf(shared.H_ctf)
-    pulse = _realize_ctle_pulse_for_path(shared, H_pre, S_all, channel_cfg, ft_cfg, kind, X, amplitude, link_cfg)
-    return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21=H_21, H_all=H_all, X=X, pulse=pulse)
+    pulse = _realize_ctle_pulse_for_path(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg)
+    return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21_measured_freqs=H_21_measured_freqs, H_21_measured_tf=H_21_measured_tf, H_21=H_21, H_all=H_all, X=X, pulse=pulse)
 
 def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     """

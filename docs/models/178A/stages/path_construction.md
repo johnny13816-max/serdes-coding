@@ -314,9 +314,11 @@ For each path, current source performs these semantic operations:
 ```text
 S_tx + S_ch + S_rx cascade
           -> S_all
-S_all plus source/load mismatch and missing-DC policy
-          -> H_21 on measured grid
-SparamModel.to_LinkSegment -> LinkSegment.from_tf -> resample_tf
+S_all plus source/load mismatch
+          -> terminated H_21 on measured grid
+SparamModel.completed_voltage_transfer_function + ALG-001
+          -> completed_freqs + completed_H_21 (DC guaranteed)
+LinkSegment.from_tf -> resample_tf
           -> H_21 on analysis grid, applying out_of_measured above measured f_max
 H_ffe + H_t + H_21 + H_r cascade
           -> pre-CTLE response
@@ -333,17 +335,18 @@ TX FFE 在上游依 path kind 選定並完成串接，不屬於 CTLE 分支。
 `_realize_ctle_response()` 擁有 CTLE method selection；
 `_apply_rectangular_unit_pulse()` 擁有共同的一 UI symbol-pulse formation。
 `continuous_tf` 直接在 analysis grid 串接 continuous CTF 與 unit-pulse TF。
-`bilinear_iir` 則由 `_evaluate_pre_ctle_on_measured_grid()` 重建 measured-domain
-composite TF，經 `_reference_fd_to_td_record()` 建立 reference spacing 的 raw
+`bilinear_iir` 則由 `_evaluate_pre_ctle_on_measured_grid()` 直接接收 ALG-001
+已完成的 scalar `H_21` 並建立 measured-domain composite TF，不再從 `S_all`
+重新計算 terminated transfer。之後經 `_reference_fd_to_td_record()` 建立 reference spacing 的 raw
 IFFT finite record、保留 3Tr 時間原點、停用 causality correction，並以固定
 `1e-3` peak threshold 截尾，再通過共用 `COMBilinearCTLE` 與 boxcar unit pulse。
 這些是該具名方法的固定定義，不拆成額外 policy 欄位。
 後者依前者的 frequency／finite-record 表示法保留原本的 convolution semantics，
 但不引入額外 project policy。
 
-`_build_path()` forwards the chosen policy; it does not edit the resulting
-sampled response. `SparamModel.to_LinkSegment()` owns the S-parameter-to-link
-boundary, and `LinkSegment.from_tf()`／`resample_tf()` own numerical frequency
+`_build_path()` forwards the chosen policy once and stores the completed measured
+transfer in `COMPath`. `SparamModel.completed_voltage_transfer_function()` owns
+missing-DC completion, and `LinkSegment.from_tf()`／`resample_tf()` own numerical frequency
 extension. `cosine_decay` retains the existing extrapolation; `zero_padding`
 sets the complex terminated `H_21` strictly to zero only above the measured
 input's effective highest frequency. The endpoint sample stays unchanged.
@@ -361,10 +364,16 @@ The notation above denotes software cascade order and object ownership. It is no
 | Value | Intended software behavior |
 |---|---|
 | `error` | reject a transfer conversion that lacks the required DC sample |
-| `hold` | use the project's hold-style DC completion |
-| `skrf` | use the scikit-rf-backed DC handling path |
+| `hold` | complete scalar H21 with `H21(0)=H21(f_min)` |
+| `skrf` | complete the S-matrix with scikit-rf before calculating terminated H21 |
+| `mag_phase_trend_to_dc` | complete scalar H21 using the pinned SiCoPR magnitude and low-frequency group-delay trends |
 
-The chosen policy is passed to `S_all.to_LinkSegment(...)`. It is shared by every victim and aggressor path in one config.
+The chosen policy is passed to
+`S_all.completed_voltage_transfer_function(...)`. The resulting
+`completed_freqs`／`completed_H21` are shared by the analysis-grid path,
+`bilinear_iir` pulse construction and TX-noise equivalent-channel construction.
+`_reference_fd_to_td_record()` rejects missing DC rather than applying a second
+policy. The same selection applies to every victim and aggressor path in one config.
 
 ## Failure conditions
 
@@ -391,7 +400,7 @@ This stage does not downgrade errors to search rows. The search layer decides wh
 | pre-DTE common impairment | victim path plus every aggressor `pulse.ir` |
 | per-phase pre-DTE impairment | victim `pulse`, `H_t`, `H_21`, `H_r`, and `H_ctf` through path proxies/fields |
 | post-FFE impairment | selected victim `pulse.ir` |
-| path reporting | stored `S_tx`, `S_ch`, `S_all`, `H_21`, `H_all`, `X`, `pulse`, and shared responses |
+| path reporting | stored `S_tx`, `S_ch`, `S_all`, completed measured `H_21`, analysis-grid `H_21`, `H_all`, `X`, `pulse`, and shared responses |
 | search | rebuilds this entire stage for each concrete filter candidate |
 
 Reporting reads stored `COMPath` objects. It must not recreate packages, filters, cascades, or pulses from config.

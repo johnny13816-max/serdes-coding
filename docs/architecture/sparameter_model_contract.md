@@ -29,6 +29,7 @@ conversion、frequency limit 或 renormalization。每個數值操作都由具�
 | S2P operation | `cascade()` | 串接相同 grid／z0 的 differential two-port。 |
 | S2P operation | `reverse_ports()` | 交換 differential input/output。 |
 | S2P operation | `voltage_transfer_function()` | 計算 terminated H21。 |
+| S2P operation | `completed_voltage_transfer_function()` | 依明示 policy 在 S-matrix 或 scalar H21 layer 補齊 missing DC，回傳 completed frequency grid 與 terminated H21。 |
 | S2P operation | `to_LinkSegment()` | 進入 scalar response/grid boundary。 |
 | Output | `write_touchstone_s2p()` | 輸出 differential `.s2p`。 |
 | Output | `write_touchstone_s4p()` | 輸出 single-ended `.s4p`。 |

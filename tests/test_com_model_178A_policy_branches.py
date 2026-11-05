@@ -315,6 +315,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     aligned = excel_to_config_178A(str(workbook_path))
     policy = aligned.policy
     assert aligned.policy.applied_config_profile == "sicopr_reference_v1"
+    assert aligned.channel.missing_dc_policy == "mag_phase_trend_to_dc"
     assert policy.out_of_measured == "zero_padding"
     assert policy.channel_renormalization_order == "s4p_first"
     assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
@@ -355,6 +356,11 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert "interference_pmf_method" not in exported["policy"]
     assert exported["policy"]["applied_config_profile"] == "sicopr_reference_v1"
     overrides = exported["policy"]["config_profile_overrides"]
+    assert overrides["channel.missing_dc_policy"] == {
+        "raw": "skrf",
+        "effective": "mag_phase_trend_to_dc",
+        "overridden_by_profile": "sicopr_reference_v1",
+    }
     assert overrides["policy.out_of_measured"] == {
         "raw": "cosine_decay",
         "effective": "zero_padding",

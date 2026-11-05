@@ -6119,13 +6119,100 @@ class SparamModel:
 
         return self.sdd21 * (1 - gamma_src) * (1 + gamma_load) / denom
 
+    @staticmethod
+    def _mag_phase_trend_dc_value(freqs: np.ndarray, response: np.ndarray) -> complex:
+        """Return the SiCoPR-style magnitude/phase trend evaluated at DC."""
+        freqs = np.asarray(freqs, dtype=float)
+        response = np.asarray(response, dtype=complex)
+        if len(freqs) < 2:
+            raise ValueError("mag_phase_trend_to_dc requires at least two frequency points.")
+
+        magnitude = np.maximum(np.abs(response), np.finfo(float).eps)
+        phase = np.unwrap(np.angle(response))
+
+        magnitude_count = min(10, len(freqs))
+        magnitude_fit = np.polyfit(
+            freqs[:magnitude_count], magnitude[:magnitude_count], 1
+        )
+        magnitude_dc = float(np.polyval(magnitude_fit, 0.0))
+
+        group_delay = -np.diff(phase) / np.diff(freqs)
+        low_frequency_count = min(50, len(group_delay))
+        low_frequency_group_delay = group_delay[:low_frequency_count]
+        median = float(np.median(low_frequency_group_delay))
+        if len(low_frequency_group_delay) > 1:
+            sigma = float(np.std(low_frequency_group_delay, ddof=1))
+            inliers = np.abs(low_frequency_group_delay - median) < sigma
+        else:
+            inliers = np.zeros(low_frequency_group_delay.shape, dtype=bool)
+        phase_trend = (
+            float(np.mean(low_frequency_group_delay[inliers]))
+            if np.any(inliers)
+            else median
+        )
+
+        corrected_phase = phase.copy()
+        for index in range(min(9, len(freqs) - 2), -1, -1):
+            corrected_phase[index] = (
+                corrected_phase[index + 1]
+                + phase_trend * (freqs[index + 1] - freqs[index])
+            )
+        phase_dc = corrected_phase[0] + (
+            (corrected_phase[1] - corrected_phase[0])
+            / (freqs[1] - freqs[0])
+            * (0.0 - freqs[0])
+        )
+        return magnitude_dc * np.exp(1j * phase_dc)
+
+    def completed_voltage_transfer_function(
+        self,
+        gamma_src: Union[float, complex, np.ndarray] = 0.0,
+        gamma_load: Union[float, complex, np.ndarray] = 0.0,
+        dc: Literal['error', 'hold', 'skrf', 'mag_phase_trend_to_dc'] = 'error',
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Return terminated H21 on a grid satisfying one missing-DC policy.
+
+        ``skrf`` completes the S-parameter matrix before termination. ``hold``
+        and ``mag_phase_trend_to_dc`` complete the terminated scalar response.
+        Inputs that already contain DC pass through without modification.
+        """
+        if dc not in {'error', 'hold', 'skrf', 'mag_phase_trend_to_dc'}:
+            raise ValueError(
+                'dc must be error, hold, skrf, or mag_phase_trend_to_dc.'
+            )
+        if dc == 'skrf' and not np.isclose(self.freqs[0], 0.0):
+            model = self.extrapolated_to_dc()
+            return (
+                model.freqs,
+                model.voltage_transfer_function(
+                    gamma_src=gamma_src, gamma_load=gamma_load
+                ),
+            )
+
+        response = self.voltage_transfer_function(
+            gamma_src=gamma_src, gamma_load=gamma_load
+        )
+        if np.isclose(self.freqs[0], 0.0):
+            return self.freqs, response
+        if dc == 'error':
+            raise ValueError(
+                'terminated H21 must include DC; select an explicit missing-DC policy.'
+            )
+        if dc == 'hold':
+            dc_value = response[0]
+        elif dc == 'mag_phase_trend_to_dc':
+            dc_value = self._mag_phase_trend_dc_value(self.freqs, response)
+        else:
+            raise AssertionError('skrf missing-DC handling must complete the S-matrix first.')
+        return np.r_[0.0, self.freqs], np.r_[dc_value, response]
+
     # ---- derived scalar conversion ----
     def to_LinkSegment(
         self,
         cfg: 'LinkConfig',
         gamma_src: Union[float, complex, np.ndarray] = 0.0,
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
-        dc: Literal['error', 'hold', 'skrf'] = 'error',
+        dc: Literal['error', 'hold', 'skrf', 'mag_phase_trend_to_dc'] = 'error',
         *,
         out_of_measured: Literal['cosine_decay', 'zero_padding'] = 'cosine_decay',
     ) -> 'LinkSegment':
@@ -6145,14 +6232,15 @@ class SparamModel:
         3. let LinkSegment.from_tf() resample / extend the scalar transfer
            function to cfg.freqs / cfg.f_nyq using the project TF rule
         """
-        if dc not in {'error', 'hold', 'skrf'}:
-            raise ValueError('dc must be error, hold, or skrf.')
-        model = self.extrapolated_to_dc() if dc == 'skrf' and not np.isclose(self.freqs[0], 0.0) else self
-        H21 = model.voltage_transfer_function(gamma_src=gamma_src, gamma_load=gamma_load)
+        freqs, H21 = self.completed_voltage_transfer_function(
+            gamma_src=gamma_src,
+            gamma_load=gamma_load,
+            dc=dc,
+        )
         return LinkSegment.from_tf(
-            model.freqs,
+            freqs,
             H21,
             cfg,
-            dc='hold' if dc == 'hold' else 'error',
+            dc='error',
             out_of_measured=out_of_measured,
         )

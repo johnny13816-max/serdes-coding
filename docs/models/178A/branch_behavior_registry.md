@@ -61,7 +61,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `numerical_control.adc_input_pmf_grid.dy_override` | workbook 值 | `10e-6 V` | 是 |
 | `numerical_control.final_pmf_grid.dy_override` | workbook 值 | `None` | 是 |
 | `channel.sparam_frequency_limit_Hz` | case input | 不覆蓋 | 否 |
-| `channel.missing_dc_policy` | project workbook default `skrf` | 不覆蓋 | 否 |
+| `channel.missing_dc_policy` | project workbook default `skrf` | `mag_phase_trend_to_dc` | 是 |
 | `execution.*.floating_mode` | profile 值 | 不覆蓋 | 否 |
 | `execution.*.pos_sweep_method/pos_coarse_stride` | profile 值 | 不覆蓋 | 否 |
 
@@ -71,7 +71,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 
 | ID | Class | Representative stage | Legacy ID | Control | Project default／alternate | Responsibility boundary |
 |---|---|---|---|---|---|---|
-| `ALG-001` | `algorithm_policy` | Stage 0 — S-parameter ingestion | B-019 | `channel.missing_dc_policy` | workbook `skrf`／constructor `error`；另有 `hold` | S-parameter ingestion owns the selectable missing-DC completion method. The actual measured-frequency boundary remains a physical input fact. This branch is not controlled by the execution profile and must not be mixed with out-of-measured high-frequency behavior. |
+| `ALG-001` | `algorithm_policy` | Stage 0 — S-parameter ingestion | B-019 | `channel.missing_dc_policy` | `error`／`hold`／`skrf`／`mag_phase_trend_to_dc` | `SparamModel.completed_voltage_transfer_function()` owns one completion before analysis-grid or pulse realization. Project workbook default is `skrf`; `sicopr_reference_v1` selects `mag_phase_trend_to_dc`. The actual measured-frequency boundary and high-frequency extension remain independent. |
 | `NUM-001` | `numerical_control` | Stage 0 — shared response utility | B-020 | `cascade_ir(..., force_grid=...)` | `True` keeps the original cfg and checks discarded tail／`False` keeps the complete linear record | `LinkSegment`／`SampledResponse` utility owns the grid result. No implicit COM regrid. Classification remains reviewable because this is not a Project Config field today. |
 | `NUM-002` | `numerical_control` | Stage 0 — shared PMF utility | B-014 | `policy.gaussian_n_sigma_override` | config support／reference `NormalDist().inv_cdf(1-DER_0)` | Controls Gaussian support only; sigma, dy and tail-probability definitions remain unchanged. Earliest owner is the shared Gaussian PMF constructor. |
 | `ALG-002` | `algorithm_policy` | Stage 0 — shared PMF utility | B-008 | `policy.pmf_projection_method` | `linear`／`nearest` | The projection operation receives the method explicitly; `Pmf1D` stores data, not policy. Applies only when an operation deposits onto a target grid. |

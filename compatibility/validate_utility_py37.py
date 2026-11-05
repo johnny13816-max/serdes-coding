@@ -92,6 +92,33 @@ def _assert_sparam_matches(module) -> None:
         ).s4p_to_s2p()
         np.testing.assert_allclose(export_roundtrip.sdd, source_roundtrip.sdd, rtol=0.0, atol=0.0)
 
+    missing_dc_freqs = np.arange(1.0, 13.0) * 1e9
+    magnitude = 0.9 - 0.01 * missing_dc_freqs / 1e9
+    response = magnitude * np.exp(-1j * 2.0 * np.pi * missing_dc_freqs * 18e-12)
+    missing_dc_sdd = np.zeros((len(missing_dc_freqs), 2, 2), dtype=complex)
+    missing_dc_sdd[:, 1, 0] = response
+    exported_missing_dc = module.SparamModel.from_sdd_array(
+        missing_dc_freqs, missing_dc_sdd, z0=100.0
+    )
+    export_freqs, export_response = (
+        exported_missing_dc.completed_voltage_transfer_function(
+            dc="mag_phase_trend_to_dc"
+        )
+    )
+    np.testing.assert_array_equal(export_freqs, np.r_[0.0, missing_dc_freqs])
+    np.testing.assert_allclose(export_response[0], 0.9 + 0j, rtol=0.0, atol=2e-15)
+    if SourceSparamModel is not None:
+        source_missing_dc = SourceSparamModel.from_sdd_array(
+            missing_dc_freqs, missing_dc_sdd, z0=100.0
+        )
+        source_freqs, source_response = (
+            source_missing_dc.completed_voltage_transfer_function(
+                dc="mag_phase_trend_to_dc"
+            )
+        )
+        np.testing.assert_array_equal(export_freqs, source_freqs)
+        np.testing.assert_array_equal(export_response, source_response)
+
 
 def main() -> None:
     source = EXPORT.read_text(encoding="utf-8")

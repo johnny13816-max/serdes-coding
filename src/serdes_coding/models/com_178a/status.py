@@ -57,6 +57,8 @@ class COMPath(COMDataclassText):
     S_tx: SparamModel
     S_ch: SparamModel
     S_all: SparamModel
+    H_21_measured_freqs: np.ndarray
+    H_21_measured_tf: np.ndarray
     H_21: LinkSegment
     H_all: LinkSegment
     X: Any
@@ -89,6 +91,8 @@ class COMPath(COMDataclassText):
                 self._field("S_tx", "TX package network", stored_unit="S-parameter", summary="shape"),
                 self._field("S_ch", "measured channel network", stored_unit="S-parameter", summary="shape"),
                 self._field("S_all", "cascaded network", stored_unit="S-parameter", summary="shape"),
+                self._field("H_21_measured_freqs", "completed H21 frequency grid", stored_unit="Hz", summary="shape"),
+                self._field("H_21_measured_tf", "completed measured H21", stored_unit="dimensionless", summary="shape"),
                 self._field("H_21", "terminated channel response", stored_unit="dimensionless", summary="shape"),
                 self._field("H_all", "equalized channel response", stored_unit="dimensionless", summary="shape"),
                 self._field("pulse", "pulse response", stored_unit="V", summary="shape"),
