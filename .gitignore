@@ -193,6 +193,7 @@ cases/**/.run/
 
 # Local scratch, environments and generated case results.
 /tmp/
+/results/
 cases/**/results/
 *.xlsx.inspect.ndjson
 
