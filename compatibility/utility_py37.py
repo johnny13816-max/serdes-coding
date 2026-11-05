@@ -1693,7 +1693,6 @@ class Pmf1D:
         max_taps: Optional[int] = None,
         name: Optional[str] = None,
         output_unit: Optional[str] = None,
-        scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
         projection_method: Literal["linear", "nearest"] = "linear",
         initial_bin_range: Optional[tuple[int, int]] = None,
     ) -> 'Pmf1D':
@@ -1724,8 +1723,6 @@ class Pmf1D:
             Optional name override after filtering.
         output_unit:
             Optional x-axis unit override for the filtered random variable.
-        scaling_method:
-            Project scaled probability masses or interpolate gridded ordinates.
         initial_bin_range:
             Optional inclusive support of the unit-mass seed on ``dx_ref``.
             Only the zero bin has mass; other bins retain the supplied support
@@ -1768,8 +1765,8 @@ class Pmf1D:
 
             for c in coeff:
                 term = base.copy().scale_x(
-                    abs(c) if scaling_method == "interpolate_ordinates" else c,
-                    keep_dx=True, dx_ref=dx_ref, method=scaling_method,
+                    c,
+                    keep_dx=True, dx_ref=dx_ref, method="mass_deposit",
                     projection_method=projection_method,
                 )
                 out_pmf = _convolve_probability_mass(out_pmf, term.pmf)

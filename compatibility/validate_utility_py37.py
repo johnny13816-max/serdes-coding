@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 from pathlib import Path
 import sys
 
 import numpy as np
+
+from build_utility_py37 import build
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +33,26 @@ def _load_export():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _assert_export_is_current(source: str) -> None:
+    if source != build():
+        raise AssertionError(
+            "utility_py37.py is stale; rebuild it with build_utility_py37.py."
+        )
+
+
+def _assert_fir_scaling_boundary(module) -> None:
+    signature = inspect.signature(module.Pmf1D.fir_filter)
+    if "scaling_method" in signature.parameters:
+        raise AssertionError(
+            "Pmf1D.fir_filter() must not expose the direct scale_x scaling policy."
+        )
+    method_source = inspect.getsource(module.Pmf1D.fir_filter)
+    if 'method="mass_deposit"' not in method_source:
+        raise AssertionError(
+            "Pmf1D.fir_filter() must keep its fixed mass_deposit scaling behavior."
+        )
 
 
 def _assert_eye_matches(module) -> None:
@@ -72,6 +95,7 @@ def _assert_sparam_matches(module) -> None:
 
 def main() -> None:
     source = EXPORT.read_text(encoding="utf-8")
+    _assert_export_is_current(source)
     if sys.version_info >= (3, 8):
         ast.parse(source, filename=str(EXPORT), feature_version=(3, 7))
     else:
@@ -79,6 +103,7 @@ def main() -> None:
     if "np.trapezoid(" in source:
         raise AssertionError("Python 3.7 NumPy compatibility rewrite was not applied.")
     module = _load_export()
+    _assert_fir_scaling_boundary(module)
     _assert_eye_matches(module)
     _assert_sparam_matches(module)
     print("utility_py37 validation passed")
