@@ -53,6 +53,17 @@ COMConfig
 ├── imp: COMImpairmentConfig
 ├── DER_0
 ├── pmf: COMPMFConfig
+├── numerical_control: COMNumericalControlConfig
+│   ├── adc_input_pmf_grid: COMPMFGridControl
+│   │   ├── rule
+│   │   ├── dy_rel_As
+│   │   ├── dy_abs_max
+│   │   └── dy_override
+│   └── final_pmf_grid: COMPMFGridControl
+│       ├── rule
+│       ├── dy_rel_As
+│       ├── dy_abs_max
+│       └── dy_override
 ├── policy: COMPolicyConfig
 │   ├── out_of_measured
 │   ├── channel_renormalization_order
@@ -135,8 +146,14 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 
 | Field（舊欄位保留讀取相容） | Runtime owner | Default |
 |---|---|---:|
-| `dy_rel_As` | `COMPMFConfig` | 0.001 |
-| `dy_abs_max` | `COMPMFConfig` | 1e-5 V |
+| `adc_input_pmf_grid.rule` | `COMConfig.numerical_control.adc_input_pmf_grid` | `relative_As_with_cap` |
+| `adc_input_pmf_grid.dy_rel_As` | same | 0.001 |
+| `adc_input_pmf_grid.dy_abs_max` | same | 1e-5 V |
+| `adc_input_pmf_grid.dy_override` | same | blank / `None` |
+| `final_pmf_grid.rule` | `COMConfig.numerical_control.final_pmf_grid` | `relative_As_with_cap` |
+| `final_pmf_grid.dy_rel_As` | same | 0.001 |
+| `final_pmf_grid.dy_abs_max` | same | 1e-5 V |
+| `final_pmf_grid.dy_override` | same | blank / `None` |
 | `tap_rel_As` | `COMPMFConfig` | 0.001 |
 | `gaussian_n_sigma` | `COMPMFConfig` | 8 |
 | `missing_dc_policy` | `COMChannelConfig` | `skrf` |
@@ -153,7 +170,17 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `pmf_projection_method` | `COMConfig.policy`（workbook 獨立曝露） | `linear` |
 | `pdf_to_pmf_method` | `COMConfig.policy`（由 profile 或 Python 設定） | `bin_integral` |
 
-All listed PMF controls and `missing_dc_policy` are labeled `policy`. There is
+The eight grid fields have primary domain `numerical_control`, exposure
+`advanced`, effect `accuracy/cost`, and workbook class `policy`. Their owners
+are `_resolve_adc_input_pmf_config()` and `_resolve_final_com_pmf_config()`;
+raw/effective/profile provenance is exported. An override must be finite and
+positive and has priority over both derived rules. The ADC-input family covers
+pre-DTE and selected-phase ADC-input PMFs only; the final family covers final
+DFE/MLSD PMFs only. The legacy shared `dy_rel_As`, `dy_abs_max`,
+`run_config.*.pmf_grid_quality`, and `run_config.*.pmf_dy_override` remain
+read-compatible but are not emitted by new templates.
+
+All remaining PMF controls and `missing_dc_policy` are labeled `policy`. There is
 no `quantization_vqc_method` row in the 178A project template: it has no 178A
 runtime owner. `run_config.pre_dte_pmf_method` is the applicable execution
 control.
@@ -172,10 +199,11 @@ control.
 XT、Gaussian grid sampling（支撐範圍由 `NormalDist().inv_cdf(1-DER_0)`
 決定）、uniform 最近端點、ordinate interpolation、reference support 與
 relative-`As` final grid。`COMConfig` 不保留此 boolean；model 只讀上述
-具名值。執行 profile 在 adapter 固定 exact PMF、fine grid、`keep_mass=1`，且
-pre-DTE `dy` 依 fine grid 的 `min(dy_abs_max, dy_rel_As*As)` 求得；
-final COM／MLSD 在專案未正規化的 RX FFE 電壓座標使用
-`dy_rel_As*As`，相當於 SiCoPR 主 tap 正規化後的 `dy` 乘回主 tap gain。
+具名值。Reference profile 在 adapter 固定 exact PMF、`keep_mass=1`，將
+ADC-input family 的 explicit `dy_override` 設為 `10e-6 V`，並將 final family
+設為 `relative_As`、final override 留空。Final COM／MLSD 因此仍在專案未正規化
+RX FFE 電壓座標使用 `dy_rel_As*As`，相當於 SiCoPR 主 tap 正規化後的 `dy`
+乘回主 tap gain。
 舊 workbook 的 `align_to_ref` 與個別欄位仍可讀；legacy boolean 為 `True` 時
 等價於 `sicopr_reference_v1`，為 `False` 且存在個別 method 時等價於 `custom`。
 Reference profile 以 preset 覆蓋，
@@ -262,7 +290,15 @@ Fixed baselines and search candidates are separate. The current fixed baselines 
 | `search_final` | Second step; final evaluation of retained candidates |
 | `search` | Orchestration values `group_size` and `top_k` |
 
-Each run profile supplies `target`, `pre_dte_pmf_method`, `pmf_grid_quality`, `pmf_keep_mass`, optional `pmf_dy_override`, `floating_mode`, `pos_sweep_method`, and `pos_coarse_stride`. These are execution policy: they select computational methods and speed/accuracy tradeoffs without changing the fixed model input. `sicopr_reference_v1` overrides the four PMF execution fields with the validated reference values while preserving `target`, floating/phase search, group size, and top-K. When `pmf_dy_override` is set to a finite positive voltage, the resolved runtime PMF `dy` uses that value directly for ADC-input and final DFE/MLSD PMFs; `dy_rel_As` and `dy_abs_max` are bypassed. A blank override retains the prior coarse/fine derivation. Final COM still keeps all PMF mass (`keep_mass=1`) independently of the run profile.
+Each canonical run profile supplies `target`, `pre_dte_pmf_method`,
+`pmf_keep_mass`, `floating_mode`, `pos_sweep_method`, and
+`pos_coarse_stride`. Grid values come from the two fixed-config
+`numerical_control` families rather than duplicated run rows. The existing
+`execution_profile` expands effective controls: project standard uses accurate
+ADC-input grids for single/final evaluation and relative-only grid for search
+sweep; the reference preset uses explicit ADC-input `10 µV` and final
+`relative_As`. Final COM still keeps all PMF mass (`keep_mass=1`) independently
+of the selected grid family.
 
 ## Requiredness and runtime fallback
 

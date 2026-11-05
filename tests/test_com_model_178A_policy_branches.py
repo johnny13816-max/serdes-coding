@@ -9,6 +9,7 @@ import pytest
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import (
     COM,
+    COMPMFGridControl,
     COMPolicyConfig,
     COMRunConfig,
     _resolve_adc_input_pmf_config,
@@ -58,27 +59,85 @@ def test_178a_out_of_measured_changes_only_scalar_vtf(reference_cfg):
         np.testing.assert_array_equal(zero.H_21.tf[above], np.zeros(np.count_nonzero(above)))
 
 
-def test_178a_run_dy_override_bypasses_relative_and_absolute_grid(reference_cfg):
+def test_178a_separated_grid_controls_do_not_leak_between_domains(reference_cfg):
     As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
-    coarse = replace(
+    run_cfg = replace(
         reference_cfg.execution.search_sweep,
-        pmf_grid_quality="coarse",
-        pmf_dy_override=2e-5,
+        adc_input_pmf_grid=replace(
+            reference_cfg.execution.search_sweep.adc_input_pmf_grid,
+            dy_override=2e-5,
+        ),
     )
-    resolved = _resolve_adc_input_pmf_config(reference_cfg.pmf, As, coarse)
+    resolved = _resolve_adc_input_pmf_config(reference_cfg.pmf, As, run_cfg)
     assert resolved.dy == 2e-5
-    assert resolved.keep_mass == coarse.pmf_keep_mass
-    final = _resolve_final_com_pmf_config(reference_cfg.pmf, As, coarse)
-    assert final.dy == 2e-5
+    assert resolved.keep_mass == run_cfg.pmf_keep_mass
+    final = _resolve_final_com_pmf_config(reference_cfg.pmf, As, run_cfg)
+    assert final.dy == pytest.approx(
+        run_cfg.final_pmf_grid.dy_rel_As * As
+    )
     assert final.keep_mass == 1.0
 
-    old = replace(coarse, pmf_dy_override=None)
-    assert _resolve_adc_input_pmf_config(reference_cfg.pmf, As, old).dy == pytest.approx(
-        reference_cfg.pmf.dy_rel_As * As
+    final_override = replace(
+        run_cfg,
+        final_pmf_grid=replace(run_cfg.final_pmf_grid, dy_override=3e-5),
     )
-    assert _resolve_final_com_pmf_config(reference_cfg.pmf, As, old).dy == pytest.approx(
-        min(reference_cfg.pmf.dy_abs_max, reference_cfg.pmf.dy_rel_As * As)
+    assert _resolve_final_com_pmf_config(
+        reference_cfg.pmf, As, final_override
+    ).dy == pytest.approx(3e-5)
+    assert _resolve_adc_input_pmf_config(
+        reference_cfg.pmf, As, final_override
+    ).dy == pytest.approx(2e-5)
+
+
+def test_178a_pmf_grid_control_rules_and_override_precedence():
+    As = 0.02
+    relative = COMPMFGridControl(
+        rule="relative_As", dy_rel_As=1e-3, dy_abs_max=1e-5
     )
+    capped = replace(relative, rule="relative_As_with_cap")
+    overridden = replace(capped, dy_override=4e-6)
+    assert relative.resolve_dy(As) == pytest.approx(2e-5)
+    assert capped.resolve_dy(As) == pytest.approx(1e-5)
+    assert overridden.resolve_dy(As) == pytest.approx(4e-6)
+
+
+@pytest.mark.parametrize("invalid", [0.0, -1e-5, np.nan, np.inf])
+def test_178a_grid_control_rejects_invalid_numeric_values(invalid):
+    with pytest.raises(ValueError, match="dy_override"):
+        COMPMFGridControl(dy_override=invalid)
+    with pytest.raises(ValueError, match="dy_rel_As"):
+        COMPMFGridControl(dy_rel_As=invalid)
+
+
+def test_178a_grid_control_rejects_unknown_rule():
+    with pytest.raises(ValueError, match="rule"):
+        COMPMFGridControl(rule="other")
+
+
+def test_178a_legacy_shared_run_dy_override_remains_compatible(reference_cfg):
+    As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
+    legacy_override = COMRunConfig(pmf_dy_override=2e-5)
+    assert _resolve_adc_input_pmf_config(
+        reference_cfg.pmf, As, legacy_override
+    ).dy == pytest.approx(2e-5)
+    assert _resolve_final_com_pmf_config(
+        reference_cfg.pmf, As, legacy_override
+    ).dy == pytest.approx(2e-5)
+
+
+def test_178a_canonical_adc_grid_takes_precedence_over_legacy_shared_override(reference_cfg):
+    As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
+    mixed = replace(
+        reference_cfg.execution.search_sweep,
+        pmf_dy_override=2e-5,
+        adc_input_pmf_grid=replace(
+            reference_cfg.execution.search_sweep.adc_input_pmf_grid,
+            dy_override=3e-5,
+        ),
+    )
+    assert _resolve_adc_input_pmf_config(
+        reference_cfg.pmf, As, mixed
+    ).dy == pytest.approx(3e-5)
 
 
 @pytest.mark.parametrize("invalid", [0.0, -1e-5, np.nan, np.inf])
@@ -280,6 +339,10 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert effective.pmf_grid_quality == "fine"
     assert effective.pmf_keep_mass == 1.0
     assert effective.pmf_dy_override is None
+    assert effective.adc_input_pmf_grid.rule == "relative_As_with_cap"
+    assert effective.adc_input_pmf_grid.dy_override == pytest.approx(10e-6)
+    assert effective.final_pmf_grid.rule == "relative_As"
+    assert effective.final_pmf_grid.dy_override is None
     final_grid = _resolve_final_com_pmf_config(
         aligned.pmf, aligned.imp.R_LM / (aligned.L - 1), effective,
         final_pmf_grid=policy.final_pmf_grid,
@@ -317,9 +380,9 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "effective": "main_tap_white",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["execution.search_sweep.pmf_grid_quality"] == {
-        "raw": "coarse",
-        "effective": "fine",
+    assert overrides["numerical_control.adc_input_pmf_grid.dy_override"] == {
+        "raw": None,
+        "effective": 1e-5,
         "overridden_by_profile": "sicopr_reference_v1",
     }
 
@@ -355,6 +418,17 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert "eq_ch_imp_len" in fields
     assert "num_trunc_ui" in fields
     assert "noise_grid_num_ui" not in fields
+    canonical_grid_fields = {
+        f"{family}.{field}"
+        for family in ("adc_input_pmf_grid", "final_pmf_grid")
+        for field in ("rule", "dy_rel_As", "dy_abs_max", "dy_override")
+    }
+    assert canonical_grid_fields.issubset(fields)
+    assert "dy_rel_As" not in fields
+    assert "dy_abs_max" not in fields
+    run_fields = {parameter for _, parameter in run_rows}
+    assert "pmf_grid_quality" not in run_fields
+    assert "pmf_dy_override" not in run_fields
     for old_field in (
         "out_of_measured", "channel_renormalization_order",
         "pre_dte_adc_clipping_convention", "final_com_vqc_convention",

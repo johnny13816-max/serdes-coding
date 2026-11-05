@@ -234,7 +234,7 @@ sign 不在此表，因為它是共同公式修正。
 ```text
 calculate_COM_MLSD(run_cfg=None)
 ├── validate enablement, N_b, and completed prerequisite status
-├── resolve final-COM PMF config with optional run_cfg.pmf_dy_override
+├── resolve independent final_pmf_grid control
 ├── Annex: solve_g_an(target, ...)
 │   └── reference: scale complete DFE PDF and derive g_an from variance delta
 ├── build_mlsd_noise(...)
@@ -248,9 +248,9 @@ calculate_COM_MLSD(run_cfg=None)
 ```
 
 `_run_once()` passes the active execution profile. A direct call without
-`run_cfg` uses `cfg.execution.single_run`; a set `pmf_dy_override` directly
-selects the PMF voltage step for added-noise calibration, while final-PMF
-`keep_mass` remains 1.0.
+`run_cfg` uses `cfg.execution.single_run`; its effective `final_pmf_grid`
+directly owns the PMF voltage step for added-noise calibration, while final-PMF
+`keep_mass` remains 1.0. ADC-input grid controls are excluded.
 
 ## Added-noise evaluation
 

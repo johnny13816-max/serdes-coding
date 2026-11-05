@@ -56,16 +56,20 @@ The stage is called only after `calculate_post_ffe_imp()` has been merged into s
 
 ## Accuracy-required PMF policy
 
-Final COM does not use the active execution profile's `pmf_grid_quality` or `pmf_keep_mass`; it does use its optional `pmf_dy_override`.
+Final COM does not use the ADC-input grid family or active run's
+`pmf_keep_mass`; it uses the independent effective `final_pmf_grid` family.
 
 ```text
 _resolve_final_com_pmf_config(...)
-├── resolve COMPMFConfig with grid_quality="fine"
-├── replace dy with run_cfg.pmf_dy_override when provided
+├── resolve final_pmf_grid.rule with final-domain As
+├── apply final_pmf_grid.dy_override when provided
 └── override keep_mass=1.0
 ```
 
-This boundary prevents single-run/search mass truncation from changing final COM. When `pmf_dy_override` is blank, relative/absolute grid rules remain in `COMPMFConfig`; otherwise the run profile's positive voltage step directly supplies `dy`. Tap threshold and Gaussian span still come from `COMPMFConfig`.
+This boundary prevents ADC-input resolution and run-level mass truncation from
+changing final COM. A positive final override directly supplies `dy`; otherwise
+the final family selects relative-only or relative-with-cap. Tap threshold and
+Gaussian span still come from `COMPMFConfig`.
 
 `_run_once()` passes its selected `COMRunConfig` explicitly. A direct call without `run_cfg` uses `cfg.execution.single_run` for compatibility.
 
@@ -197,6 +201,8 @@ Until these exist, this document makes no specification-accuracy claim.
 ## Known limitations and unresolved questions
 
 - Shared 93A PMF helper reuse in the 178A stage needs explicit reference confirmation.
-- Final PMF mass retention remains hard-coded to 1.0; its voltage grid may be selected by `run_cfg.pmf_dy_override`.
+- Final PMF mass retention remains hard-coded to 1.0; its voltage grid is owned by
+  `run_cfg.final_pmf_grid`. The legacy shared `run_cfg.pmf_dy_override` is only
+  consulted when no canonical final-grid control was resolved.
 - `calculate_COM()` remains a compatibility alias to `calculate_COM_DFE()` and should not be documented as a separate numerical stage.
 - The PMF backend and general `Pmf1D` contracts remain utility-level documentation work outside this stage.

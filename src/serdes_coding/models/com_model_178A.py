@@ -31,7 +31,8 @@ try:
         COMExecutionConfig, COMFilterConfig, COMImpStageStatus,
         COMImpairmentConfig, COMImpairmentStatus, COMLengthMismatchError,
         COMMainCursorError, COMMLSDConfig, COMMLSDNoiseStatus, COMMLSDStatus,
-        COMPMFConfig, COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
+        COMNumericalControlConfig, COMPMFConfig, COMPMFGridControl,
+        COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
         COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
         COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
@@ -64,7 +65,8 @@ except ImportError:
         COMExecutionConfig, COMFilterConfig, COMImpStageStatus,
         COMImpairmentConfig, COMImpairmentStatus, COMLengthMismatchError,
         COMMainCursorError, COMMLSDConfig, COMMLSDNoiseStatus, COMMLSDStatus,
-        COMPMFConfig, COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
+        COMNumericalControlConfig, COMPMFConfig, COMPMFGridControl,
+        COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
         COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
         COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
@@ -835,9 +837,16 @@ def _resolve_adc_input_pmf_config(
 ) -> COMPMFRuntimeConfig:
     """Resolve execution-policy PMF settings used before ADC quantization."""
     resolved = pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality)
+    grid_control = run_cfg.adc_input_pmf_grid
     return replace(
         resolved,
-        dy=resolved.dy if run_cfg.pmf_dy_override is None else run_cfg.pmf_dy_override,
+        dy=(
+            grid_control.resolve_dy(As)
+            if grid_control is not None
+            else run_cfg.pmf_dy_override
+            if run_cfg.pmf_dy_override is not None
+            else resolved.dy
+        ),
         keep_mass=run_cfg.pmf_keep_mass,
         gaussian_n_sigma=(
             resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
@@ -855,6 +864,18 @@ def _resolve_final_com_pmf_config(
     final_pmf_grid: Literal["fine", "relative_As"] = "fine",
 ) -> COMPMFRuntimeConfig:
     """Resolve accuracy-required PMF settings used to calculate final COM."""
+    grid_control = run_cfg.final_pmf_grid
+    if grid_control is not None:
+        resolved = pmf_config.resolve(As, grid_quality="fine")
+        return replace(
+            resolved,
+            dy=grid_control.resolve_dy(As),
+            keep_mass=1.0,
+            gaussian_n_sigma=(
+                resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
+                else gaussian_n_sigma_override
+            ),
+        )
     # In the reference profile, RxFFE is represented with a unit main tap.
     # This model retains the unnormalized main gain, so reference delta_y
     # must be multiplied by that gain: 0.001*(As/gain)*gain = 0.001*As.
@@ -3094,7 +3115,9 @@ __all__ = [
     "COMImpairmentConfig",
     "COMImpairmentStatus",
     "COMImpStageStatus",
+    "COMNumericalControlConfig",
     "COMPMFConfig",
+    "COMPMFGridControl",
     "COMPolicyConfig",
     "COMPMFStatus",
     "COMRunStatus",

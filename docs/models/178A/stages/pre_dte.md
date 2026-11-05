@@ -149,8 +149,8 @@ The `victim` argument is accepted by the current public method but is not read i
 | `common` | `sigma_X`, `S_rn`, `S_xn`, and their integrated values | reused phase-independent components |
 | `h_XTs_dsamp` | one-dimensional sampled response for each aggressor | selected candidate equivalent-channel status |
 | `COMConfig.imp` | `SNR_TX`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc`, `R_LM` | phase-specific impairment and optional quantization controls |
-| `COMConfig.pmf` | base PMF grid controls | ADC-input PMF construction |
-| `run_cfg` | `pre_dte_pmf_method`, `pmf_grid_quality`, `pmf_keep_mass`, optional `pmf_dy_override` | execution-policy accuracy/cost selection |
+| `COMConfig.pmf` | PMF support/tap/mass defaults | ADC-input PMF construction |
+| `run_cfg` | `pre_dte_pmf_method`, `pmf_keep_mass`, effective `adc_input_pmf_grid` | method and numerical-control selection |
 
 The exact workbook mappings are defined in [Configuration tree](../config_tree.md).
 
@@ -247,10 +247,14 @@ Every stored `S_*` value is a `SampledPSD`. Every stored `h_*` value is a `Sampl
 | `pmf_exact` | `p_sig`, `p_s`, `p_ga`/`p_n` (same Gaussian PMF object), `p_sn`, `V_qc`, `delta`, method label |
 | quantization disabled | `p_sig` and method `disabled`; `S_qn` is a zero PSD |
 
-`pmf_grid_quality` resolves the PMF grid through `COMPMFConfig.resolve()` when `pmf_dy_override` is blank. A finite positive `pmf_dy_override` directly replaces the resolved `dy`, bypassing `dy_rel_As` and `dy_abs_max`. `pmf_keep_mass` replaces the resolved PMF retention value for this ADC-input calculation. These run controls trade runtime for numerical fidelity; the fixed `pre_dte_adc_clipping_convention` instead selects the clipping equation inputs.
+`adc_input_pmf_grid` owns `rule`, `dy_rel_As`, `dy_abs_max`, and optional
+`dy_override`. The override has highest priority; otherwise the rule selects
+relative-only or relative-with-cap resolution. `pmf_keep_mass` remains the
+separate E-004 retention control. These numerical controls do not affect final
+DFE/MLSD PMFs.
 
 workbook `execution_profile=sicopr_reference_v1` 時，adapter 已將各 run profile 展開為 exact
-PMF、fine grid、`keep_mass=1`，並由 fine-grid 規則求 `dy`；同時把
+PMF、`keep_mass=1` 與 ADC-input explicit `dy=10 µV`；同時把
 pre-DTE clipping、離散訊號最近落格及 Gaussian reference sampling 寫入
 具名 runtime methods。此 stage 與 `Pmf1D` 都不讀取 profile selector。
 

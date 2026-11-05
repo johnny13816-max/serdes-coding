@@ -76,7 +76,7 @@ class TestConversionStatusView(unittest.TestCase):
             self.assertIn(("fixed_config", "case_id"), {field.identity for field in fields})
             self.assertTrue(any(field.sheet == "channels" for field in fields))
 
-    def test_178a_template_contains_shared_required_pmf_defaults(self):
+    def test_178a_template_contains_independent_pmf_grid_defaults(self):
         project_root = Path(__file__).resolve().parents[1]
         workbook = load_workbook(project_root / "cases" / "_templates" / "178A" / "config.xlsx", data_only=True)
         try:
@@ -86,8 +86,13 @@ class TestConversionStatusView(unittest.TestCase):
                 sheet.cell(row, headers["Parameter"]).value: sheet.cell(row, headers["Value"]).value
                 for row in range(4, sheet.max_row + 1)
             }
-            self.assertEqual(values["dy_rel_As"], 0.001)
-            self.assertEqual(values["dy_abs_max"], 1e-5)
+            for prefix in ("adc_input_pmf_grid", "final_pmf_grid"):
+                self.assertEqual(values[f"{prefix}.rule"], "relative_As_with_cap")
+                self.assertEqual(values[f"{prefix}.dy_rel_As"], 0.001)
+                self.assertEqual(values[f"{prefix}.dy_abs_max"], 1e-5)
+                self.assertIsNone(values[f"{prefix}.dy_override"])
+            self.assertNotIn("dy_rel_As", values)
+            self.assertNotIn("dy_abs_max", values)
             self.assertEqual(values["tap_rel_As"], 0.001)
             self.assertEqual(values["gaussian_n_sigma"], 8)
         finally:

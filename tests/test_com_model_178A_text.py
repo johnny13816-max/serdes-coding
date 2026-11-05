@@ -188,6 +188,8 @@ def test_json_snapshot_contract_remains_available() -> None:
         "pmf_grid_quality": "fine",
         "pmf_keep_mass": 0.99999,
         "pmf_dy_override": 2.5e-6,
+        "adc_input_pmf_grid": None,
+        "final_pmf_grid": None,
         "floating_mode": "heuristic",
         "pos_sweep_method": "each_phase",
         "pos_coarse_stride": 4,

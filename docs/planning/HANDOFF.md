@@ -8,27 +8,29 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-05 Asia/Taipei
 Source branch: main
-Source revision: 6d0c7df
-Active task: CP-BR E-003 pre-DTE PMF grid numerical-control review
-Current phase: normal review; define reference behavior, scope, and override semantics
+Source revision: E-003 closure commit on main (current HEAD)
+Active task: CP-BR; next item E-004 PMF mass-retention review
+Current phase: E-003 closed; E-004 introduction not started
 Collaboration mode: Co-Build branch review
-Approved boundary: B-013 is closed no-code. E-003 owns pre-DTE/selected-phase ADC-input grid
-                   resolution and explicit dy override; E-004 retains separate PMF mass control.
-Completed: B-008, B-010/B-011 and B-012 are remote-synced; B-013 is closed no-code.
-In progress: compare project coarse/fine/explicit dy behavior with SiCoPR pre-DTE `OP.BinSize`.
+Approved boundary: E-003 separates ADC-input and final PMF-grid numerical controls while retaining
+                   their existing resolver owners. E-004 retains separate PMF mass control.
+Completed: B-008, B-010/B-011, B-012 and E-003; B-013 is closed no-code/config-migrated with E-003.
+In progress: none; E-004 has not entered technical review.
 Blocked: none.
-Next recommended action: decide whether the reference profile should use a derived grid or explicit fixed dy.
-Next action owner: User selects E-003 reference-alignment behavior after evidence review.
-Stop point: do not modify pre-DTE runtime controls before the E-003 decision.
+Next recommended action: introduce E-004 in plain language, then show its scope tree, branch options,
+                         coding layer, current project behavior and SiCoPR evidence.
+Next action owner: Codex presents E-004 review opening; user decides its contract.
+Stop point: do not modify `pmf_keep_mass` or its consumers before E-004 approval.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/stages/pre_dte.md;
-                docs/models/178A/stages/post_ffe.md;
-                tests/test_com_model_178A_policy_branches.py
-Dirty-state summary: B-013 closure record pending this documentation commit; no production-code change.
+                docs/models/178A/stages/post_ffe.md; docs/planning/e003_pmf_grid_numerical_control.md;
+                tests/test_com_model_178A_policy_branches.py; tests/test_com_model_178A_golden.py
+Dirty-state summary: clean after the E-003 closure commit/push.
 ```
 
-B-013 closed with no production change: SiCoPR `dy≈5.3743 uV` maps through the
-project's unnormalized post-FFE gain to `≈316.667 uV`, exactly `relative_As`.
-E-003 now reviews the separate pre-DTE grid consumers; E-004 `pmf_keep_mass` is excluded.
+E-003 closure evidence: focused policy/text tests `37 passed`; fixed SiCoPR golden
+`COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
+Workbook inspection confirms eight canonical grid fields, no legacy run-level shared grid rows,
+and no formula errors. E-004 `pmf_keep_mass` remains excluded and unmodified.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。

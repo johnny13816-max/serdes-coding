@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal, Optional, Sequence
 
@@ -253,12 +253,90 @@ class COMChannelConfig(_LeafConfigText):
         return "\n".join(lines)
 
 @dataclass(repr=False)
+class COMPMFGridControl(_LeafConfigText):
+    """One voltage-domain PMF grid numerical-control family."""
+
+    _FIELD_UNITS = {
+        "rule": "policy",
+        "dy_rel_As": "relative amplitude",
+        "dy_abs_max": "V",
+        "dy_override": "V",
+    }
+    rule: Literal["relative_As", "relative_As_with_cap"] = "relative_As_with_cap"
+    dy_rel_As: float = 1e-3
+    dy_abs_max: float = 0.01e-3
+    dy_override: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if self.rule not in {"relative_As", "relative_As_with_cap"}:
+            raise ValueError(
+                "COMPMFGridControl.rule must be 'relative_As' or "
+                "'relative_As_with_cap'."
+            )
+        for name in ("dy_rel_As", "dy_abs_max"):
+            value = float(getattr(self, name))
+            if not np.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"COMPMFGridControl.{name} must be finite and positive."
+                )
+            setattr(self, name, value)
+        if self.dy_override is not None:
+            self.dy_override = float(self.dy_override)
+            if not np.isfinite(self.dy_override) or self.dy_override <= 0.0:
+                raise ValueError(
+                    "COMPMFGridControl.dy_override must be finite and positive."
+                )
+
+    def resolve_dy(self, As: float) -> float:
+        """Resolve ``dy`` in this control's declared voltage domain."""
+        As_abs = abs(float(As))
+        if not np.isfinite(As_abs) or As_abs <= 0.0:
+            raise ValueError("As must be finite and positive to resolve a PMF grid.")
+        if self.dy_override is not None:
+            return self.dy_override
+        relative_dy = self.dy_rel_As * As_abs
+        if self.rule == "relative_As":
+            return relative_dy
+        return min(relative_dy, self.dy_abs_max)
+
+
+@dataclass(repr=False)
+class COMNumericalControlConfig(COMDataclassText):
+    """User-facing PMF grid controls separated by voltage domain."""
+
+    adc_input_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
+    final_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("PMF voltage grids", (
+                self._field(
+                    "adc_input_pmf_grid", "ADC-input PMF grid", stored_unit="configuration"
+                ),
+                self._field(
+                    "final_pmf_grid", "final PMF grid", stored_unit="configuration"
+                ),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (
+            self._field(
+                "adc_input_pmf_grid", "ADC-input PMF grid", stored_unit="configuration"
+            ),
+            self._field(
+                "final_pmf_grid", "final PMF grid", stored_unit="configuration"
+            ),
+        )
+
+
+@dataclass(repr=False)
 class COMPMFConfig(_LeafConfigText):
     """
     PMF-domain configuration for Annex 178A interference/noise distributions.
 
-    This config owns only amplitude-axis and PMF numerical controls. It does
-    not own channel construction, DFE selection, or imp statistics.
+    This legacy-compatible config owns PMF support, tap threshold, and mass
+    controls. New voltage-grid selection is owned by ``COMPMFGridControl``.
     """
     _FIELD_UNITS = {
         "dy_override": "V",
@@ -778,6 +856,8 @@ class COMRunConfig(COMDataclassText):
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
     pmf_dy_override: Optional[float] = None  # V; bypass derived PMF grid step when set
+    adc_input_pmf_grid: Optional[COMPMFGridControl] = None
+    final_pmf_grid: Optional[COMPMFGridControl] = None
     floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pos_sweep_method: Literal["each_phase", "coarse_fine"] = "each_phase"
     pos_coarse_stride: int = 4
@@ -795,6 +875,8 @@ class COMRunConfig(COMDataclassText):
                 self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
                 self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
                 self._field("pmf_dy_override", "PMF voltage-grid spacing override", stored_unit="V", display_unit="mV", scale=1e3),
+                self._field("adc_input_pmf_grid", "effective ADC-input PMF grid", stored_unit="configuration"),
+                self._field("final_pmf_grid", "effective final PMF grid", stored_unit="configuration"),
             )),
         )
 
@@ -821,6 +903,10 @@ class COMRunConfig(COMDataclassText):
             self.pmf_dy_override = float(self.pmf_dy_override)
             if not np.isfinite(self.pmf_dy_override) or self.pmf_dy_override <= 0.0:
                 raise ValueError("COMRunConfig.pmf_dy_override must be finite and positive.")
+        for name in ("adc_input_pmf_grid", "final_pmf_grid"):
+            value = getattr(self, name)
+            if value is not None and not isinstance(value, COMPMFGridControl):
+                raise TypeError(f"COMRunConfig.{name} must be a COMPMFGridControl or None.")
         if self.floating_mode not in {"heuristic", "simplified", "spec-defined"}:
             raise ValueError(
                 "COMRunConfig.floating_mode must be 'heuristic', 'simplified', or 'spec-defined'."
@@ -1134,6 +1220,9 @@ class COMConfig(COMDataclassText):
     imp: COMImpairmentConfig          # unit contract: V/UI/noise PSD units
     DER_0: float                      # unit: dimensionless, target detector error ratio
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
+    numerical_control: COMNumericalControlConfig = field(
+        default_factory=COMNumericalControlConfig
+    )
     execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
     mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
     policy: COMPolicyConfig = field(default_factory=COMPolicyConfig)
@@ -1157,6 +1246,7 @@ class COMConfig(COMDataclassText):
                 self._field("dte", "discrete-time equalizer", stored_unit="configuration"),
                 self._field("imp", "impairments", stored_unit="configuration"),
                 self._field("pmf", "PMF", stored_unit="configuration"),
+                self._field("numerical_control", "numerical controls", stored_unit="configuration"),
                 self._field("mlsd", "MLSD", stored_unit="configuration"),
             )),
             TextSection("Execution", (
@@ -1182,8 +1272,38 @@ class COMConfig(COMDataclassText):
             raise ValueError("policy.num_trunc_ui must cover COMDTEConfig.N_max lags.")
 
     def resolve_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
-        """Compatibility identity: adapters now construct effective run profiles."""
-        return run_cfg
+        """Fill separated grid controls for legacy direct Python callers."""
+        if run_cfg.adc_input_pmf_grid is not None and run_cfg.final_pmf_grid is not None:
+            return run_cfg
+        adc_rule = (
+            "relative_As" if run_cfg.pmf_grid_quality == "coarse"
+            else "relative_As_with_cap"
+        )
+        final_rule = (
+            "relative_As" if self.policy.final_pmf_grid == "relative_As"
+            else "relative_As_with_cap"
+        )
+        adc_grid = COMPMFGridControl(
+            rule=adc_rule,
+            dy_rel_As=self.pmf.dy_rel_As,
+            dy_abs_max=self.pmf.dy_abs_max,
+            dy_override=run_cfg.pmf_dy_override,
+        )
+        final_grid = COMPMFGridControl(
+            rule=final_rule,
+            dy_rel_As=self.pmf.dy_rel_As,
+            dy_abs_max=self.pmf.dy_abs_max,
+            dy_override=(
+                None if final_rule == "relative_As" else run_cfg.pmf_dy_override
+            ),
+        )
+        return replace(
+            run_cfg,
+            adc_input_pmf_grid=(
+                run_cfg.adc_input_pmf_grid or adc_grid
+            ),
+            final_pmf_grid=(run_cfg.final_pmf_grid or final_grid),
+        )
 
     def to_export_dict(self) -> dict[str, object]:
         """
@@ -1197,6 +1317,7 @@ class COMConfig(COMDataclassText):
             "config": self._json_value(self),
             "derived": {
                 "policy": self._json_value(self.policy),
+                "numerical_control": self._json_value(self.numerical_control),
                 "effective_execution": {
                     "single_run": self._json_value(self.resolve_run_cfg(self.execution.single_run)),
                     "search_sweep": self._json_value(self.resolve_run_cfg(self.execution.search_sweep)),

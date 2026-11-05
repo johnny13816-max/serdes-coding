@@ -15,7 +15,9 @@ from ..models.com_178a import (
     COMFilterConfig as COMFilterConfig_178A,
     COMImpairmentConfig as COMImpairmentConfig_178A,
     COMMLSDConfig,
+    COMNumericalControlConfig,
     COMPMFConfig,
+    COMPMFGridControl,
     COMPolicyConfig,
     COMPartialHostConfig,
     COMPkgConfig as COMPkgConfig_178A,
@@ -72,8 +74,16 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
     der_0 = _fixed_float(fixed, "DER_0")
     execution = _read_project_execution_config(excel_path)
     execution_profile = _read_project_execution_profile(excel_path, fixed)
+    numerical_control, has_canonical_numerical_control = (
+        _read_project_numerical_control_178A(fixed)
+    )
     methods, execution, applied_profile, profile_overrides = _resolve_project_profile_178A(
-        fixed, execution, der_0, execution_profile
+        fixed,
+        execution,
+        numerical_control,
+        has_canonical_numerical_control,
+        der_0,
+        execution_profile,
     )
 
     link_cfg = LinkConfig(
@@ -138,11 +148,16 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
         ),
         DER_0=der_0,
         pmf=COMPMFConfig(
-            dy_rel_As=_fixed_float(fixed, "dy_rel_As"),
-            dy_abs_max=_fixed_float(fixed, "dy_abs_max"),
+            dy_rel_As=float(
+                fixed.get("dy_rel_As", numerical_control.adc_input_pmf_grid.dy_rel_As)
+            ),
+            dy_abs_max=float(
+                fixed.get("dy_abs_max", numerical_control.adc_input_pmf_grid.dy_abs_max)
+            ),
             tap_rel_As=_fixed_float(fixed, "tap_rel_As"),
             gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
+        numerical_control=numerical_control,
         execution=execution,
         mlsd=COMMLSDConfig(
             enable=_coerce_bool(fixed.get("mlsd_enable", False)),
@@ -165,6 +180,8 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
 def _resolve_project_profile_178A(
     fixed: dict[str, object],
     execution: COMExecutionConfig,
+    numerical_control: COMNumericalControlConfig,
+    has_canonical_numerical_control: bool,
     der_0: float,
     execution_profile: str,
 ) -> tuple[
@@ -195,11 +212,64 @@ def _resolve_project_profile_178A(
         rxffe_record_realization="linear_convolution",
         eq_ch_imp_len=configured_eq_ch_imp_len,
         num_trunc_ui=configured_num_trunc_ui,
+        final_pmf_grid=(
+            "relative_As"
+            if numerical_control.final_pmf_grid.rule == "relative_As"
+            else "fine"
+        ),
     )
     if execution_profile == "project_standard":
-        return general_methods, execution, execution_profile, {}
+        if not has_canonical_numerical_control:
+            return general_methods, execution, execution_profile, {}
+        accurate_adc = replace(
+            numerical_control.adc_input_pmf_grid,
+            rule="relative_As_with_cap",
+        )
+        fast_adc = replace(
+            numerical_control.adc_input_pmf_grid,
+            rule="relative_As",
+        )
+        effective_execution = replace(
+            execution,
+            single_run=replace(
+                execution.single_run,
+                adc_input_pmf_grid=accurate_adc,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+            search_sweep=replace(
+                execution.search_sweep,
+                adc_input_pmf_grid=fast_adc,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+            search_final=replace(
+                execution.search_final,
+                adc_input_pmf_grid=accurate_adc,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+        )
+        return general_methods, effective_execution, execution_profile, {}
     if execution_profile == "custom":
-        return general_methods, execution, execution_profile, {}
+        if not has_canonical_numerical_control:
+            return general_methods, execution, execution_profile, {}
+        effective_execution = replace(
+            execution,
+            single_run=replace(
+                execution.single_run,
+                adc_input_pmf_grid=numerical_control.adc_input_pmf_grid,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+            search_sweep=replace(
+                execution.search_sweep,
+                adc_input_pmf_grid=numerical_control.adc_input_pmf_grid,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+            search_final=replace(
+                execution.search_final,
+                adc_input_pmf_grid=numerical_control.adc_input_pmf_grid,
+                final_pmf_grid=numerical_control.final_pmf_grid,
+            ),
+        )
+        return general_methods, effective_execution, execution_profile, {}
     if execution_profile != "sicopr_reference_v1":
         raise ValueError(f"Unsupported 178A execution_profile: {execution_profile!r}.")
 
@@ -250,6 +320,35 @@ def _resolve_project_profile_178A(
         if value != getattr(general_methods, field_name)
     }
 
+    reference_adc_grid = replace(
+        numerical_control.adc_input_pmf_grid,
+        rule="relative_As_with_cap",
+        dy_override=10e-6,
+    )
+    reference_final_grid = replace(
+        numerical_control.final_pmf_grid,
+        rule="relative_As",
+        dy_override=None,
+    )
+    for family_name, raw_grid, effective_grid in (
+        (
+            "adc_input_pmf_grid",
+            numerical_control.adc_input_pmf_grid,
+            reference_adc_grid,
+        ),
+        (
+            "final_pmf_grid",
+            numerical_control.final_pmf_grid,
+            reference_final_grid,
+        ),
+    ):
+        for field_name in ("rule", "dy_rel_As", "dy_abs_max", "dy_override"):
+            raw = getattr(raw_grid, field_name)
+            value = getattr(effective_grid, field_name)
+            overrides[
+                f"numerical_control.{family_name}.{field_name}"
+            ] = override_record(raw, value)
+
     def aligned_run(name: str, run_cfg: COMRunConfig) -> COMRunConfig:
         effective = replace(
             run_cfg,
@@ -257,6 +356,8 @@ def _resolve_project_profile_178A(
             pmf_grid_quality="fine",
             pmf_keep_mass=1.0,
             pmf_dy_override=None,
+            adc_input_pmf_grid=reference_adc_grid,
+            final_pmf_grid=reference_final_grid,
         )
         for field_name in (
             "pre_dte_pmf_method", "pmf_grid_quality", "pmf_keep_mass", "pmf_dy_override"
@@ -277,6 +378,58 @@ def _resolve_project_profile_178A(
         effective_execution,
         profile_name,
         overrides,
+    )
+
+
+def _read_project_numerical_control_178A(
+    fixed: dict[str, object],
+) -> tuple[COMNumericalControlConfig, bool]:
+    """Read the canonical two-domain PMF grid family or legacy shared values."""
+    prefixes = ("adc_input_pmf_grid", "final_pmf_grid")
+    fields = ("rule", "dy_rel_As", "dy_abs_max", "dy_override")
+    canonical_keys = {f"{prefix}.{name}" for prefix in prefixes for name in fields}
+    present = canonical_keys.intersection(fixed)
+    if present and present != canonical_keys:
+        missing = sorted(canonical_keys - present)
+        raise ValueError(
+            "fixed_config canonical PMF grid controls are incomplete; missing "
+            f"{missing}."
+        )
+
+    if present:
+        def canonical_grid(prefix: str) -> COMPMFGridControl:
+            override = fixed[f"{prefix}.dy_override"]
+            return COMPMFGridControl(
+                rule=str(fixed[f"{prefix}.rule"]).strip(),
+                dy_rel_As=float(fixed[f"{prefix}.dy_rel_As"]),
+                dy_abs_max=float(fixed[f"{prefix}.dy_abs_max"]),
+                dy_override=None if _is_blank(override) else float(override),
+            )
+
+        return (
+            COMNumericalControlConfig(
+                adc_input_pmf_grid=canonical_grid("adc_input_pmf_grid"),
+                final_pmf_grid=canonical_grid("final_pmf_grid"),
+            ),
+            True,
+        )
+
+    legacy_rel = _fixed_float(fixed, "dy_rel_As")
+    legacy_cap = _fixed_float(fixed, "dy_abs_max")
+    return (
+        COMNumericalControlConfig(
+            adc_input_pmf_grid=COMPMFGridControl(
+                rule="relative_As_with_cap",
+                dy_rel_As=legacy_rel,
+                dy_abs_max=legacy_cap,
+            ),
+            final_pmf_grid=COMPMFGridControl(
+                rule="relative_As_with_cap",
+                dy_rel_As=legacy_rel,
+                dy_abs_max=legacy_cap,
+            ),
+        ),
+        False,
     )
 
 
@@ -368,10 +521,14 @@ def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
     def run_profile(name: str) -> COMRunConfig:
         values = profiles.get(name, {})
         dy_override = values.get("pmf_dy_override")
+        legacy_grid_quality = values.get(
+            "pmf_grid_quality",
+            "coarse" if name == "search_sweep" else "fine",
+        )
         return COMRunConfig(
             target=_run_str(values, name, "target"),
             pre_dte_pmf_method=_run_str(values, name, "pre_dte_pmf_method"),
-            pmf_grid_quality=_run_str(values, name, "pmf_grid_quality"),
+            pmf_grid_quality=str(legacy_grid_quality).strip(),
             pmf_keep_mass=float(values.get("pmf_keep_mass", 1 - 1e-5)),
             pmf_dy_override=None if _is_blank(dy_override) else float(dy_override),
             floating_mode=_run_str(values, name, "floating_mode"),

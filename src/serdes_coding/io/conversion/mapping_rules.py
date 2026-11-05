@@ -289,6 +289,14 @@ POLICY_FIXED_178A={
     'final_com_vqc_convention',
     'eq_ch_imp_len',
     'num_trunc_ui',
+    'adc_input_pmf_grid.rule',
+    'adc_input_pmf_grid.dy_rel_As',
+    'adc_input_pmf_grid.dy_abs_max',
+    'adc_input_pmf_grid.dy_override',
+    'final_pmf_grid.rule',
+    'final_pmf_grid.dy_rel_As',
+    'final_pmf_grid.dy_abs_max',
+    'final_pmf_grid.dy_override',
 }
 SEARCH_POLICY={'keep_top_n','keep_all_rows','continue_on_error'}
 # These source controls belong to MATLAB reporting, TDR/ERL/ICN calculations,
@@ -322,6 +330,8 @@ def optional_field(field, version, values):
         if field.sheet=='fixed_config' and field.parameter=='num_trunc_ui':
             return True
         if field.sheet=='run_config' and field.parameter.endswith('.pmf_dy_override'):
+            return True
+        if field.sheet=='fixed_config' and field.parameter.endswith('.dy_override'):
             return True
     rule=rules_for(version).get(field.identity)
     return bool(rule and rule.optional(values))

@@ -36,7 +36,7 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | `policy.pmf_projection_method` | `linear` | `nearest` | 是 |
 | `policy.pdf_to_pmf_method` | `bin_integral` | `pmf_sample` | 是 |
 | `policy.pmf_scaling_method` | `mass_deposit` | `interpolate_ordinates` | 是 |
-| `policy.final_pmf_grid` | `fine` | `relative_As` | 是 |
+| `numerical_control.final_pmf_grid.rule` | `relative_As_with_cap` | `relative_As` | 是 |
 | `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support` | 是 |
 | `policy.gaussian_n_sigma_override` | `None` | `NormalDist().inv_cdf(1-DER_0)` | 是 |
 | `policy.added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` | 是 |
@@ -44,9 +44,9 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | `policy.sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` | 是 |
 | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` | 是 |
 | `execution.*.pre_dte_pmf_method` | profile 值 | `pmf_exact` | 是 |
-| `execution.*.pmf_grid_quality` | profile 值 | `fine` | 是 |
 | `execution.*.pmf_keep_mass` | profile 值 | `1.0` | 是 |
-| `execution.*.pmf_dy_override` | profile 值 | `None` | 是 |
+| `numerical_control.adc_input_pmf_grid.dy_override` | workbook 值 | `10e-6 V` | 是 |
+| `numerical_control.final_pmf_grid.dy_override` | workbook 值 | `None` | 是 |
 | `channel.sparam_frequency_limit_Hz` | case input | 不覆蓋 | 否 |
 | `channel.missing_dc_policy` | project workbook default `skrf` | 不覆蓋 | 否 |
 | `execution.*.floating_mode` | profile 值 | 不覆蓋 | 否 |
@@ -68,7 +68,7 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 | B-008 | Discrete-amplitude PMF projection | `policy.pmf_projection_method` | `linear`：質量線性分配至相鄰格點 | `nearest`：質量放入最近格點 | Projection method 是 operation-level policy，不屬於 `Pmf1D` data。PAM-L source 先保存在 exact natural grid；只有 `multi_dirac()`、`scale_x(method="mass_deposit")`、`resample_dx()`、`fir_filter()` 在投影至 target grid 時接收此參數。`copy/shift/combine` 不接收也不傳遞 policy。B-008 與 B-012 是獨立決策：B-012 選 `mass_deposit` 時 B-008 決定落格；選 `interpolate_ordinates` 時不做 deposit，B-008 不適用但沒有被覆寫。workbook 保留獨立 selector。 |
 | B-010/B-011 **(implemented; committed and remote-synced 2026-11-04)** | PDF→PMF discretization | `policy.pdf_to_pmf_method` | `bin_integral`：Gaussian 以 bin probability 積分；uniform 以 bin overlap 積分 | `pmf_sample`：Gaussian 在 grid centers 取樣後正規化；uniform 選取 `±delta/2` 最近 centers、含端點且等權重 | **L3 owner:** `COMPolicyConfig` 選擇，L2 helpers 顯式傳入 `Pmf1D.gaussian()`／`Pmf1D.uniform()`。涵蓋 exact/approx pre-DTE、final COM 與 MLSD Gaussian PMF；不改 ADC step `delta`。B-014 仍獨立擁有 Gaussian support；B-008/B-012 不受影響。focused tests 29 passed；SiCoPR golden final COM 不變。實作隨 PMF policy migration `4870669` 推送至 `origin/main`。 |
 | B-012 **(implemented; validation passed; committed and remote-synced 2026-11-04)** | Scalar PMF amplitude resampling | `policy.pmf_scaling_method` | `mass_deposit`：縮放後逐點 deposit probability mass，再由 B-008 決定落格 | `interpolate_ordinates`：把 PMF ordinate 的 piecewise-linear 表示沿 x 軸縮放，在既有 grid 取樣、修正邊界並正規化 | **L3 owner:** direct scalar-PMF resampling only：`_build_scaled_total_pdf_added_noise()` 的 `p_combined→p_an`，以及 `calculate_der_mlsd()` 的 `p_an→b·p_an`／`(1-b)·p_an`。SiCoPR `scalePDF` 對齊選 `interpolate_ordinates`。`fir_filter()` 的 tap×PAM construction 即使內部呼叫 `scale_x()`，也固定是 B-008 `mass_deposit + pmf_projection_method`，不接收 B-012。negative-scale generic contract 未納入本分支。Focused PMF/policy tests 30 passed；SiCoPR golden COM 不變。實作隨 PMF policy migration `4870669` 推送至 `origin/main`。 |
-| B-013 **(closed; no production change 2026-11-05)** | Final COM/MLSD PMF grid | `policy.final_pmf_grid` | `fine`：在 project post-FFE domain 使用 `min(dy_abs_max, dy_rel_As*As)` | `relative_As`：在 project post-FFE domain 使用 `dy_rel_As*As` | `_resolve_final_com_pmf_config()` 擁有 final-domain grid。SiCoPR case 的 `A_s≈5.3743 mV` 令 reference `dy≈5.3743 µV`；經本專案未正規化 post-FFE gain 映射後為 `≈316.667 µV`，正好等於目前 reference profile 的 `relative_As`。直接在 project domain 套 `10 µV` cap 會混用 voltage domain，因此不修改 profile 或 resolver。pre-DTE grid 仍由 run config 與 `_resolve_adc_input_pmf_config()` 控制，另於 E-003 審查。 |
+| B-013 **(behavior closed; config ownership migrated with E-003)** | Final COM/MLSD PMF grid | `numerical_control.final_pmf_grid.*` | `relative_As_with_cap`：在 project post-FFE domain 使用 `min(dy_abs_max, dy_rel_As*As)` | `relative_As`：在 project post-FFE domain 使用 `dy_rel_As*As`；獨立 `dy_override` 可明示取代 | `_resolve_final_com_pmf_config()` owner 不變。SiCoPR profile 使用 `relative_As` 且 final override 留空；ADC-input `10 µV` 不得洩漏至此 domain。 |
 | B-014 | Gaussian support | `policy.gaussian_n_sigma_override` | `None`：使用 `COMPMFConfig.gaussian_n_sigma` | reference preset：`NormalDist().inv_cdf(1-DER_0)` | 只控制 Gaussian PMF support；不改 sigma、dy 或 tail probability 定義。 |
 | B-015 | Final ADC PMF projection | `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support`：reference support/tap projection | 只在 final ADC quantization PMF 生效；`reference_support` 必須搭配 `final_com_vqc_convention=sicopr_final_reconstruction`。B-015 與 B-007 是獨立控制，SiCoPR preset 同時選取兩者；不得影響 pre-DTE ADC。 |
 | B-016 | MLSD added-noise PDF | `policy.added_noise_pdf` | `gaussian_addition`：依 Annex 加入 Gaussian component | `scaled_total_pdf`：縮放完整 DFE PDF 後求 `g_an` | `solve_g_an()` orchestration 選 `_build_scaled_total_pdf_added_noise()` 或 Annex flow。不得改 `S_isi`、`S_ni` 的定義。 |
@@ -84,8 +84,13 @@ provenance 的正式定義，見 [Branch behavior contract](../../architecture/b
 |---|---|---|---|---|
 | E-001 | Pipeline gate | `COMRunConfig.target` | `dfe`；可選 `mse/dfe/mlsd/full` | 只決定執行到哪個 stage，不改已執行 stage 的公式。 |
 | E-002 | Pre-DTE ADC | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | 選擇 `V_qc` 的近似或完整 PMF flow；reference preset 選 exact。 |
-| E-003 | PMF grid quality | `pmf_grid_quality` | `fine`；search sweep 可用 `coarse` | 交由 PMF config resolver 決定 dy；不得改物理公式。 |
-| E-004 | PMF numerical convergence | `pmf_keep_mass`, `pmf_dy_override` | `1-1e-5`, `None` | 控制截尾與明示 dy。override 非空時直接取代 derived dy；reference preset 使用 `keep_mass=1`、`dy_override=None`。 |
+| E-003 | PMF grid numerical control | `numerical_control.adc_input_pmf_grid.*`、`numerical_control.final_pmf_grid.*` | 各 family 獨立選 `relative_As`／`relative_As_with_cap`，並有自己的 `dy_rel_As`、`dy_abs_max`、`dy_override` | ADC-input owner 為 `_resolve_adc_input_pmf_config()`；final owner 為 `_resolve_final_com_pmf_config()`。Reference profile 使用 ADC `10 µV` override 與 final `relative_As`；兩 domain 不得互相洩漏。 |
+
+相容性邊界：`COMRunConfig.pmf_grid_quality` 與
+`COMRunConfig.pmf_dy_override` 僅供舊 workbook／直接 API 呼叫讀取；新模板不再輸出這兩個
+shared fields。runtime 展開後的 canonical effective fields 是
+`COMRunConfig.adc_input_pmf_grid` 與 `COMRunConfig.final_pmf_grid`。
+| E-004 | PMF mass convergence | `pmf_keep_mass` | `1-1e-5`；reference preset `1.0` | 只控制 ADC-input convolution retained mass；不擁有 grid spacing。 |
 | E-005 | Floating FFE solve | `floating_mode` | `heuristic`；另有 `simplified/spec-defined` | `COM_MMSE_DTE.run()` 選 floating tap/group flow；不改固定 tap limiter 定義。 |
 | E-006 | Sampling-phase search | `pos_sweep_method`, `pos_coarse_stride` | `each_phase`, `4`；另有 `coarse_fine` | `_initial_pos_sweep_indices()`／`_fine_pos_sweep_indices()` 只決定評估哪些 phase；每個候選仍送相同 MMSE solver。 |
 | E-007 *(deferred technical issue)* | Final quantization tap accumulation realization | 無 runtime control；目前 SiCoPR regression 路徑凍結既有 production ordering | 抽象上「main-seeded PMF + non-main taps」與「Dirac-seeded PMF + all taps」應等價；目前 production accounting 的直接替換會改變 COM，故不得併入 B-007 或先行重構 | 待獨立追查 PMF seed、main-tap contribution、projection/support 與 B-015 的交互作用。pending 期間不得改公式、順序或 golden。 |

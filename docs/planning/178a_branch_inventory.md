@@ -17,8 +17,8 @@
 | final COM `V_qc` convention | `selected_phase_adc_input`：沿用 Stage 5 exact `V_qc/delta` | `sicopr_final_reconstruction`：Stage 6 依 SiCoPR composition 與 `P_qc` 重建 | **B-007 pending D3p2 evidence**。只控制 clipping voltage convention；main-tap accumulation 已移出 B-007，另列 deferred issue。 |
 | 離散 tap PMF projection | 線性質量分配 | 最近格點 | **B-008 獨立 numerical policy**；`policy.pmf_projection_method` 由 caller 明示傳入會重新投影 grid 的 operation，`Pmf1D` 不保存 policy。PAM source atoms 在自然 grid 精確保存，tap scaling 後才套用 projection。 |
 | PDF→PMF discretization（B-010/B-011） | `bin_integral`：Gaussian bin integral、uniform bin overlap | `pmf_sample`：Gaussian grid-center sample、uniform nearest-center inclusive sample | **shared L3 policy** `policy.pdf_to_pmf_method`；各 distribution 保留自己的 rule。Gaussian support、PMF scaling 分別仍由 B-014、B-012 擁有。 |
-| final PMF grid | `fine` | `dy_rel_As × As`，再依主 tap gain 換算 | **建議拆成明確的 final PMF grid/domain policy**。這是數值座標與精度，不是物理公式；reference preset 可選它，但不能讓 boolean 取代單位／domain 契約。 |
-| `COMRunConfig` PMF 執行設定 | 保留 `pre_dte_pmf_method`、`pmf_grid_quality`、`pmf_keep_mass`、`pmf_dy_override` | 強制 `pmf_exact`、`fine`、`keep_mass=1`、`pmf_dy_override=None` | **保留為具名 run-level 控制**。這些是精度／速度／收斂設定；reference preset 為了可重現 golden comparison 明確覆蓋，且 export 記錄 raw／effective／profile，不能成為 model 內的隱藏分支。 |
+| ADC-input／final PMF grid | E-003 各自的 `numerical_control.*_pmf_grid` family | ADC-input `10 µV` override；final `relative_As` 且無 override | **已拆成兩個獨立 numerical-control domain**。兩者共用 field shape，但 owner、stage 與 reference preset 不互相洩漏。 |
+| `COMRunConfig` PMF 執行設定 | 保留 `pre_dte_pmf_method`、`pmf_keep_mass` 等 execution controls | reference preset 展開對齊行為 | `pmf_grid_quality`／`pmf_dy_override` 已降為 legacy compatibility；canonical grid controls 由 E-003 family 展開至 runtime。 |
 
 `align_to_ref=False` **不是單一「spec 模式」**：它仍允許舊 workbook 個別 `out_of_measured`、renormalization 和 ADC convention 欄位，且 run policy 各自獨立。`True` 由 adapter 覆蓋成 reference 具名值；`COMConfig.to_export_dict()` 匯出 effective policy／execution、profile 名稱及 raw/effective override。
 
@@ -28,7 +28,7 @@
 | --- | --- |
 | S4P 檔案、port order、reference impedance、`sparam_frequency_limit_GHz` | **case 輸入與 provenance**。TC-021 已將 SiCoPR `flim` 建模為獨立輸入；Akinwale 原檔 100 GHz、case limit 67 GHz。`zero_padding` 從有效 67 GHz 邊界後生效。 |
 | `missing_dc_policy` | channel/utility 的量測缺口 policy。 |
-| `pmf_dy_override`、`pmf_keep_mass`、`pmf_grid_quality`、`pre_dte_pmf_method` | run-level 精度、近似／成本 policy；不同 single/search profile 可不同，應記錄有效值並做收斂。 |
+| `pmf_keep_mass`、`pre_dte_pmf_method` | run-level 精度、近似／成本 execution control；不同 single/search profile 可不同，應記錄有效值並做收斂。PMF grid spacing 改由 E-003 numerical-control families 擁有。 |
 | `floating_mode`、`pos_sweep_method`／stride | MMSE／sampling-phase 搜尋演算法或加速 policy；不是 reference 物理公式。 |
 | `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；TC-013 尚未結案。 |
 | `SampledPSD.filtered_by()` 的 grid 檢查 | utility 一致性契約，無隱藏 regrid 分支。 |
