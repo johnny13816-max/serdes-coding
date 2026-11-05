@@ -13,7 +13,6 @@
 | Stage order | ID / control class | rg_name (project config) | Description |
 |---|---|---|---|
 | Stage 0 / S-parameter ingestion | `ALG-001` algorithm policy | `channel.missing_dc_policy` | Missing-DC completion method；實際量測頻率邊界仍是 physical input fact，不由 execution profile 控制。 |
-| Stage 0 / shared response utility | `NUM-001` numerical control | — (`cascade_ir(force_grid=...)`) | 固定-grid tail guard 或完整 linear-convolution record；目前不是 Project Config field。 |
 | Stage 0 / shared PMF utility | `NUM-002` numerical control | `policy.gaussian_n_sigma_override` | Gaussian support span；不改 sigma、dy 或 tail probability。 |
 | Stage 0 / shared PMF utility | `ALG-002` algorithm policy | `policy.pmf_projection_method` | Target-grid projection：`linear` 或 `nearest`。 |
 | Stage 0 / shared PMF utility | `ALG-003` algorithm policy | `policy.pdf_to_pmf_method` | PDF→PMF：`bin_integral` 或 `pmf_sample`。 |
@@ -29,7 +28,7 @@
 | Stage 3 / ADC-input PMF grid | `NUM-004` numerical control | `numerical_control.adc_input_pmf_grid.*` | `_resolve_adc_input_pmf_config()` function set；只影響 ADC-input domain。 |
 | Stage 3 / ADC-input PMF | `NUM-006` numerical control | `execution.<profile>.pmf_keep_mass` | Retained-mass convergence；不擁有 grid spacing。 |
 | Stage 4 / MMSE DTE | `ALG-010` algorithm policy | `execution.<profile>.floating_mode` | Heuristic、simplified 或 spec-defined floating-tap solve。 |
-| Stage 5 / post-FFE | `ALG-011` algorithm policy | `policy.rxffe_record_realization` | Fixed-grid linear convolution 或 finite-record circular shift-sum。 |
+| Stage 5 / post-FFE；Stages 6–7 consume | `ALG-011` algorithm policy | `policy.rxffe_record_realization` | `linear_fixed_grid`、`linear_expanded_grid` 或 `finite_record_circshift`；Stage 5 resolves one common victim/XT/DDJ record and downstream stages consume it。 |
 | Stage 6 / final PMF grid | `NUM-005` numerical control | `numerical_control.final_pmf_grid.*` | `_resolve_final_com_pmf_config()` function set；只影響 final DFE／MLSD domain。 |
 | Stage 6 / DFE COM | `ALG-012` algorithm policy | `policy.final_com_vqc_convention` | 沿用 selected-phase `V_qc/delta` 或重建 final clipping PMF。 |
 | Stage 6 / final ADC PMF | `ALG-013` algorithm policy | `policy.final_adc_pmf_projection` | Annex D3 或 reference-support/tap projection。 |
@@ -41,6 +40,7 @@
 ## 明確不納入本表
 
 - Guard methods、input validation、error handling 與 data-presence paths。
+- `cascade_ir(force_grid=False)`：caller-owned diagnostic/complete-record utility；沒有獨立 Project Config selector，因此原 `NUM-001` 已退休。
 - `policy.xtalk_pmf_accumulation`：fixed single-value behavior，不是選擇。
 - Retired B-009 `interference_pmf_method`：已無 selector。
 - Former E-007 final-quantization accumulation：無 selectable control，保留為 deferred technical issue。

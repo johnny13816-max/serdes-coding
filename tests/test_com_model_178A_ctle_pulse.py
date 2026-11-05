@@ -11,6 +11,7 @@ from serdes_coding.models.com_model_178A import (
     COMBilinearCTLE,
     IEEECOMFilter,
     _apply_fir_finite_record,
+    _apply_rxffe_response,
     _build_channel_under_test,
     _apply_rectangular_unit_pulse,
     _build_paths,
@@ -19,7 +20,7 @@ from serdes_coding.models.com_model_178A import (
     _reference_fd_to_td_record,
     _realize_ctle_response,
 )
-from serdes_coding.utilities.link import LinkConfig, LinkSegment
+from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse
 
 
 def _small_cfg() -> LinkConfig:
@@ -101,6 +102,32 @@ def test_finite_record_rxffe_is_circular_shift_sum():
     taps = np.array([0.5, -0.25])
     expected = 0.5 * response - 0.25 * np.roll(response, 1)
     np.testing.assert_array_equal(_apply_fir_finite_record(response, taps), expected)
+
+
+def test_rxffe_owner_covers_fixed_expanded_and_circular_records():
+    cfg = LinkConfig.from_Nfft(8.0, 1, 8)
+    expanded = LinkConfig.from_Nfft(8.0, 1, 10)
+    response = SampledResponse.from_ir(np.array([1.0, 2.0, 3.0, 4.0]), cfg)
+    taps = np.array([0.5, -0.25])
+
+    fixed = _apply_rxffe_response(
+        response, taps, cfg, "linear_fixed_grid", "fixed test"
+    )
+    full = _apply_rxffe_response(
+        response, taps, expanded, "linear_expanded_grid", "expanded test"
+    )
+    circular = _apply_rxffe_response(
+        response, taps, cfg, "finite_record_circshift", "circular test"
+    )
+
+    expected_linear = np.convolve(np.array([1.0, 2.0, 3.0, 4.0]), taps)
+    np.testing.assert_allclose(fixed.ir[:5], expected_linear)
+    np.testing.assert_allclose(full.ir[:5], expected_linear)
+    assert full.cfg is expanded
+    np.testing.assert_allclose(
+        circular.ir,
+        0.5 * response.ir - 0.25 * np.roll(response.ir, 1),
+    )
 
 
 def test_ctle_realization_is_separate_from_common_unit_pulse_application():

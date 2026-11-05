@@ -11,7 +11,7 @@
 | `channel_renormalization_order` | 取獨立欄位；預設 `sdd_first` | 強制 `s4p_first` | **獨立 channel ingestion policy**。四埠含 common-mode 的處理方法有物理意義，不應因「非 SiCoPR mode」自動退回 Sdd-first；由輸入／方法選擇明示。 |
 | `out_of_measured` | 取獨立欄位；預設 `cosine_decay` | 強制 `zero_padding` | **獨立量測邊界 policy**。測到 100 GHz 或 67 GHz 是輸入事實，超出量測的處理是 utility 方法；reference mode 不可暗中改變量測截止。 |
 | `ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | **獨立 pulse-realization method**。後者固定包含 measured composite TF、reference grid、raw IFFT、`1e-3` 截尾、bilinear IIR 與 boxcar；不再拆細項控制。 |
-| `rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | **獨立 post-FFE record policy**。前者保留 overflow guard；後者重現 reference 的有限記錄 shift-sum。 |
+| `rxffe_record_realization` | `linear_fixed_grid`（另有 `linear_expanded_grid`） | `finite_record_circshift` | **獨立 post-FFE record policy**。fixed 保留原 grid 與 overflow guard；expanded 保存完整 linear record；reference 重現有限記錄 shift-sum。Stage 5 為唯一 owner，Stages 6–7 消費已解析 record。 |
 | Eq-channel impairment length | `full`，保留完整 one-sample/UI response 供 PSD | `truncated`；Akinwale `num_trunc_ui=4096` | **獨立 NUM-003 numerical control**。Shared L3 供 Stage 2/3/5/7 使用；只在 PSD 前改 record，不修改 XT phase、channel/pulse grid 或 status 中的 full response。workbook 保留獨立控制。 |
 | pre-DTE clipping | 取獨立欄位；預設 D3 `P_qc/2`＋完整 jitter | 強制 MATLAB 4.17 `P_qc`＋RJ-only clipping；MMSE 保留完整 jitter | **可留在 reference algorithm preset**。這是已確認、僅為對照的公式差異；須保持與 final-stage 選擇在邏輯上可區分。 |
 | final COM `V_qc` convention | `selected_phase_adc_input`：沿用 Stage 5 exact `V_qc/delta` | `sicopr_final_reconstruction`：Stage 6 依 SiCoPR composition 與 `P_qc` 重建 | **ALG-012 pending D3p2 evidence**。只控制 clipping voltage convention；main-tap accumulation 已移出 ALG-012，另列 deferred issue。 |
@@ -30,7 +30,7 @@
 | `missing_dc_policy` | channel/utility 的量測缺口 policy。 |
 | `pmf_keep_mass`、`pre_dte_pmf_method` | 前者是 NUM-006 numerical control，後者是 ALG-009 algorithm policy；不同 single/search profile 可展開不同有效值並應記錄。PMF grid spacing 由 NUM-004／NUM-005 各自的 function set 擁有。 |
 | `floating_mode`、`pos_sweep_method`／stride | MMSE／sampling-phase 搜尋演算法或加速 policy；不是 reference 物理公式。 |
-| `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；TC-013 尚未結案。 |
+| `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；`force_grid=False` 是 diagnostic/caller-owned complete-record behavior，不另立 selectable branch。ALG-011 由 Stage 5 owner 明示使用。 |
 | `SampledPSD.filtered_by()` 的 grid 檢查 | utility 一致性契約，無隱藏 regrid 分支。 |
 | TX 時間原點、sinc／boxcar unit-pulse 表示 | 已驗證為比較座標與等價表示；**不建立算法分支**。 |
 | MLSD reference realization | `COMPolicyConfig` 保留 `added_noise_pdf`、`sequence_termination`、`reported_der` 三個具名方法；`align_to_ref=True` 由 adapter 展開成 TC-023 reference 組合。Eq. 178A-49 sign 是直接修正，不是分支。 |

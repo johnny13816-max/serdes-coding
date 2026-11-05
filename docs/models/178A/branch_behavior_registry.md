@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-11-05
+最後核對：2026-11-06
 
 本文件是 178A model 現有具名方法選擇及其分類審查候選的正式索引。新增、修改、重新命名、合併或移除 branch behavior 時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
 
@@ -41,7 +41,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `policy.channel_renormalization_order` | `sdd_first` | `s4p_first` | 是 |
 | `policy.out_of_measured` | `cosine_decay` | `zero_padding` | 是 |
 | `policy.ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | 是 |
-| `policy.rxffe_record_realization` | `linear_convolution` | `finite_record_circshift` | 是 |
+| `policy.rxffe_record_realization` | `linear_fixed_grid` | `finite_record_circshift` | 是；`custom` 亦可選 `linear_expanded_grid` |
 | `policy.eq_ch_imp_len` | `full` | `truncated` | 是；workbook 保留獨立控制 |
 | `policy.num_trunc_ui` | `None` | `4096` | 是；只在 `truncated` 時適用 |
 | `policy.pre_dte_adc_clipping_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
@@ -72,7 +72,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | ID | Class | Representative stage | Legacy ID | Control | Project default／alternate | Responsibility boundary |
 |---|---|---|---|---|---|---|
 | `ALG-001` | `algorithm_policy` | Stage 0 — S-parameter ingestion | B-019 | `channel.missing_dc_policy` | `error`／`hold`／`skrf`／`mag_phase_trend_to_dc` | `SparamModel.completed_voltage_transfer_function()` owns one completion before analysis-grid or pulse realization. Project workbook default is `skrf`; `sicopr_reference_v1` selects `mag_phase_trend_to_dc`. The actual measured-frequency boundary and high-frequency extension remain independent. |
-| `NUM-001` | `numerical_control` | Stage 0 — shared response utility | B-020 | `cascade_ir(..., force_grid=...)` | `True` keeps the original cfg and checks discarded tail／`False` keeps the complete linear record | `LinkSegment`／`SampledResponse` utility owns the grid result. No implicit COM regrid. Classification remains reviewable because this is not a Project Config field today. |
 | `NUM-002` | `numerical_control` | Stage 0 — shared PMF utility | B-014 | `policy.gaussian_n_sigma_override` | config support／reference `NormalDist().inv_cdf(1-DER_0)` | Controls Gaussian support only; sigma, dy and tail-probability definitions remain unchanged. Earliest owner is the shared Gaussian PMF constructor. |
 | `ALG-002` | `algorithm_policy` | Stage 0 — shared PMF utility | B-008 | `policy.pmf_projection_method` | `linear`／`nearest` | The projection operation receives the method explicitly; `Pmf1D` stores data, not policy. Applies only when an operation deposits onto a target grid. |
 | `ALG-003` | `algorithm_policy` | Stage 0 — shared PMF utility | B-010/B-011 | `policy.pdf_to_pmf_method` | `bin_integral`／`pmf_sample` | Shared Gaussian/uniform PDF→PMF construction across pre-DTE, final COM and MLSD. Each distribution retains its own applicable rule. |
@@ -89,7 +88,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `NUM-005` | `numerical_control` | Stage 6 — final PMF grid | B-013 | `numerical_control.final_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_final_com_pmf_config()` owns the final DFE/MLSD grid function set. It shares the control shape with NUM-004 but not its RG group or impact boundary. |
 | `NUM-006` | `numerical_control` | Stage 3 — ADC-input PMF convergence | E-004 | `pmf_keep_mass` | `1-1e-5`／reference `1.0` | Controls ADC-input convolution retained mass only; it does not own grid spacing. |
 | `ALG-010` | `algorithm_policy` | Stage 4 — MMSE DTE | E-005 | `floating_mode` | `heuristic/simplified/spec-defined` | `COM_MMSE_DTE.run()` selects the floating-tap/group solve flow; fixed tap limiter definition remains unchanged. |
-| `ALG-011` | `algorithm_policy` | Stage 5 — post-FFE impairment | B-004 | `policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | `_apply_rxffe_response()` owns the record realization; RX FFE taps, MMSE solve and pre-FFE response remain unchanged. |
+| `ALG-011` | `algorithm_policy` | Stage 5 — post-FFE impairment；Stages 6–7 consume | B-004 | `policy.rxffe_record_realization` | `linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | Stage 5 `_apply_rxffe_response()` is the sole branch owner for victim、all XT and DDJ. `COMPostFFEEqChannelStatus` records the resolved response grid；Stages 6–7 consume that record. NUM-003 separately selects full vs truncated PSD/correlation length. RX FFE taps、MMSE solve and pre-FFE responses remain unchanged. |
 | `ALG-012` | `algorithm_policy` | Stage 6 — DFE COM | B-007 | `policy.final_com_vqc_convention` | `selected_phase_adc_input`／`sicopr_final_reconstruction` | Controls final-COM clipping voltage convention only. Main-tap accumulation is the separate deferred issue below. Pending D3p2 evidence. |
 | `ALG-013` | `algorithm_policy` | Stage 6 — final ADC PMF | B-015 | `policy.final_adc_pmf_projection` | `annex_d3`／`reference_support` | Final ADC quantization PMF only; reference support requires the reference final-`V_qc` convention and must not affect pre-DTE ADC. |
 | `ALG-014` | `algorithm_policy` | Stage 7 — MLSD added noise | B-016 | `policy.added_noise_pdf` | `gaussian_addition`／`scaled_total_pdf` | `solve_g_an()` selects added-noise PDF construction; `S_isi` and `S_ni` definitions remain separate. |
@@ -118,7 +117,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | B-010/B-011 | `ALG-003` | Merged shared PDF→PMF control |
 | B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / `NUM-002` / `ALG-013` | B-013 remains the independent Stage 6 final-grid function set |
 | B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
-| B-019 / B-020 / B-021 | `ALG-001` / `NUM-001` / `ALG-015` | Stage 0 input/utility plus Stage 7 PSD |
+| B-019 / B-020 / B-021 | `ALG-001` / — / `ALG-015` | B-020 retired as a selectable control：`force_grid=False` is diagnostic utility behavior, not Project Config；B-021 remains Stage 7 PSD |
 | E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-009` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |
 | E-005 / E-006 / E-007 | `ALG-010` / `SRCH-001` / — | E-007 is a deferred non-selectable issue |
 
@@ -135,6 +134,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | final quantization FIR 是否「包含 main tap」 | **不是 `ALG-012` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
 | B-009 `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供 B-009 selector。 |
 | `SampledPSD.filtered_by()` grid matching | **固定 utility contract**。輸入 grid 不一致即由 caller 先處理；沒有隱藏 auto-regrid branch。 |
+| `cascade_ir(force_grid=False)` | **診斷／caller-owned utility behavior**。可回傳完整 linear-convolution record，或由 caller 明示 `output_cfg`；它不是獨立 Project Config branch。ALG-011 only uses it behind the Stage 5 owner after the record grid is resolved. |
 
 ### `ALG-002`／retired B-009 coding-layer review
 
@@ -158,7 +158,7 @@ layer 只負責在每個 projection operation 明示注入同一個 project poli
 | Channel renormalization | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
 | High-frequency handling | `SparamModel.to_LinkSegment()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py` |
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse_for_path()` | `tests/test_com_model_178A_ctle_pulse.py` |
-| RX FFE record | `_apply_rxffe_response()` | `tests/test_com_model_178A_post_ffe.py`、CTLE pulse tests |
+| RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；Stage 6/7 consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
 | Eq-channel impairment record／MMSE inputs | `COM._realize_eq_ch_imp_record()`、`COM._build_eq_ch_imp_psd()`；Stage 3 `_select_xtalk_path_phase()` | policy tests、`tests/test_com_model_178A_mlsd_noise.py` |
 | PMF branches | `_build_pmf_interference_178A()`、`_build_pmf_G()`、ADC/final PMF builders | `tests/test_pmf_reference_methods.py`、policy tests |
 | MLSD branches | `solve_g_an()`、`build_mlsd_noise()`、`calculate_der_mlsd()`、`calculate_COM_MLSD()` | `tests/test_com_model_178A_mlsd_flow.py`、`test_com_model_178A_mlsd_noise.py`、`test_com_model_178A_mlsd_eq47.py` |

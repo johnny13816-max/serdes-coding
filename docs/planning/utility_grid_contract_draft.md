@@ -1,10 +1,10 @@
 # TC-013 — Run-level fixed grid 與 search overflow 補位
 
-狀態：Core Model Change Contract 與 search overflow warning／補位政策已核准；固定 grid、overflow guard 與 search 補位已在工作樹實作。固定 case、utility 與 search 補位測試通過。使用者於 2026-10-09 指示停止實際 search 驗收並回到 COM model 對齊主線；本 TC 暫緩，實際 search sweep 與獨立 model commit 尚未完成，故未結案。現況入口見 [`active_contracts.md`](active_contracts.md)；現行行為以 `docs/architecture/utility_grid.md` 與版本 stage 文件為準。
+狀態：Core Model Change Contract 與 search overflow warning／補位政策已核准；固定 grid、overflow guard 與 search 補位已在工作樹實作。2026-11-06 ALG-011 另核准 Stage 5 caller-owned expanded output grid；該變更不把 `force_grid` 升格為獨立 selectable branch。現行行為以 `docs/architecture/utility_grid.md`、[`alg011_rxffe_record_realization.md`](alg011_rxffe_record_realization.md) 與版本 stage 文件為準。
 
 ## 本次批准的功能與檔案邊界
 
-- **功能**：`LinkConfig` 由 run 建立一次；`SampledResponse`、`ContinuousPSD`、`SampledPSD` 可綁定同一 `cfg`；`cascade_ir(force_grid=True)` 先算完整線性卷積，再檢查固定 grid 尾端。`False` 僅供完整卷積診斷。178A post-FFE／MLSD 沿用 run grid；single run overflow 報錯；search final 記 warning 與 `grid_overflow`、留空 COM 並依 MSE 補位。
+- **功能**：`LinkConfig` 定義每個數值 domain；`cascade_ir(force_grid=True)` 先算完整線性卷積，再檢查固定 grid 尾端。`False` 可供診斷，或由 ALG-011 Stage 5 owner 明示 `output_cfg` 保存完整 convolution；它本身不是 RG。single run fixed-grid overflow 報錯；search final 記 warning 與 `grid_overflow`、留空 COM 並依 MSE 補位。
 - **受保護的 utility／model**：`src/serdes_coding/utilities/link.py`（`GridOverflowError`、`SampledResponse`／`LinkSegment` 的 cfg、TF／IR cascade、完整卷積與溢出檢查）、`src/serdes_coding/utilities/psd.py`（兩種 PSD 的建構、filtering、addition 與 cfg 傳遞）、`src/serdes_coding/utilities/__init__.py`（error export）、`src/serdes_coding/models/com_model_178A.py`（pre-DTE PSD 建構、`calculate_post_ffe_imp()`、`build_mlsd_noise()` 的同 grid 流程）、`src/serdes_coding/models/com_model_93A.py`（noise PSD cfg 綁定）。僅限上述 grid 行為，不改 spec 公式或其他 impairment 定義。
 - **search**：`src/serdes_coding/search/com_search_178A.py` 的 `finalize_search()`、status 與 CSV 欄位，僅限 typed overflow status、指標、warning 與 MSE 補位。
 - **測試**：`tests/test_fixed_grid_contract.py`、`tests/test_com_search_178A_grid_overflow.py`、`tests/test_com_model_178A_mlsd_noise.py`。

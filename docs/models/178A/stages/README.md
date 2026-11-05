@@ -37,7 +37,7 @@ and in the [branch registry](../branch_behavior_registry.md).
 
 | Stage | Layered call tree | Closed decisions | Pending / next |
 |---|---|---|---|
-| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-002, ALG-003, ALG-004 | ALG-001, NUM-001, NUM-002, EXE-001 |
+| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-002, ALG-003, ALG-004 | ALG-001, NUM-002, EXE-001 |
 | 1 Path construction | Recorded | ALG-006, ALG-007 | ALG-005 external evidence |
 | 2 Common impairment | Recorded | NUM-003 shared-L3 ownership and config exposure；legacy B-009 removed | No additional Stage 2 owner |
 | 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid | SRCH-001, ALG-008, ALG-009, NUM-006 |

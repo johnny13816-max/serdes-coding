@@ -5,8 +5,9 @@ They are intentionally not a Python package.
 
 - `utility_py36.py`: direct-import export for exact CPython 3.6.0.
 - `utility_py37.py`: direct-import export for CPython 3.7.3.
-- `utility_py37_20261105.py`: dated 2026-11-05 snapshot of the synchronized
+- `utility_py37_20261106.py`: dated 2026-11-06 snapshot of the synchronized
   Python 3.7 export for explicit handoff/version identification.
+- `utility_py37_20261105.py`: retained historical 2026-11-05 snapshot.
 - `build_utility_py37.py`: deterministically rebuilds the Python 3.7 export
   from the canonical utility modules.
 - `validate_utility_py37.py`: checks Python 3.7 grammar plus representative

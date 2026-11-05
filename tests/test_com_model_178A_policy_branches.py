@@ -154,7 +154,7 @@ def test_178a_out_of_measured_rejects_unknown_method(reference_cfg):
 def test_178a_ctle_pulse_realization_defaults_and_rejects_unknown_method(reference_cfg):
     fields = COMPolicyConfig.__dataclass_fields__
     assert fields["ctle_pulse_realization"].default == "continuous_tf"
-    assert fields["rxffe_record_realization"].default == "linear_convolution"
+    assert fields["rxffe_record_realization"].default == "linear_fixed_grid"
     with pytest.raises(ValueError, match="ctle_pulse_realization"):
         _with_methods(reference_cfg, ctle_pulse_realization="other")
     with pytest.raises(ValueError, match="rxffe_record_realization"):
@@ -172,6 +172,31 @@ def test_178a_eq_ch_imp_length_contract_and_reference_profile(reference_cfg):
         COMPolicyConfig(eq_ch_imp_len="truncated", num_trunc_ui=4095)
     with pytest.raises(ValueError, match="num_trunc_ui=None"):
         COMPolicyConfig(eq_ch_imp_len="full", num_trunc_ui=4096)
+
+
+def test_178a_rxffe_record_realization_resolves_stage5_grid(reference_cfg):
+    fixed_cfg = replace(reference_cfg, policy=COMPolicyConfig())
+    fixed_model = COM(fixed_cfg)
+    assert fixed_model._resolve_post_ffe_response_cfg() is fixed_cfg.link
+
+    expanded_cfg = replace(
+        reference_cfg,
+        policy=COMPolicyConfig(rxffe_record_realization="linear_expanded_grid"),
+    )
+    expanded_model = COM(expanded_cfg)
+    expanded = expanded_model._resolve_post_ffe_response_cfg()
+    expected = expanded_cfg.link.sampled_nfft + expanded_cfg.dte.N_max - 1
+    if expected % 2:
+        expected += 1
+    assert expanded.sampled_nfft == expected
+    assert expanded_model._resolve_post_ffe_imp_record_cfg(expanded) is expanded
+
+    reference_model = COM(reference_cfg)
+    assert reference_model._resolve_post_ffe_response_cfg() is reference_cfg.link
+    assert (
+        reference_model._resolve_post_ffe_imp_record_cfg(reference_cfg.link)
+        is reference_model._eq_ch_imp_record_cfg
+    )
 
 
 def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
@@ -372,7 +397,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["policy.rxffe_record_realization"] == {
-        "raw": "linear_convolution",
+        "raw": "linear_fixed_grid",
         "effective": "finite_record_circshift",
         "overridden_by_profile": "sicopr_reference_v1",
     }
@@ -423,6 +448,7 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert run_rows[("control", "execution_profile")] == "project_standard"
     assert "eq_ch_imp_len" in fields
     assert "num_trunc_ui" in fields
+    assert "rxffe_record_realization" in fields
     assert "noise_grid_num_ui" not in fields
     canonical_grid_fields = {
         f"{family}.{field}"

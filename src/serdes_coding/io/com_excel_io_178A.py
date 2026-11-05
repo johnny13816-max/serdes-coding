@@ -219,7 +219,9 @@ def _resolve_project_profile_178A(
         # realization; the reference execution profile expands it to the
         # validated reference realization.
         ctle_pulse_realization="continuous_tf",
-        rxffe_record_realization="linear_convolution",
+        rxffe_record_realization=str(
+            fixed.get("rxffe_record_realization", "linear_fixed_grid")
+        ).strip(),
         eq_ch_imp_len=configured_eq_ch_imp_len,
         num_trunc_ui=configured_num_trunc_ui,
         final_pmf_grid=(

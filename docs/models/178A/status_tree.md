@@ -150,7 +150,10 @@ The compatibility property `dfe_coeff` returns `b_lim` for shared report code.
 
 ### Stage ownership
 
-`COMImpStageStatus` contains only `psd` and `adc_input`. Equivalent-channel responses are owned by root `COMStatus.eq_ch`; RX FFE ownership belongs to `COMDTEStatus`.
+`COMImpStageStatus` contains `record_cfg`, `psd` and `adc_input`.
+Equivalent-channel responses are owned by root `COMStatus.eq_ch`; RX FFE tap
+ownership belongs to `COMDTEStatus`, while Stage 5 response realization belongs
+to `COMPostFFEEqChannelStatus`.
 
 | Root field | Producer | Replacement behavior |
 |---|---|---|
@@ -193,9 +196,12 @@ Every `S_*` field is a `SampledPSD` and therefore carries its own `theta`, `fb`,
 |---|---|---|
 | `COMEqChannelStatus` | `phase_index`, `pre_dte`, optional `post_ffe` | selected-phase lifecycle |
 | `COMPreDTEEqChannelStatus` | `h_dsamp`, `h_tn`, `h_J`, `h_XTs_dsamp` | `SampledResponse` or list thereof |
-| `COMPostFFEEqChannelStatus` | `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | `SampledResponse` or list thereof |
+| `COMPostFFEEqChannelStatus` | `record_realization`, `response_cfg`, `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | ALG-011 provenance/grid plus `SampledResponse` or list thereof |
 
-Each COM-produced response retains the run-level `LinkConfig` reference and owns its impulse/transfer representation. Reporting consumes these stored objects.
+All Stage 5 responses retain the exact `response_cfg` resolved by ALG-011 and
+own their impulse/transfer representation. `COMImpStageStatus.record_cfg`
+records the independently resolved NUM-003 PSD/correlation grid. Reporting and
+Stage 7 consume these stored objects instead of reconstructing a grid from config.
 
 ### `COMAdcInputPMF`
 
@@ -236,7 +242,7 @@ in the 178A dataclass to support incremental stage construction and reporting.
 ## MLSD status
 
 `COMMLSDNoiseStatus` is a transient result of `build_mlsd_noise()`: it owns
-`S_isi`, `sigma_isi`, `S_ni`, `sigma_ni`, and `R_ni` until the top-level MLSD
+`record_cfg`, `S_isi`, `sigma_isi`, `S_ni`, `sigma_ni`, and `R_ni` until the top-level MLSD
 flow assembles the final status. `calculate_der_mlsd()` reads only `p_an`
 and `R_ni` and returns `DER_MLSD` plus `der_by_j`; it does not mutate a status.
 The final `COMMLSDStatus` keeps the existing flat reporting fields:

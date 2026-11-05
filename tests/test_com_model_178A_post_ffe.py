@@ -58,6 +58,38 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             direct = direct.add(source.filtered_by(response))
         np.testing.assert_allclose(post.S_xn.psd, direct.psd, rtol=1e-12, atol=1e-24)
 
+    def test_expanded_record_uses_one_stage5_grid_for_responses_and_psds(self) -> None:
+        expanded_cfg = replace(
+            self.cfg,
+            policy=replace(
+                self.cfg.policy,
+                rxffe_record_realization="linear_expanded_grid",
+                eq_ch_imp_len="full",
+                num_trunc_ui=None,
+            ),
+        )
+        model = COM(expanded_cfg)
+        status = model._run_once(
+            run_cfg=expanded_cfg.execution.search_final,
+            progress=False,
+        )
+        response_cfg = status.eq_ch.post_ffe.response_cfg
+        record_cfg = status.imp.post_ffe.record_cfg
+        expected = expanded_cfg.link.sampled_nfft + expanded_cfg.dte.N_max - 1
+        if expected % 2:
+            expected += 1
+        self.assertEqual(response_cfg.sampled_nfft, expected)
+        self.assertIs(record_cfg, response_cfg)
+        for response in (
+            status.eq_ch.h_w,
+            status.eq_ch.h_ISI,
+            status.eq_ch.h_w_J,
+            *status.eq_ch.h_XTs_w,
+        ):
+            self.assertIs(response.cfg, response_cfg)
+        for name in ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total"):
+            self.assertIs(getattr(status.imp.post_ffe.psd, name).cfg, record_cfg)
+
     def test_quantization_psd_matches_final_pmf_rms(self) -> None:
         status = self.status
         p_qn = status.pmf.p_qn

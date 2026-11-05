@@ -164,7 +164,7 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
 | `final_com_vqc_convention` | `COMConfig.policy` | `selected_phase_adc_input` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
-| `rxffe_record_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `linear_convolution` |
+| `rxffe_record_realization` | `COMConfig.policy`（workbook `fixed_config` 可明示；profile 可覆蓋） | `linear_fixed_grid` |
 | `eq_ch_imp_len` | `COMConfig.policy`（workbook 獨立曝露） | `full` |
 | `num_trunc_ui` | `COMConfig.policy`（僅 `truncated` 適用） | blank / `None` |
 | `pmf_projection_method` | `COMConfig.policy`（workbook 獨立曝露） | `linear` |
@@ -214,8 +214,12 @@ raw/effective 值。此模式只供 reference 比對，不宣稱為 178A 通用�
 方法：measured composite pre-CTLE TF、reference frequency grid、raw IFFT、
 停用 causality correction、固定 `1e-3` peak 截尾、兩級 bilinear IIR 與一 UI
 unit pulse。這些步驟沒有額外 config 欄位。`rxffe_record_realization` 是另一個
-post-FFE 邊界；reference preset 選 finite-record circular shift，general 預設
-保留 fixed-grid linear convolution 與 overflow guard。
+Stage 5 post-FFE record policy：`linear_fixed_grid` 保留 run grid 與 overflow guard；
+`linear_expanded_grid` 建立足以容納完整 linear convolution 的共同 response grid；
+`finite_record_circshift` 在原有限 record 做 shift-sum，供 reference preset 使用。
+Stage 5 為唯一 branch owner，Stage 6 DFE 與 Stage 7 MLSD 只消費 status 中已解析的
+response／PSD record grid。`policy.eq_ch_imp_len`（NUM-003）仍獨立決定 full 或
+truncated PSD/correlation record，不改變 ALG-011 的 response realization。
 
 `out_of_measured` 控制 terminated scalar `H_21` 從量測 S-parameter grid
 轉到 analysis grid 時的頻帶外處理。`cosine_decay` 保留原本的 cosine

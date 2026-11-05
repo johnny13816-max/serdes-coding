@@ -2605,7 +2605,7 @@ class SampledResponse:
 
     def cascade_ir(
         self, other: 'SampledResponse', *, per_ui: Optional[int] = None,
-        force_grid: bool = True,
+        force_grid: bool = True, output_cfg: Optional[LinkConfig] = None,
     ) -> 'SampledResponse':
         """Cascade sampled-time responses by checked linear convolution.
 
@@ -2613,7 +2613,9 @@ class SampledResponse:
         grids. Trailing exact zero padding is removed before convolution.
         ``force_grid=True`` keeps the original cfg after checking the discarded
         tail; ``False`` returns a new grid with the full linear result for
-        diagnosis. No continuous-time ``dt`` factor is applied.
+        diagnosis. A caller-owned ``output_cfg`` preserves the full result on
+        an explicitly resolved common grid. No continuous-time ``dt`` factor
+        is applied.
         """
         if not np.isclose(self.fb, other.fb):
             raise ValueError("SampledResponse fb values must match.")
@@ -2628,6 +2630,16 @@ class SampledResponse:
         a = _finite_support(self.ir)
         b = _finite_support(other.ir)
         ir_total = np.convolve(a, b)
+        if output_cfg is not None:
+            if force_grid:
+                raise ValueError("output_cfg requires force_grid=False.")
+            if not np.isclose(output_cfg.fb, self.fb):
+                raise ValueError("output_cfg fb must match the cascaded responses.")
+            if output_cfg.sampled_nfft < len(ir_total):
+                raise ValueError(
+                    "output_cfg.sampled_nfft must cover the full linear result."
+                )
+            return type(self).from_ir(ir_total, output_cfg)
         if force_grid:
             if self.cfg is None:
                 raise ValueError("force_grid=True requires responses bound to a LinkConfig.")

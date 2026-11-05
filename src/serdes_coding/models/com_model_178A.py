@@ -258,25 +258,39 @@ def _apply_fir_finite_record(response: np.ndarray, taps: np.ndarray) -> np.ndarr
 def _apply_rxffe_response(
     response: SampledResponse,
     taps: np.ndarray,
-    link_cfg: LinkConfig,
-    realization: Literal["linear_convolution", "finite_record_circshift"],
+    output_cfg: LinkConfig,
+    realization: Literal[
+        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
+    ],
     context: str,
 ) -> SampledResponse:
-    """Apply the selected post-FFE record-boundary convention."""
+    """Apply the selected post-FFE record convention on one resolved grid."""
     taps = np.asarray(taps, dtype=float)
     if realization == "finite_record_circshift":
+        if output_cfg is not response.cfg:
+            raise ValueError("finite_record_circshift must preserve the input response grid.")
         return SampledResponse.from_ir(
             _apply_fir_finite_record(response.ir, taps),
-            link_cfg,
+            output_cfg,
         )
-    if realization != "linear_convolution":
+    if realization not in {"linear_fixed_grid", "linear_expanded_grid"}:
         raise ValueError(
-            "RxFFE record realization must be linear_convolution or "
-            "finite_record_circshift."
+            "RxFFE record realization must be linear_fixed_grid, "
+            "linear_expanded_grid, or finite_record_circshift."
         )
-    tap_response = SampledResponse.from_ir(taps, link_cfg)
+    if response.cfg is None:
+        raise ValueError("RxFFE response must be bound to a LinkConfig.")
+    tap_response = SampledResponse.from_ir(taps, response.cfg)
     try:
-        return response.cascade_ir(tap_response, force_grid=True)
+        if realization == "linear_fixed_grid":
+            if output_cfg is not response.cfg:
+                raise ValueError("linear_fixed_grid must preserve the input response grid.")
+            return response.cascade_ir(tap_response, force_grid=True)
+        return response.cascade_ir(
+            tap_response,
+            force_grid=False,
+            output_cfg=output_cfg,
+        )
     except GridOverflowError as error:
         raise error.with_context(context) from error
 
@@ -285,10 +299,6 @@ def _calculate_h_J(
     h: np.ndarray,
     pos: int,
     link_cfg: LinkConfig,
-    w: Optional[np.ndarray] = None,
-    rxffe_record_realization: Literal[
-        "linear_convolution", "finite_record_circshift"
-    ] = "linear_convolution",
 ) -> np.ndarray:
     """
     Calculate 178A sampled jitter sensitivity.
@@ -310,18 +320,6 @@ def _calculate_h_J(
     delta_t_ui = link_cfg.dt / link_cfg.bt
     h_m1 = h[center_idx - 1]
     h_p1 = h[center_idx + 1]
-    if w is not None:
-        if rxffe_record_realization == "linear_convolution":
-            h_m1 = np.convolve(h_m1, w)
-            h_p1 = np.convolve(h_p1, w)
-        elif rxffe_record_realization == "finite_record_circshift":
-            h_m1 = _apply_fir_finite_record(h_m1, w)
-            h_p1 = _apply_fir_finite_record(h_p1, w)
-        else:
-            raise ValueError(
-                "RxFFE record realization must be linear_convolution or "
-                "finite_record_circshift."
-            )
     h_J = (h_p1 - h_m1) / (2 * delta_t_ui)
     return h_J
 
@@ -1657,6 +1655,56 @@ class COM:
         self._eq_ch_imp_record_cfg = self._resolve_eq_ch_imp_record_cfg()
         self.status: Optional[COMStatus | COMSearchStatus] = None
 
+    def _resolve_post_ffe_response_cfg(self) -> LinkConfig:
+        """Resolve the one time-domain response grid owned by Stage 5."""
+        realization = self.cfg.policy.rxffe_record_realization
+        if realization in {"linear_fixed_grid", "finite_record_circshift"}:
+            return self.cfg.link
+        if realization != "linear_expanded_grid":
+            raise ValueError(
+                f"Unsupported RX FFE record realization: {realization!r}."
+            )
+        sampled_nfft = self.cfg.link.sampled_nfft + int(self.cfg.dte.N_max) - 1
+        if sampled_nfft % 2 != 0:
+            sampled_nfft += 1
+        return LinkConfig.from_Nfft(
+            fb=self.cfg.link.fb,
+            per_ui=self.cfg.link.per_ui,
+            Nfft=sampled_nfft * self.cfg.link.per_ui,
+        )
+
+    def _resolve_post_ffe_imp_record_cfg(
+        self, post_ffe_response_cfg: LinkConfig,
+    ) -> LinkConfig:
+        """Apply NUM-003 to the Stage 5/7 post-FFE numerical domain."""
+        if self.cfg.policy.eq_ch_imp_len == "full":
+            return post_ffe_response_cfg
+        return self._eq_ch_imp_record_cfg
+
+    @staticmethod
+    def _resample_psd_to_cfg(
+        psd: SampledPSD, target_cfg: LinkConfig, *, source_name: str,
+    ) -> SampledPSD:
+        """Evaluate an existing sampled PSD on another grid with the same fb."""
+        if not np.isclose(psd.fb, target_cfg.fb):
+            raise ValueError(f"{source_name} must share the target fb.")
+        if psd.cfg is target_cfg:
+            return psd
+        if psd.cfg is None or not (
+            np.isclose(psd.theta[0], 0.0)
+            and np.isclose(psd.theta[-1], np.pi)
+        ):
+            raise ValueError(
+                f"{source_name} must share the target grid or provide a bound full-band grid."
+            )
+        values = np.interp(target_cfg.theta, psd.theta, psd.psd)
+        return SampledPSD(
+            theta=target_cfg.theta,
+            psd=values,
+            fb=target_cfg.fb,
+            cfg=target_cfg,
+        )
+
     def _resolve_eq_ch_imp_record_cfg(self) -> LinkConfig:
         """Resolve the single PSD/correlation record shared by NUM-003 consumers."""
         if self.cfg.policy.eq_ch_imp_len == "full":
@@ -1694,12 +1742,16 @@ class COM:
     ) -> SampledPSD:
         """Build an impairment PSD through the one shared NUM-003 L3 facade."""
         record_cfg = record_cfg or self._eq_ch_imp_record_cfg
-        if (
-            record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
-            or not np.isclose(record_cfg.fb, self._eq_ch_imp_record_cfg.fb)
-        ):
+        if not np.isclose(record_cfg.fb, self._eq_ch_imp_record_cfg.fb):
             raise ValueError(
                 f"{source_name} record config conflicts with COMPolicyConfig.eq_ch_imp_len."
+            )
+        if (
+            self.cfg.policy.eq_ch_imp_len == "truncated"
+            and record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
+        ):
+            raise ValueError(
+                f"{source_name} record config conflicts with the configured truncated length."
             )
         record = self._realize_eq_ch_imp_record(
             response,
@@ -2471,22 +2523,26 @@ class COM:
             raise ValueError("Stage 5 requires H_rxffe from completed Stage 4.")
         eq_ch_imp_record_cfg = imp_pre.S_rn.cfg or self._eq_ch_imp_record_cfg
         w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, eq_ch_imp_record_cfg)
+        post_ffe_response_cfg = self._resolve_post_ffe_response_cfg()
+        post_ffe_imp_record_cfg = self._resolve_post_ffe_imp_record_cfg(
+            post_ffe_response_cfg
+        )
 
         h_w = _apply_rxffe_response(
             eq_ch.pre_dte.h_dsamp,
             w_lim_ndarray,
-            self.cfg.link,
+            post_ffe_response_cfg,
             self.cfg.policy.rxffe_record_realization,
             "post_ffe victim",
         )
-        H_rxffe = dte_status.H_rxffe
+        H_rxffe = SampledResponse.from_ir(w_lim_ndarray, post_ffe_imp_record_cfg)
 
         h_XTs_w: list[SampledResponse] = []
         for path_index, h_XT_dsamp in enumerate(eq_ch.pre_dte.h_XTs_dsamp or [], start=1):
             h_XT_w = _apply_rxffe_response(
                 h_XT_dsamp,
                 w_lim_ndarray,
-                self.cfg.link,
+                post_ffe_response_cfg,
                 self.cfg.policy.rxffe_record_realization,
                 f"post_ffe XT{path_index}",
             )
@@ -2502,25 +2558,24 @@ class COM:
             )
         h_ISI_ndarray[d] = 0.0
         h_ISI_ndarray[d + 1:dfe_stop] -= dte_status.b_lim
-        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, self.cfg.link)
+        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, post_ffe_response_cfg)
         sigma_ISI = float(imp_pre.sigma_X * np.sqrt(np.sum(h_ISI.ir**2)))
 
         # DDJ uses the original selected-phase construction: take the two
         # adjacent victim-pulse phases through the FFE, then difference them.
-        h_w_J_ndarray = _calculate_h_J(
+        h_J_pre_ndarray = _calculate_h_J(
             h,
             dte_status.pos,
             self.cfg.link,
-            w_lim_ndarray,
-            self.cfg.policy.rxffe_record_realization,
         )
-        if self.cfg.policy.rxffe_record_realization == "finite_record_circshift":
-            h_w_J = SampledResponse.from_ir(h_w_J_ndarray, self.cfg.link)
-        else:
-            try:
-                h_w_J = SampledResponse.from_linear_ir(h_w_J_ndarray, self.cfg.link)
-            except GridOverflowError as error:
-                raise error.with_context("post_ffe DDJ") from error
+        h_J_pre = SampledResponse.from_ir(h_J_pre_ndarray, self.cfg.link)
+        h_w_J = _apply_rxffe_response(
+            h_J_pre,
+            w_lim_ndarray,
+            post_ffe_response_cfg,
+            self.cfg.policy.rxffe_record_realization,
+            "post_ffe DDJ",
+        )
 
         run_cfg = self._effective_run_cfg(run_cfg)
         # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
@@ -2561,18 +2616,25 @@ class COM:
                 pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
             )
 
-        # All pre/post-FFE PSDs share the run-level sampled grid.
-        S_rn = imp_pre.S_rn.filtered_by(H_rxffe)
-        S_tn = imp_pre.S_tn.filtered_by(H_rxffe)
+        # ALG-011 resolves the full Stage 5 response support. NUM-003 then
+        # resolves the PSD/correlation record used by Stage 5 and Stage 7.
+        S_rn_pre = self._resample_psd_to_cfg(
+            imp_pre.S_rn, post_ffe_imp_record_cfg, source_name="pre-FFE S_rn"
+        )
+        S_tn_pre = self._resample_psd_to_cfg(
+            imp_pre.S_tn, post_ffe_imp_record_cfg, source_name="pre-FFE S_tn"
+        )
+        S_rn = S_rn_pre.filtered_by(H_rxffe)
+        S_tn = S_tn_pre.filtered_by(H_rxffe)
 
-        S_xn = _zero_sampled_psd(eq_ch_imp_record_cfg)
+        S_xn = _zero_sampled_psd(post_ffe_imp_record_cfg)
         for h_XT_w in h_XTs_w:
             S_xn = S_xn.add(
                 self._build_eq_ch_imp_psd(
                     h_XT_w.ir,
                     imp_pre.sigma_X**2,
                     source_name="post-FFE XT eq-channel",
-                    record_cfg=eq_ch_imp_record_cfg,
+                    record_cfg=post_ffe_imp_record_cfg,
                 )
             )
 
@@ -2581,17 +2643,17 @@ class COM:
             imp_pre.sigma_X**2
             * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
             source_name="post-FFE jitter eq-channel",
-            record_cfg=eq_ch_imp_record_cfg,
+            record_cfg=post_ffe_imp_record_cfg,
         )
 
         if adc_input_pmf.delta is None:
-            S_qn = _zero_sampled_psd(eq_ch_imp_record_cfg)
+            S_qn = _zero_sampled_psd(post_ffe_imp_record_cfg)
         else:
             S_qn_adc = SampledPSD.from_constant(
-                eq_ch_imp_record_cfg.theta,
-                (adc_input_pmf.delta**2 / 12.0) / eq_ch_imp_record_cfg.fb,
-                eq_ch_imp_record_cfg.fb,
-                cfg=eq_ch_imp_record_cfg,
+                post_ffe_imp_record_cfg.theta,
+                (adc_input_pmf.delta**2 / 12.0) / post_ffe_imp_record_cfg.fb,
+                post_ffe_imp_record_cfg.fb,
+                cfg=post_ffe_imp_record_cfg,
             )
             S_qn = S_qn_adc.filtered_by(H_rxffe)
 
@@ -2599,12 +2661,15 @@ class COM:
 
         return (
             COMPostFFEEqChannelStatus(
+                record_realization=self.cfg.policy.rxffe_record_realization,
+                response_cfg=post_ffe_response_cfg,
                 h_w=h_w,
                 h_XTs_w=h_XTs_w,
                 h_ISI=h_ISI,
                 h_w_J=h_w_J,
             ),
             COMImpairmentStatus(post_ffe=COMImpStageStatus(
+                record_cfg=post_ffe_imp_record_cfg,
                 psd=COMPSDStatus(
                     As=As,
                     S_rn=S_rn,
@@ -2644,8 +2709,8 @@ class COM:
                 "build_mlsd_noise requires pre-FFE total noise PSD S_n."
             )
         S_n = pre_dte.psd.S_total
-        H_rxffe = dte_status.H_rxffe
-        if not isinstance(H_rxffe, SampledResponse):
+        H_rxffe_pre = dte_status.H_rxffe
+        if not isinstance(H_rxffe_pre, SampledResponse):
             raise TypeError("build_mlsd_noise requires H_rxffe to be a SampledResponse.")
         h_ISI = eq_ch.h_ISI
         if not isinstance(h_ISI, SampledResponse):
@@ -2655,13 +2720,27 @@ class COM:
         if not np.isfinite(imp_status.sigma_X) or imp_status.sigma_X < 0.0:
             raise ValueError("build_mlsd_noise requires finite non-negative sigma_X.")
 
+        post_stage = imp_status.post_ffe
+        if post_stage is None:
+            raise ValueError("build_mlsd_noise requires post-FFE impairment status.")
+        record_cfg = post_stage.record_cfg or H_rxffe_pre.cfg
+        if record_cfg is None:
+            raise ValueError("build_mlsd_noise requires a resolved post-FFE record grid.")
+        H_rxffe = SampledResponse.from_ir(H_rxffe_pre.ir, record_cfg)
+        S_n = self._resample_psd_to_cfg(
+            S_n, record_cfg, source_name="pre-FFE S_n"
+        )
+        S_an = self._resample_psd_to_cfg(
+            added_noise.S_an, record_cfg, source_name="added_noise.S_an"
+        )
+
         if (
             S_n.theta.shape != H_rxffe.theta.shape
             or not np.isclose(S_n.fb, H_rxffe.fb)
             or not np.allclose(S_n.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
         ):
             raise ValueError("pre-FFE S_n must share the H_rxffe theta grid and fb.")
-        for name, psd in (("added_noise.S_an", added_noise.S_an),):
+        for name, psd in (("added_noise.S_an", S_an),):
             if (
                 psd.theta.shape != H_rxffe.theta.shape
                 or not np.isclose(psd.fb, H_rxffe.fb)
@@ -2678,6 +2757,10 @@ class COM:
         # the complete response.
         quantization_method = self.cfg.policy.mlsd_quantization_psd
         source_qn = pre_dte.psd.S_qn
+        if source_qn is not None:
+            source_qn = self._resample_psd_to_cfg(
+                source_qn, record_cfg, source_name="pre-DTE S_qn"
+            )
         if quantization_method == "pre_dte_filtered":
             S_n_filtered = S_n.filtered_by(H_rxffe)
             S_qn = source_qn.filtered_by(H_rxffe) if source_qn is not None else None
@@ -2721,10 +2804,10 @@ class COM:
             h_ISI.ir,
             imp_status.sigma_X**2,
             source_name="post-FFE ISI equivalent channel",
-            record_cfg=H_rxffe.cfg,
+            record_cfg=record_cfg,
         )
         # Eq. (178A-54): sum receiver, added, and ISI noise densities.
-        S_ni = S_n_filtered.add(added_noise.S_an).add(S_isi)
+        S_ni = S_n_filtered.add(S_an).add(S_isi)
         # Eq. (178A-16), as directed by the text after Eq. (178A-54).
         R_ni = S_ni.to_autocorrelation()
         if not np.all(np.isfinite(R_ni)) or R_ni.size == 0 or R_ni[0] <= 0.0:
@@ -2739,6 +2822,7 @@ class COM:
             S_ni=S_ni,
             sigma_ni=S_ni.to_sigma(),
             R_ni=R_ni,
+            record_cfg=record_cfg,
             S_qn=S_qn,
             sigma_qn=S_qn.to_sigma() if S_qn is not None else None,
         )

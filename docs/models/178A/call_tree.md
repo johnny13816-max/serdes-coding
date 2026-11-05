@@ -117,9 +117,11 @@ COM._run_once(run_cfg)
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
-    │   ├── Stage 5: calculate_post_ffe_imp(...), reusing shared NUM-003 L3
-    │   ├── _assign_post_ffe(...) once
-    │   │   └── _apply_rxffe_response(...) using resolved record realization
+    │   ├── Stage 5: calculate_post_ffe_imp(...)
+    │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
+    │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
+    │   │   └── _resolve_post_ffe_imp_record_cfg(...) for independent NUM-003
+    │   ├── _assign_post_ffe(...) once, including resolved response/PSD grids
     │   ├── calculate_COM_DFE(...)
     │   └── return DFE COM status
     ├── mlsd
@@ -134,8 +136,9 @@ COM._run_once(run_cfg)
         └── return requested completed status
 ```
 
-Stage 7 建立 MLSD `S_isi` 時也以 full `h_ISI` 呼叫 shared NUM-003 L3；
-status 中的 `h_ISI` 不先截短。
+Stage 7 建立 MLSD `S_isi` 時，以 Stage 5 status 的 `h_ISI` 與 resolved
+`post_ffe.record_cfg` 呼叫 shared NUM-003 L3；status 中的完整 `h_ISI` 不先截短。
+MLSD 不再擁有另一個 RX FFE realization selector。
 
 A `COMMainCursorError` rejects only that phase in the sampling loop. Other exceptions leave `_run_once()` and preserve any status already assigned, as described in the status lifecycle.
 

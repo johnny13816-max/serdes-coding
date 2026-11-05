@@ -8,7 +8,7 @@ from typing import Any, Literal, Optional
 
 import numpy as np
 
-from ...utilities.link import LinkSegment, SampledPSD, SampledResponse
+from ...utilities.link import LinkConfig, LinkSegment, SampledPSD, SampledResponse
 from ...utilities.pmf import Pmf1D
 from ...utilities.sparam import SparamModel
 from ..com_dataclass_text import COMDataclassText, TextField, TextSection
@@ -302,8 +302,16 @@ class COMMLSDNoiseStatus(COMDataclassText):
     S_ni: SampledPSD
     sigma_ni: float
     R_ni: np.ndarray
+    record_cfg: Optional[LinkConfig] = None
     S_qn: Optional[SampledPSD] = None
     sigma_qn: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if self.record_cfg is None:
+            self.record_cfg = self.S_ni.cfg
+        for name, psd in (("S_isi", self.S_isi), ("S_ni", self.S_ni), ("S_qn", self.S_qn)):
+            if psd is not None and self.record_cfg is not None and psd.cfg is not self.record_cfg:
+                raise ValueError(f"COMMLSDNoiseStatus.{name} must share record_cfg.")
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -313,6 +321,7 @@ class COMMLSDNoiseStatus(COMDataclassText):
                 self._field("S_ni", "MLSD input-noise PSD", stored_unit="V^2/Hz"),
                 self._field("sigma_ni", "MLSD input-noise sigma", stored_unit="V", display_unit="mV", scale=1e3),
                 self._field("R_ni", "MLSD noise autocorrelation", stored_unit="V^2", display_unit="mV^2", scale=1e6),
+                self._field("record_cfg", "MLSD PSD record grid", stored_unit="configuration"),
                 self._field("S_qn", "MLSD quantization PSD", stored_unit="V^2/Hz"),
                 self._field("sigma_qn", "MLSD quantization sigma", stored_unit="V", display_unit="mV", scale=1e3),
             )),
@@ -403,14 +412,40 @@ class COMPreDTEEqChannelStatus(COMDataclassText):
 class COMPostFFEEqChannelStatus(COMDataclassText):
     """Selected sampling phase's equivalent responses after RX FFE."""
 
+    record_realization: Literal[
+        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
+    ] = "linear_fixed_grid"
+    response_cfg: Optional[LinkConfig] = None
     h_ISI: Optional[SampledResponse] = None
     h_w_J: Optional[SampledResponse] = None
     h_w: Optional[SampledResponse] = None
     h_XTs_w: Optional[list[SampledResponse]] = None
 
+    def __post_init__(self) -> None:
+        allowed = {
+            "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
+        }
+        if self.record_realization not in allowed:
+            raise ValueError(
+                "COMPostFFEEqChannelStatus.record_realization must be one of "
+                f"{sorted(allowed)}."
+            )
+        responses = [self.h_ISI, self.h_w_J, self.h_w]
+        responses.extend(self.h_XTs_w or [])
+        responses = [response for response in responses if response is not None]
+        if self.response_cfg is None and responses:
+            self.response_cfg = responses[0].cfg
+        for response in responses:
+            if self.response_cfg is not None and response.cfg is not self.response_cfg:
+                raise ValueError(
+                    "All COMPostFFEEqChannelStatus responses must share response_cfg."
+                )
+
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Post-FFE responses", (
+                self._field("record_realization", "RX FFE record realization", stored_unit="policy"),
+                self._field("response_cfg", "post-FFE response grid", stored_unit="configuration"),
                 self._field("h_ISI", "ISI response", stored_unit="V"),
                 self._field("h_w_J", "equalized jitter response", stored_unit="V/UI"),
                 self._field("h_w", "equalized victim response", stored_unit="V"),
@@ -419,7 +454,10 @@ class COMPostFFEEqChannelStatus(COMDataclassText):
         )
 
     def _repr_fields(self) -> tuple[TextField, ...]:
-        return (self._field("h_w", "equalized victim response", stored_unit="V"),)
+        return (
+            self._field("record_realization", "RX FFE record realization", stored_unit="policy"),
+            self._field("h_w", "equalized victim response", stored_unit="V"),
+        )
 
 
 @dataclass(repr=False)
@@ -529,12 +567,27 @@ class COMAdcInputPMF(COMDataclassText):
 @dataclass(repr=False)
 class COMImpStageStatus(COMDataclassText):
     """One 178A impairment stage's PSD, equivalent-channel, and ADC material."""
+    record_cfg: Optional[LinkConfig] = None
     psd: Optional[COMPSDStatus] = None
     adc_input: Optional[COMAdcInputPMF] = None
+
+    def __post_init__(self) -> None:
+        if self.psd is None:
+            return
+        psds = [
+            value for value in vars(self.psd).values()
+            if isinstance(value, SampledPSD)
+        ]
+        if self.record_cfg is None and psds:
+            self.record_cfg = psds[0].cfg
+        for psd in psds:
+            if self.record_cfg is not None and psd.cfg is not self.record_cfg:
+                raise ValueError("All COMImpStageStatus PSDs must share record_cfg.")
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Stage outputs", (
+                self._field("record_cfg", "impairment PSD record grid", stored_unit="configuration"),
                 self._field("psd", "PSD status", stored_unit="status"),
                 self._field("adc_input", "ADC-input PMF status", stored_unit="status"),
             )),

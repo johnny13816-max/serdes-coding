@@ -82,3 +82,17 @@ def test_post_ffe_phase_mismatch_does_not_partially_update_status() -> None:
     assert model.status is selected
     assert model.status.eq_ch.post_ffe is None
     assert model.status.imp.post_ffe is None
+
+
+def test_post_ffe_status_requires_one_shared_response_grid() -> None:
+    first_grid = LinkConfig.from_Nfft(8.0, 1, 16)
+    second_grid = LinkConfig.from_Nfft(8.0, 1, 18)
+    victim = SampledResponse.from_ir(np.array([1.0, 0.25]), first_grid)
+    xtalk = SampledResponse.from_ir(np.array([0.5]), second_grid)
+
+    with pytest.raises(ValueError, match="must share response_cfg"):
+        COMPostFFEEqChannelStatus(
+            response_cfg=first_grid,
+            h_w=victim,
+            h_XTs_w=[xtalk],
+        )

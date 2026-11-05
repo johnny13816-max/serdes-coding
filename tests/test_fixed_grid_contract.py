@@ -40,6 +40,21 @@ def test_sampled_overflow_rejects_circular_alias_and_diagnostic_keeps_full_resul
     assert full.cfg is not cfg and full.ir[8] == pytest.approx(0.5)
 
 
+def test_sampled_linear_cascade_accepts_one_caller_owned_expanded_grid():
+    cfg = LinkConfig.from_Nfft(fb=8.0, per_ui=1, Nfft=8)
+    expanded = LinkConfig.from_Nfft(fb=8.0, per_ui=1, Nfft=10)
+    a = SampledResponse.from_ir(np.array([1.0, 0.5, 0.25]), cfg)
+    b = SampledResponse.from_ir(np.array([1.0, -0.5]), cfg)
+
+    actual = a.cascade_ir(b, force_grid=False, output_cfg=expanded)
+
+    assert actual.cfg is expanded
+    np.testing.assert_allclose(
+        actual.ir[:4], np.convolve(np.array([1.0, 0.5, 0.25]), np.array([1.0, -0.5]))
+    )
+    np.testing.assert_array_equal(actual.ir[4:], np.zeros(6))
+
+
 def test_known_finite_taps_require_exact_capacity_even_for_a_small_tail():
     cfg = LinkConfig.from_Nfft(fb=8.0, per_ui=1, Nfft=8)
     a = SampledResponse.from_ir(np.array([1.0, 0, 0, 0, 0, 0, 1e-6]), cfg)

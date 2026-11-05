@@ -135,6 +135,24 @@ class TestMLSDNoise178A(unittest.TestCase):
                 self.imp, self.eq_ch, self.dte, self.added_noise
             )
 
+    def test_mlsd_consumes_the_resolved_expanded_post_ffe_record(self) -> None:
+        expanded = LinkConfig.from_Nfft(self.fb, 1, 18)
+        h_isi = SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), expanded)
+        self.eq_ch.post_ffe = COMPostFFEEqChannelStatus(
+            record_realization="linear_expanded_grid",
+            response_cfg=expanded,
+            h_ISI=h_isi,
+        )
+        self.imp.post_ffe.record_cfg = expanded
+
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+
+        self.assertIs(result.record_cfg, expanded)
+        self.assertIs(result.S_isi.cfg, expanded)
+        self.assertIs(result.S_ni.cfg, expanded)
+
 
 if __name__ == "__main__":
     unittest.main()

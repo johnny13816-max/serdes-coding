@@ -8,14 +8,14 @@ This stage takes the selected pre-DTE impairment and selected limited DTE result
 
 It owns:
 
-- the run-level fixed sampled grid shared with pre-DTE;
+- ALG-011 的 post-FFE response record realization 與共同 response grid；
 - consumption of the Stage 4 RX FFE response representation;
 - equalized victim and aggressor responses;
 - residual ISI after applying selected DFE feedback taps;
 - post-FFE jitter sensitivity;
 - Gaussian-noise sigma used by DFE COM;
 - exact selected-phase ADC-input material used by final quantization PMF;
-- component PSDs on the run-level grid used for reporting.
+- component PSDs on the independently resolved NUM-003 record used for reporting and MLSD.
 
 It does not change the selected DTE MSE and does not build the final interference/noise PMF or COM value.
 
@@ -38,36 +38,49 @@ The commit validates the selected phase and adds only `eq_ch.post_ffe` and
 | `eq_ch` | matching `phase_index` plus pre-DTE `h_dsamp`, `h_J`, `h_XTs_dsamp` | selected equivalent-channel inputs |
 | `imp_pre` | `sigma_X`, pre-DTE `S_rn`, `S_tn`, and selected impairment data | physical pre-DTE inputs |
 | `h` | oversampled victim pulse | post-FFE jitter sensitivity from adjacent phases |
-| `COMConfig.link` | run-level sampled grid and symbol timing | all pre/post-FFE responses and PSDs |
-| `COMConfig.policy.rxffe_record_realization` | `linear_convolution`／`finite_record_circshift` | victim、XT 與 DDJ 的 FFE record-boundary method |
+| `COMConfig.link` | run-level sampled grid and symbol timing | pre-FFE input grid and fixed/circular output grid |
+| `COMConfig.policy.rxffe_record_realization` | `linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | victim、all XT 與 DDJ 的共同 FFE record realization |
+| `COMConfig.policy.eq_ch_imp_len`／`num_trunc_ui` | `full`／`truncated` | independent NUM-003 PSD/correlation record length |
 | `COMConfig.imp` | `R_LM`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc` | signal amplitude, jitter, and quantization controls |
 | `COMConfig.L` | PAM order | signal amplitude and PMF input |
 | `COMConfig.pmf` plus `run_cfg` | ADC-input PMF grid/retention policy | exact selected-phase ADC clipping material |
 
 `w_lim` must be the full zero-filled vector with shape `(N_max,)`, as guaranteed by the DTE stage contract.
 
-## Fixed-grid numerical domain
+## ALG-011 response domain and NUM-003 PSD domain
 
-The stage uses the one run-level `cfg.link` sampled grid. `linear_convolution`
-computes the full convolution and checks the excluded tail before returning to
-that grid; its guard requires `max|tail|/max|full| <= 2e-3` and
-`sum(tail²)/sum(full²) <= 1e-6`. `finite_record_circshift` applies every FFE tap
-as a circular shift on the existing finite record, matching the reference
-record convention and intentionally bypassing the linear-tail guard. Both
-methods retain the same `LinkConfig` object.
+`COM._resolve_post_ffe_response_cfg()` first resolves one response grid. All
+victim、XT、DDJ and residual-ISI responses must share this exact `LinkConfig`:
+
+- `linear_fixed_grid` computes linear convolution, checks the discarded tail,
+  then returns to `cfg.link`. The guard requires
+  `max|tail|/max|full| <= 2e-3` and `sum(tail²)/sum(full²) <= 1e-6`.
+- `linear_expanded_grid` allocates one caller-owned grid large enough for
+  `cfg.link.sampled_nfft + N_max - 1` samples and preserves the complete linear
+  convolution without hidden regrid.
+- `finite_record_circshift` applies every FFE tap as a circular shift on
+  `cfg.link`, matching the SiCoPR finite-record convention and bypassing the
+  linear-tail guard.
+
+After ALG-011 resolves the response grid, NUM-003 independently resolves the
+PSD/correlation record. `full` uses the ALG-011 response grid；`truncated` uses
+the configured truncated record. This separation prevents a response-boundary
+algorithm choice from silently becoming a PSD-cost control.
 
 ```text
-run-level grid
+pre-FFE cfg.link
 ├── imp_pre responses and PSDs
-├── w_lim_pre
-├── S_G_pre
-├── sigma_G after one FFE filtering operation
-├── Stage 4 dte.H_rxffe
-├── h_w
-├── h_XTs_w
-├── h_ISI
-├── h_w_J
-└── post-FFE display PSD components
+├── Stage 4 w_lim / H_rxffe
+└── Stage 5 ALG-011 owner
+    ├── response_cfg
+    │   ├── h_w
+    │   ├── h_XTs_w[*]
+    │   ├── h_ISI
+    │   └── h_w_J
+    └── NUM-003 record_cfg
+        ├── full -> response_cfg
+        └── truncated -> configured truncated grid
+            └── post-FFE PSDs and Stage 7 MLSD noise PSDs
 ```
 
 The post-FFE component PSDs are reporting quantities. Their construction
@@ -82,16 +95,17 @@ does not change DTE MSE or DFE COM.
 - require the matching `dte_status.H_rxffe` constructed by Stage 4;
 - construct `w_lim_pre` on the run-level link grid.
 
-### 2. Build fixed-grid equivalent responses
+### 2. Build one resolved set of equivalent responses
 
 ```text
-eq_ch.pre_dte.h_dsamp + w_lim -> selected _apply_rxffe_response method -> h_w on cfg.link
-dte_status.H_rxffe -> PSD/filter consumers
+eq_ch.pre_dte.h_dsamp + w_lim -> _apply_rxffe_response -> h_w on response_cfg
 for every eq_ch.pre_dte.h_XTs_dsamp
-    apply the same selected record method -> h_XTs_w[k] on cfg.link
+    apply the same selected record method -> h_XTs_w[k] on response_cfg
+pre-FFE h_J + w_lim -> same owner/method -> h_w_J on response_cfg
 ```
 
-The victim and every aggressor retain the original `cfg.link` reference.
+The victim、every aggressor、DDJ and residual ISI share `response_cfg`. No
+downstream stage selects the realization again.
 
 ### 3. Build residual ISI
 
@@ -101,7 +115,9 @@ The exact residual-ISI equation and sign convention remain subject to specificat
 
 ### 4. Build post-FFE jitter sensitivity
 
-The stage calls `_calculate_h_J()` using the oversampled victim pulse, selected phase, run-level `LinkConfig`, and finite FFE taps. Its full result is checked before `h_w_J` is stored on the fixed grid.
+The stage calls `_calculate_h_J()` only for the pre-FFE adjacent-phase derivative,
+then passes that response through the same `_apply_rxffe_response()` owner used by
+victim and XT. `_calculate_h_J()` does not own an ALG-011 selector.
 
 This preserves the implementation's adjacent-phase construction through the selected FFE. Its equation and units still require independent reference validation.
 
@@ -124,9 +140,9 @@ When `N_qb` or `P_qc` is absent, the ADC-input method is `disabled` and no `delt
 
 This exact material is prepared regardless of the faster pre-DTE clipping method. Final DFE COM consumes its `delta` under the default `annex_d3` policy; the separate reference-only final policy reconstructs its own clipping amplitude in `calculate_COM_DFE()` without changing this stored selected-phase material.
 
-### 7. Build reporting PSDs
+### 7. Build reporting／MLSD-consumed PSDs
 
-Every component is represented on `cfg.link`:
+Every component is represented on resolved `record_cfg`:
 
 - `S_rn` and `S_tn`: pre-DTE PSDs filtered directly by `H_rxffe`, with no regrid;
 - `S_xn`: uncorrelated power sum rebuilt from every `h_XTs_w` path;
@@ -134,18 +150,22 @@ Every component is represented on `cfg.link`:
 - `S_qn`: white ADC quantization PSD based on stored `delta`, then filtered by `H_rxffe`; zero when quantization is disabled;
 - `S_total`: sum of the five stored reporting components.
 
-The stored component sigmas are obtained from their matching fixed-grid PSDs.
+The stored component sigmas are obtained from their matching PSDs. Stage 7 MLSD
+consumes this same record grid and does not introduce another selector.
 
 ## Produced status
 
 ```text
 COMStatus Stage 5 additions
 ├── eq_ch.post_ffe: COMPostFFEEqChannelStatus
+│   ├── record_realization
+│   ├── response_cfg
 │   ├── h_w
 │   ├── h_XTs_w
 │   ├── h_ISI
 │   └── h_w_J
 └── imp.post_ffe: COMImpStageStatus
+    ├── record_cfg
 │   ├── psd: COMPSDStatus
 │   │   ├── As
 │   │   ├── S_rn / sigma_rn
@@ -170,7 +190,7 @@ COMStatus Stage 5 additions
 | `h_w_J` | yes, for dual-Dirac PMF | yes |
 | `sigma_G` | yes, Gaussian PMF | summary/proportion context |
 | `post_ffe.adc_input.delta` | yes, final quantization PMF | yes |
-| fixed-grid `S_rn/S_xn/S_tn/S_jn/S_qn/S_total` | no for DFE COM | yes |
+| resolved-grid `S_rn/S_xn/S_tn/S_jn/S_qn/S_total` | MLSD consumes the resolved post record；DFE COM uses PMF quantities | yes |
 | component `sigma_rn/.../sigma_total` | no for DFE COM | yes |
 | `sigma_ISI` | summary value; final ISI PMF uses `h_ISI` | yes |
 
@@ -192,9 +212,10 @@ The stage rejects or propagates errors for these conditions:
 
 - `w_lim` is not finite or does not have shape `(N_max,)`;
 - cursor `d` or the configured DFE feedback range exceeds `h_w`;
-- a linear response tail exceeds the fixed-grid peak or energy limit;
+- a `linear_fixed_grid` response tail exceeds the fixed-grid peak or energy limit;
+- `linear_expanded_grid` cannot cover the complete response or a consumer changes the resolved grid;
 - pre-DTE PSDs/responses required for the selected phase are absent;
-- PSDs or responses do not share the run-level grid;
+- response objects do not share `response_cfg`, or PSD objects do not share `record_cfg`;
 - ADC-input exact PMF construction fails or produces invalid clipping material;
 - any derived response, PSD, or scalar fails its utility/dataclass validation.
 
@@ -205,8 +226,8 @@ The stage runs only after a valid phase/DTE candidate has been selected.
 | Consumer | Data read |
 |---|---|
 | DFE COM | `As`, `sigma_G`, `h_ISI`, `h_XTs_w`, `h_w_J`, exact ADC `delta`, and selected DTE coefficients |
-| MLSD initialization | post-FFE `S_rn`, `h_ISI`, `sigma_X`, plus the later added-noise result |
-| post-FFE reporting | fixed-grid PSDs, sigmas, equivalent responses, and ADC-input PMFs |
+| MLSD initialization | post-FFE `record_cfg`, `S_rn`, `h_ISI`, `sigma_X`, plus later added noise |
+| post-FFE reporting | resolved-grid PSDs, sigmas, equivalent responses, provenance, and ADC-input PMFs |
 | final search CSV | `As`, `sigma_ISI`, and post-FFE component sigmas |
 
 Reporting reads the stored fixed-grid objects and must not reconstruct this stage from config.
@@ -216,12 +237,15 @@ Reporting reads the stored fixed-grid objects and must not reconstruct this stag
 `tests/test_com_model_178A_post_ffe.py` currently supplies one fixed-case integration test with five checks:
 
 1. selected MSE matches the recorded fixed-case value to 14 decimal places;
-2. every post-FFE PSD shares `h_w`'s `fb` and theta grid (`rtol=1e-12`, `atol=1e-15` for theta);
+2. every response shares `response_cfg` and every post-FFE PSD shares `record_cfg`;
 3. stored crosstalk PSD equals the power sum rebuilt from `h_XTs_w` (`rtol=1e-12`, `atol=1e-24`);
 4. post-FFE quantization PSD RMS matches the final quantization PMF RMS (`rtol=5e-4`, `atol=1e-8`);
 5. zeroing display PSDs leaves recomputed DFE COM unchanged to 12 decimal places.
 
-This is implementation-regression evidence for one case. It is not independent specification validation, and it does not yet cover disabled quantization, several DFE lengths, several floating placements, or multiple link grids.
+Additional focused tests cover all three owner methods, the expanded common
+response grid, full/truncated NUM-003 interaction, and Stage 7 consumption of
+the resolved record. This is implementation-regression evidence, not independent
+specification validation.
 
 ## Known limitations and unresolved questions
 

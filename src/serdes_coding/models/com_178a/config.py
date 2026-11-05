@@ -1089,8 +1089,8 @@ class COMPolicyConfig(COMDataclassText):
     ] = "selected_phase_adc_input"
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
     rxffe_record_realization: Literal[
-        "linear_convolution", "finite_record_circshift"
-    ] = "linear_convolution"
+        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
+    ] = "linear_fixed_grid"
     eq_ch_imp_len: Literal["full", "truncated"] = "full"
     num_trunc_ui: Optional[int] = None
     pmf_projection_method: Literal["linear", "nearest"] = "linear"
@@ -1160,7 +1160,9 @@ class COMPolicyConfig(COMDataclassText):
                 "selected_phase_adc_input", "sicopr_final_reconstruction"
             },
             "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
-            "rxffe_record_realization": {"linear_convolution", "finite_record_circshift"},
+            "rxffe_record_realization": {
+                "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
+            },
             "eq_ch_imp_len": {"full", "truncated"},
             "pmf_projection_method": {"linear", "nearest"},
             "xtalk_pmf_accumulation": {"pathwise_convolution"},
