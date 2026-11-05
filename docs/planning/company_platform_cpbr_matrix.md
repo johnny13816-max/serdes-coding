@@ -1,6 +1,6 @@
 # CP-BR — 178A algorithm-branch coverage matrix
 
-> 狀態：**初始盤點，尚未逐項對照 source**。權威技術文件仍為
+> 狀態：**2026-11-05 stage-by-stage reindex 已同步；未完成項仍待逐項 review**。權威技術文件仍為
 > [`../models/178A/branch_behavior_registry.md`](../models/178A/branch_behavior_registry.md).
 > 本工作矩陣依 model stage 歸納現有算法／數值選擇，供 CP-BR 審查；尚不宣稱
 > coverage 完整。
@@ -10,40 +10,39 @@
 由 project 的 `run_config` sheet 解析。`—` 表示 internal utility argument，
 不是可由 project config 選擇的欄位。
 
-| Stage | Branch | rg_name (project config) | Description |
+| Stage order | ID / control class | rg_name (project config) | Description |
 |---|---|---|---|
-| Path construction | B-001 Channel renormalization order | `policy.channel_renormalization_order` | 在 differential conversion 前選擇 SDD-first 或 four-port S4P-first renormalization。 |
-| Path construction | B-002 Out-of-measured-band transfer | `policy.out_of_measured` | 在量測頻帶外選擇 cosine-decay extrapolation 或 zero padding。 |
-| Path construction | B-003 CTLE pulse realization | `policy.ctle_pulse_realization` | 選擇 continuous transfer-function 或 bilinear-IIR finite-record pulse realization。 |
-| Shared response utility | B-020 Time-domain cascade grid | — (`cascade_ir(force_grid=...)`) | 選擇保留原固定 grid 並檢查 tail，或使用完整 linear-convolution record；目前不由 project config 選擇。 |
-| Multiple stages involved / Shared L3 (Stages 2, 3, 5, 7) | B-005 Eq-channel impairment length | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | 完整 one-sample/UI impairment eq-channel 先形成；PSD 前統一選 `full` 或依 `num_trunc_ui` 做 `truncated`。Stage 7 的 MLSD `S_isi` 也走同一入口；workbook 獨立控制。 |
-| Pre-DTE impairment / ADC | B-006 Pre-DTE ADC clipping convention | `policy.pre_dte_adc_clipping_convention` | 選擇 Annex D3 clipping 或 reference-only RJ/tail convention。 |
-| Pre-DTE impairment / ADC | E-002 ADC-input PMF method | `execution.<profile>.pre_dte_pmf_method` | 選擇 Gaussian approximation 或 exact PMF flow 的 pre-DTE clipping。 |
-| Multiple PMF stages / shared L3 + PMF utility | B-008 Discrete-amplitude projection | `policy.pmf_projection_method` | `Pmf1D` 只保存 PMF data；各 stage 把同一 project policy 明示傳入 projection operation，exact PAM atoms 先乘 tap，再由唯一 utility decision point 選 linear mass deposition 或 nearest-bin projection。B-009 平行 FIR path 已移除。 |
-| Multiple PMF stages / shared L3 + PMF utility | B-010/B-011 PDF→PMF discretization | `policy.pdf_to_pmf_method` | `bin_integral` 或 `pmf_sample`；Gaussian／uniform 各自執行 SiCoPR 對應的離散化 rule。 |
-| Pre-DTE impairment / PMF | B-012 PMF amplitude scaling | `policy.pmf_scaling_method` | 在 PMF scaling 時選擇 mass deposition 或 ordinate interpolation。 |
-| Pre-DTE impairment / PMF | E-003 PMF grid quality | `execution.<profile>.pmf_grid_quality` | 選擇 coarse 或 fine derived PMF grid。 |
-| Pre-DTE impairment / PMF | E-004 PMF convergence controls | `execution.<profile>.pmf_keep_mass`, `execution.<profile>.pmf_dy_override` | 選擇 retained mass，並可用明示值取代 derived grid spacing。 |
-| MMSE DTE | E-005 Floating FFE solve | `execution.<profile>.floating_mode` | 選擇 heuristic、simplified 或 spec-defined floating-tap placement flow。 |
-| MMSE DTE | E-006 Sampling-phase search | `execution.<profile>.pos_sweep_method`, `execution.<profile>.pos_coarse_stride` | 選擇 exhaustive 或 coarse/fine sampling-phase evaluation。 |
-| Post-FFE impairment | B-004 RX FFE record realization | `policy.rxffe_record_realization` | 選擇 fixed-grid linear convolution 或 finite-record circular shift-sum。 |
-| DFE COM / final PMF | B-007 Final COM `V_qc` convention *(pending D3p2)* | `policy.final_com_vqc_convention` | 選擇沿用 Stage 5 selected-phase ADC-input `V_qc/delta`，或依 SiCoPR final composition 重建。main-tap accumulation 不屬此分支。 |
-| DFE COM / final PMF | B-013 Final PMF grid | `policy.final_pmf_grid` | 選擇受 absolute/relative limit 約束的 fine grid，或直接 relative-to-`As` grid。 |
-| DFE COM / final PMF | B-014 Gaussian support | `policy.gaussian_n_sigma_override` | 使用 config Gaussian support 或明示的 reference-profile override。 |
-| DFE COM / final PMF | B-015 Final ADC PMF projection | `policy.final_adc_pmf_projection` | 選擇 Annex D3 或 reference-support/tap projection；後者要求 reference-only quantization convention。 |
-| MLSD COM | B-016 Added-noise PDF | `policy.added_noise_pdf` | 選擇 Annex Gaussian addition 或 scaled-total-DFE-PDF calibration。 |
-| MLSD COM | B-017 Sequence termination | `policy.sequence_termination` | 選擇 fixed-length sequence sum 或 reference relative-tail realization。 |
-| MLSD COM | B-018 Reported DER | `policy.reported_der` | 選擇 raw sequence-sum DER 或以 baseline PDF re-evaluate 的 reported DER。 |
-| MLSD COM | B-021 Quantization PSD | `policy.mlsd_quantization_psd` | 選擇完整 filtered pre-DTE noise 或 main-tap-white quantization treatment。 |
+| Stage 0 / input boundary | `PHY-001` physical input | `channel.missing_dc_policy` | Missing-DC completion；不由 execution profile 控制。 |
+| Stage 0 / shared response utility | `NUM-001` numerical control | — (`cascade_ir(force_grid=...)`) | 固定-grid tail guard 或完整 linear-convolution record；目前不是 Project Config field。 |
+| Stage 0 / shared PMF utility | `NUM-002` numerical control | `policy.gaussian_n_sigma_override` | Gaussian support span；不改 sigma、dy 或 tail probability。 |
+| Stage 0 / shared PMF utility | `ALG-001` algorithm policy | `policy.pmf_projection_method` | Target-grid projection：`linear` 或 `nearest`。 |
+| Stage 0 / shared PMF utility | `ALG-002` algorithm policy | `policy.pdf_to_pmf_method` | PDF→PMF：`bin_integral` 或 `pmf_sample`。 |
+| Stage 0 / shared PMF utility | `ALG-003` algorithm policy | `policy.pmf_scaling_method` | Scalar PMF scaling：`mass_deposit` 或 `interpolate_ordinates`。 |
+| Stage 0 / pipeline gate | `EXE-001` execution | `execution.<profile>.target` | 選擇執行至 MSE、DFE、MLSD 或 full；不改已執行 stage 公式。 |
+| Stage 1 / path construction | `ALG-004` algorithm policy | `policy.channel_renormalization_order` | SDD-first 或 four-port S4P-first renormalization。 |
+| Stage 1 / path construction | `ALG-005` algorithm policy | `policy.out_of_measured` | 有效量測頻帶外 cosine decay 或 zero padding。 |
+| Stage 1 / path construction | `ALG-006` algorithm policy | `policy.ctle_pulse_realization` | Continuous TF 或 bilinear-IIR finite-record pulse realization。 |
+| Stage 2 / shared L3 (Stages 2, 3, 5, 7) | `NUM-003` numerical control | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | PSD 前使用 full 或 truncated equivalent-channel record。 |
+| Stage 3 / phase scheduling | `SRCH-001` search | `execution.<profile>.pos_sweep_method`, `pos_coarse_stride` | Exhaustive 或 coarse/fine phase evaluation。 |
+| Stage 3 / per-phase ADC | `ALG-007` algorithm policy | `policy.pre_dte_adc_clipping_convention` | Annex D3 或 reference-only RJ/tail clipping。 |
+| Stage 3 / per-phase ADC | `ALG-008` algorithm policy | `execution.<profile>.pre_dte_pmf_method` | Gaussian approximation 或 exact PMF flow。 |
+| Stage 3 / earliest grid consumer | `NUM-004` numerical control | `numerical_control.adc_input_pmf_grid.*`, `final_pmf_grid.*` | ADC-input/final families 獨立解析；跨 Stage 3 與 Stage 6。 |
+| Stage 3 / ADC-input PMF | `NUM-005` numerical control | `execution.<profile>.pmf_keep_mass` | Retained-mass convergence；不擁有 grid spacing。 |
+| Stage 4 / MMSE DTE | `ALG-009` algorithm policy | `execution.<profile>.floating_mode` | Heuristic、simplified 或 spec-defined floating-tap solve。 |
+| Stage 5 / post-FFE | `ALG-010` algorithm policy | `policy.rxffe_record_realization` | Fixed-grid linear convolution 或 finite-record circular shift-sum。 |
+| Stage 6 / DFE COM | `ALG-011` algorithm policy | `policy.final_com_vqc_convention` | 沿用 selected-phase `V_qc/delta` 或重建 final clipping PMF。 |
+| Stage 6 / final ADC PMF | `ALG-012` algorithm policy | `policy.final_adc_pmf_projection` | Annex D3 或 reference-support/tap projection。 |
+| Stage 7 / MLSD added noise | `ALG-013` algorithm policy | `policy.added_noise_pdf` | Gaussian addition 或 scaled-total-PDF calibration。 |
+| Stage 7 / MLSD noise PSD | `ALG-014` algorithm policy | `policy.mlsd_quantization_psd` | Full pre-DTE filtered quantization noise 或 main-tap-white treatment。 |
+| Stage 7 / DER recurrence | `ALG-015` algorithm policy | `policy.sequence_termination` | Fixed-length sum 或 reference relative-tail termination。 |
+| Stage 7 / reported DER | `ALG-016` algorithm policy | `policy.reported_der` | Raw sequence DER 或 baseline-PDF re-evaluation。 |
 
 ## 明確不納入本表
 
-- `COMRunConfig.target`: pipeline termination gate, not a same-stage algorithm
-  selection。
 - Guard methods、input validation、error handling 與 data-presence paths。
-- B-019 `channel.missing_dc_policy`：它由缺失 DC sample 觸發，屬 data-presence
-  handling，不符合本次 algorithm-branch 定義。
 - `policy.xtalk_pmf_accumulation`：fixed single-value behavior，不是選擇。
+- Retired B-009 `interference_pmf_method`：已無 selector。
+- Former E-007 final-quantization accumulation：無 selectable control，保留為 deferred technical issue。
 
 ## CP-BR 下一輪審查欄位
 

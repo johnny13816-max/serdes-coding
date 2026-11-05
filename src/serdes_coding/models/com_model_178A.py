@@ -127,7 +127,7 @@ def _select_xtalk_path_phase(h_XT: np.ndarray, per_ui: int) -> tuple[int, np.nda
     Eq. 178A-18 defines h_xn^(k)(n) using t_s^(k), where t_s^(k) is chosen to
     maximize sum_n [h_xn^(k)(n)]^2 for that crosstalk path. This phase is not
     the victim sampling phase candidate. Record-length policy is deliberately
-    excluded; B-005 is applied later when this full response becomes a PSD.
+    excluded; NUM-003 is applied later when this full response becomes a PSD.
     """
     rss = np.zeros(per_ui)
     for phase in np.arange(per_ui):
@@ -899,7 +899,7 @@ def _resolve_final_com_pmf_config(
 
 def _build_pmf_pam_L(L: int) -> Pmf1D:
     # Preserve exact PAM atoms on their natural dimensionless source grid.
-    # The source itself needs no B008 projection: its occupied integer grid
+    # The source itself needs no ALG-001 projection: its occupied integer grid
     # indices are -(L-1), -(L-3), ..., +(L-1).
     pmf = np.zeros(2 * L - 1, dtype=float)
     pmf[::2] = 1.0 / L
@@ -1658,7 +1658,7 @@ class COM:
         self.status: Optional[COMStatus | COMSearchStatus] = None
 
     def _resolve_eq_ch_imp_record_cfg(self) -> LinkConfig:
-        """Resolve the single PSD/correlation record shared by B-005 consumers."""
+        """Resolve the single PSD/correlation record shared by NUM-003 consumers."""
         if self.cfg.policy.eq_ch_imp_len == "full":
             return self.cfg.link
         return LinkConfig.from_Nfft(
@@ -1673,7 +1673,7 @@ class COM:
         *,
         source_name: str,
     ) -> np.ndarray:
-        """Apply B-005 to one full one-sample-per-UI impairment response."""
+        """Apply NUM-003 to one full one-sample-per-UI impairment response."""
         response = np.asarray(response, dtype=float)
         if response.ndim != 1:
             raise ValueError(f"{source_name} must be a one-dimensional response.")
@@ -1692,7 +1692,7 @@ class COM:
         source_name: str,
         record_cfg: Optional[LinkConfig] = None,
     ) -> SampledPSD:
-        """Build an impairment PSD through the one shared B-005 L3 facade."""
+        """Build an impairment PSD through the one shared NUM-003 L3 facade."""
         record_cfg = record_cfg or self._eq_ch_imp_record_cfg
         if (
             record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
@@ -1803,7 +1803,7 @@ class COM:
         report("pre_dte_imp_common: done")
 
         # stage 3 preparation: select each full-length XT path phase once, then
-        # pass its one-sample-per-UI response through the shared B-005 L3 path.
+        # pass its one-sample-per-UI response through the shared NUM-003 L3 path.
         report("sampling_phase_common: start")
         pre_dte_imp_common, h_XTs_dsamp = self.prepare_sampling_phase_common(
             common=pre_dte_imp_common,
@@ -2237,7 +2237,7 @@ class COM:
         S_rn = common_psd.S_rn
         S_xn = common_psd.S_xn
 
-        # Transmitter output-noise equivalent channel, then shared B-005 PSD.
+        # Transmitter output-noise equivalent channel, then shared NUM-003 PSD.
         h_tn, tx_noise_variance = _calculate_tx_noise_eq_ch(
             victim,
             link_cfg,
@@ -2255,7 +2255,7 @@ class COM:
         )
         sigma_tn = S_tn.to_sigma()
 
-        # Jitter equivalent channel, then shared B-005 PSD.
+        # Jitter equivalent channel, then shared NUM-003 PSD.
         h_J, jitter_variance = _calculate_tx_jitter_eq_ch(
             victim,
             link_cfg,
@@ -2714,7 +2714,7 @@ class COM:
             raise ValueError(f"Unsupported MLSD quantization PSD method: {quantization_method}.")
         # Eq. (178A-54) gives a two-sided ISI density. from_constant() folds
         # interior rFFT bins into SampledPSD's one-sided representation.
-        # Keep the Stage 5 status response full-length. B-005 is applied only
+        # Keep the Stage 5 status response full-length. NUM-003 is applied only
         # at this PSD-construction boundary, through the same Shared L3 used
         # by the pre-DTE and post-FFE impairment PSDs.
         S_isi = self._build_eq_ch_imp_psd(
@@ -2834,7 +2834,7 @@ class COM:
                 # SiCoPR final-COM V_qc convention: reconstruct the clipping
                 # distribution and apply its P_qc tail rule. The existing tap
                 # accumulation is frozen for reference regression only; main-
-                # tap inclusion is not part of the B-007 branch definition.
+                # tap inclusion is not part of the ALG-011 branch definition.
                 main_gain = float(w_lim[self.cfg.dte.d_w])
                 V_qc, adc_grid_cfg, p_noise_adc = _reconstruct_final_vqc_sicopr(
                     imp_status,
@@ -2863,7 +2863,7 @@ class COM:
                 )
             else:
                 # Selected-phase ADC-input convention: reuse the Stage 5
-                # clipping result. Tap accumulation is not a B-007 decision.
+                # clipping result. Tap accumulation is not an ALG-011 decision.
                 if adc_input_pmf.delta is None:
                     raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
                 delta = adc_input_pmf.delta

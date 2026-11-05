@@ -26,7 +26,7 @@ TC-019 的 reference preset 會在 adapter 展開成具名 PMF methods。此 sta
 依這些方法讓 ISI／XT／DD 由原始 PAM 振幅乘 tap 後最近落格；Gaussian grid support 由
 `NormalDist().inv_cdf(1-DER_0)` 決定並在 grid 取樣；ADC uniform
 使用最近端點和 clipping-noise PMF 的完整 support，RX FFE tap 縮放
-採 B-008 的 mass deposit 與 projection method。B-012 的 ordinate
+採 ALG-001 的 mass deposit 與 projection method。ALG-003 的 ordinate
 interpolation 僅適用於 MLSD direct scalar-PMF resampling，不傳入此 FIR
 construction。final `dy=dy_rel_As*As` 以未正規化的
 RX FFE 電壓座標表示，除以主 tap gain 後即為 reference 的 grid。
@@ -113,15 +113,15 @@ The stage reads `sigma_G` directly. It does not derive Gaussian noise from post-
 
 When quantization is disabled, `p_qn` is a unit-mass PMF at zero.
 
-`policy.final_com_vqc_convention` is the B-007 boundary. With
+`policy.final_com_vqc_convention` is the ALG-011 boundary. With
 `selected_phase_adc_input`, the stage reuses the exact selected-phase ADC-input
 `V_qc` and `delta` prepared in Stage 5. With `sicopr_final_reconstruction`, it
 reconstructs the final clipping distribution from the pre-FFE victim signal and
 post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE
 main gain, then applies the SiCoPR `P_qc` tail rule to obtain `V_qc` and `delta`.
 
-B-007 does not select whether the later FIR accumulation includes the main tap.
-That is a deferred realization issue involving the PMF seed and B-015
+ALG-011 does not select whether the later FIR accumulation includes the main tap.
+That is a deferred realization issue involving the PMF seed and ALG-012
 projection/support. The current production ordering is frozen so that this
 reclassification cannot change COM. Both V_qc conventions share the selected
 phase, FFE/DFE, and non-quantization final PMFs.

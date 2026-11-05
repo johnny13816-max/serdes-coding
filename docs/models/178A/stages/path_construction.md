@@ -70,7 +70,7 @@ COM                                            [Root: model]
 └── _run_once()                                [L0: stage set]
     └── build_all_paths()                      [L1: Stage 1 — Path Construction]
         ├── _build_channel_under_test()        [L2: channel-under-test]
-        │   ├── channel representation transformation [L3: B001; evidence pending]
+        │   ├── channel representation transformation [L3: ALG-004; evidence pending]
         │   │   ├── from_touchstone()          [L4: measured S-parameter ingestion]
         │   │   ├── s4p_to_s2p()               [L4: mode conversion]
         │   │   └── renormalized()             [L4: reference-impedance conversion]
@@ -87,7 +87,7 @@ COM                                            [Root: model]
         │   │   └── _build_H_ctf()             [L4: continuous CTF]
         │   ├── RX package construction         [L3]
         │   │   └── _build_rxpkg()             [L4: RX package composite]
-        │   └── CTLE pulse realization          [L3: B003 owner]
+        │   └── CTLE pulse realization          [L3: ALG-006 owner]
         │       ├── _prepare_ctle_pulse_realization() [L4: shared setup]
         │       └── _realize_ctle_pulse_for_path()    [L4: per-path realization]
         └── _build_paths()                     [L2: path-specific construction]
@@ -96,15 +96,15 @@ COM                                            [Root: model]
                 │   └── _build_txpkg()         [L4: TX package composite]
                 ├── S-parameter path cascade    [L3]
                 │   └── cascade_com()          [L4: S-parameter cascade]
-                ├── transfer extrapolation      [L3: B002]
+                ├── transfer extrapolation      [L3: ALG-005]
                 │   └── to_LinkSegment()       [L4: terminated transfer + extension]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
-                ├── realize_ctle_pulse_for_path() [L4: delegated B003]
+                ├── realize_ctle_pulse_for_path() [L4: delegated ALG-006]
                 └── COMPath()                  [L4: stage-output record]
 ```
 
-### B003 implementation mapping
+### ALG-006 implementation mapping
 
 `_build_shared_path()` resolves `policy.ctle_pulse_realization` once and stores
 the resolved value plus method-specific shared state in `COMSharedPath`.
@@ -119,9 +119,9 @@ accepts the path-specific `H_pre`／`S_all` context and returns the selected
 post-CTLE pulse. The lower-level `_realize_ctle_response()` remains the
 numerical primitive for the two realization formulae; it is not a configuration
 selection point. `H_all` remains the common continuous VTF for reporting and
-is outside B003 ownership.
+is outside ALG-006 ownership.
 
-### B003 interface contract
+### ALG-006 interface contract
 
 The L3 block follows the existing function-oriented stage style. One prepare
 function writes the resolved method and method-specific shared fields
@@ -175,15 +175,15 @@ this L3 block.
 - A bilinear realization requires matching `LinkConfig.Fs`, valid measured
   pre-CTLE data, and finite-record length not exceeding `LinkConfig.Nfft`.
 - The result for a selected method remains identical to the pre-consolidation
-  B003 path for the same fully resolved config.
+  ALG-006 path for the same fully resolved config.
 
 ### Algorithm-branch placement
 
 | Branch | L3 owner | L4 execution point | Excluded from branch definition |
 |---|---|---|---|
-| B001 channel representation transformation *(pending evidence)* | channel representation transformation | ingestion/conversion/renormalization order in `_build_channel_under_test()` | frequency limit and ordinary file-read failure |
-| B002 transfer extrapolation | transfer extrapolation | `S_all.to_LinkSegment(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data |
-| B003 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
+| ALG-004 channel representation transformation *(pending evidence)* | channel representation transformation | ingestion/conversion/renormalization order in `_build_channel_under_test()` | frequency limit and ordinary file-read failure |
+| ALG-005 transfer extrapolation | transfer extrapolation | `S_all.to_LinkSegment(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data |
+| ALG-006 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
 
 ## Required input objects
 

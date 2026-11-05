@@ -38,8 +38,9 @@ v1.0 foundation
 
 ## Current company-platform focus
 
-CP-BR 依 stage-by-stage layered call tree 審查算法分支。B-005 已於
-2026-11-01 關閉，B-006 為目前唯一 Approved review item；93A、reporting、
+CP-BR 依 stage-by-stage layered call tree 審查 selectable controls。NUM-003
+（legacy B-005）已於 2026-11-01 關閉，ALG-007（legacy B-006）為目前唯一
+Approved review item；93A、reporting、
 C2M migration 與 public release 仍維持暫停。
 
 ## 與其他狀態文件的分工

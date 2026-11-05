@@ -186,7 +186,7 @@ runtime owner. `run_config.pre_dte_pmf_method` is the applicable execution
 control.
 
 `run_config.control.execution_profile` 是新版 178A 模板的 facade selector；
-合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。B-005 的
+合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。NUM-003 的
 `eq_ch_imp_len`／`num_trunc_ui` 保留為 workbook 獨立控制，不從 Ad Hoc 映射；
 其他未曝露的底層 method controls 由 profile 展開。
 `project_standard` 使用專案預設，
@@ -251,17 +251,17 @@ PSD 仍含 random jitter 與 DDJ；切換只經 `V_qc → S_qn` 改變 `R_n`。
 `V_qc`／`delta`。`sicopr_final_reconstruction` 以 pre-FFE victim signal
 與除以 RX FFE 主 tap gain 的 post-FFE ISI／XT／DDJ／Gaussian PMF
 重建 final clipping input，取左尾 `P_qc` 得
-`V_qc`／`delta`。B-007 到此為止，不定義後續量化 PMF 的 RX FFE
+`V_qc`／`delta`。ALG-011 到此為止，不定義後續量化 PMF 的 RX FFE
 main-tap accumulation；該實作問題已另列 deferred issue。此分支在
 D3p2 evidence 到手前維持 pending；pre-DTE 與 final-COM clipping policy
 仍可獨立設定。
 
-`pdf_to_pmf_method` 是 B-010/B-011 的 shared L3 policy。值
+`pdf_to_pmf_method` 是 ALG-002 的 shared L3 policy。值
 `bin_integral` 以 distribution 的 bin probability/overlap 建立 PMF；
 `pmf_sample` 則使用 SiCoPR 的 grid-center rule：Gaussian sample 後
 正規化，uniform 選取 `±delta/2` 的最近 centers（含端點）並等權重。
 `COM` orchestration 將此值明示傳入 pre-DTE、final COM、MLSD 的 L2
-helpers；`Pmf1D` 只執行建構，不保存 policy。Gaussian support 仍由 B-014
+helpers；`Pmf1D` 只執行建構，不保存 policy。Gaussian support 仍由 NUM-002
 控制，不能藉此 selector 改變。
 
 ## Channels

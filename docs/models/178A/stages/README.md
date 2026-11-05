@@ -37,17 +37,18 @@ and in the [branch registry](../branch_behavior_registry.md).
 
 | Stage | Layered call tree | Closed decisions | Pending / next |
 |---|---|---|---|
-| 1 Path construction | Recorded | B-002, B-003 | B-001 external evidence; B-020 classification |
-| 2 Pre-DTE impairment | Recorded | B-005 shared-L3 ownership and config exposure；B-009 removed | B-006 **pending**（疑似 D3p2 差異，待規範證據）；B-008 close validation、B-010、B-014、E-002、E-003/E-004 |
-| 3 Sampling-phase evaluation | Recorded | Stage boundary; B-005 XT-phase separation | Remaining Stage 3 candidates after Stage 2 review |
-| 4 MMSE DTE | Recorded | None under current CP-BR pass | Branch review not started |
-| 5 Post-FFE impairment | Recorded | B-005 shared-L3 consumer | B-004 formal review deferred until Stage 5 |
-| 6 DFE COM | Recorded | B-007 final-COM `V_qc` convention safely pending D3p2 evidence | B-011, B-012, B-013, B-015 not started |
-| 6 DFE COM | Recorded | None under current CP-BR pass | Branch review not started |
-| 7 MLSD COM | Recorded | B-005 `S_isi` shared-L3 consumer | Branch review not started |
+| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-001, ALG-002, ALG-003 | PHY-001, NUM-001, NUM-002, EXE-001 |
+| 1 Path construction | Recorded | ALG-005, ALG-006 | ALG-004 external evidence |
+| 2 Common impairment | Recorded | NUM-003 shared-L3 ownership and config exposure；legacy B-009 removed | No additional Stage 2 owner |
+| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 grid domains | SRCH-001, ALG-007, ALG-008, NUM-005 |
+| 4 MMSE DTE | Recorded | None under current CP-BR pass | ALG-009 |
+| 5 Post-FFE impairment | Recorded | NUM-003 shared-L3 consumer | ALG-010 |
+| 6 DFE COM | Recorded | NUM-004 final-grid domain | ALG-011 pending D3p2 evidence；ALG-012 |
+| 7 MLSD COM | Recorded | NUM-003 `S_isi` shared-L3 consumer | ALG-013, ALG-014, ALG-015, ALG-016 |
 
-B-005 closed on 2026-11-01 after implementation, documentation/workbook
-sync, unchanged SiCoPR golden COM values, branch isolation tests, and full
-non-GUI regression. B-006 and B-007 are pending D3p2 evidence. B-007's RG name
-and observability status are recorded without changing its numerical flow;
-main-tap accumulation is a separate deferred issue, not a B-007 option.
+NUM-003 (legacy B-005) closed on 2026-11-01 after implementation,
+documentation/workbook sync, unchanged SiCoPR golden COM values, branch
+isolation tests, and full non-GUI regression. ALG-007 and ALG-011 are pending
+D3p2 evidence. ALG-011's RG name and observability status are recorded without
+changing its numerical flow; main-tap accumulation is a separate deferred
+issue, not an ALG-011 option.

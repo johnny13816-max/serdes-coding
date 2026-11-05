@@ -1,11 +1,11 @@
 # TC-018 — 178A final-COM `V_qc` convention 歷史契約
 
-狀態：**已被 B-007 reclassification 取代；保留作歷史證據。** 關聯 G-006。
+狀態：**已被 ALG-011（legacy B-007）reclassification 取代；保留作歷史證據。** 關聯 G-006。
 
-目前權威定義見 `docs/models/178A/branch_behavior_registry.md`：B-007 只控制
+目前權威定義見 `docs/models/178A/branch_behavior_registry.md`：ALG-011 只控制
 final-COM `V_qc`／`delta` 的來源，RG 為 `final_com_vqc_convention`，合法值
 為 `selected_phase_adc_input`／`sicopr_final_reconstruction`。RX FFE main-tap
-accumulation 已移出 B-007，另列 E-007 deferred technical issue；在 D3p2
+accumulation 已移出 ALG-011，另列 deferred technical issue；在 D3p2
 evidence 到手前不得改變既有數值流程或 golden。
 
 ## 目的與來源
@@ -23,7 +23,7 @@ SiCoPR／MATLAB 4.17 在 final PDF 另用 `P_qc` 左尾決定 clipping，且
 | fixed policy | `src/serdes_coding/models/com_178a/config.py::COMPolicyConfig` | `final_com_vqc_convention`，預設 `selected_phase_adc_input` |
 | workbook adapter | `src/serdes_coding/io/com_excel_io_178A.py` | 讀取同名 fixed-config 欄位 |
 | converter registry | `src/serdes_coding/io/conversion/mapping_rules.py` | 分類為不從 Ad Hoc 映射的 policy |
-| final COM 數值 owner | `src/serdes_coding/models/com_model_178A.py::_reconstruct_final_vqc_sicopr()`、`COM.calculate_COM_DFE()` | 組 reference clipping PMF並選 CDF 左尾；tap accumulation 不屬 B-007 |
+| final COM 數值 owner | `src/serdes_coding/models/com_model_178A.py::_reconstruct_final_vqc_sicopr()`、`COM.calculate_COM_DFE()` | 組 reference clipping PMF並選 CDF 左尾；tap accumulation 不屬 ALG-011 |
 | workbook | `cases/_templates/178A/config.xlsx`；`cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx` | 各增一個 policy row；模板為 D3，對照 case 為 reference-only |
 | 測試／文件 | `tests/test_com_model_178A_policy_branches.py`、`tests/test_com_model_178A_post_ffe.py`、本契約、178A config/stage 文件 | policy 驗證與 final-stage invariant |
 

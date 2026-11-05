@@ -39,7 +39,7 @@ RUN_MODE
 有效 execution profile。`COM._effective_run_cfg()` 只回傳已解析的 profile；
 model 不判斷 selector。有效方法、profile 名稱及 raw/effective override
 隨 config snapshot 輸出。
-`COM.__init__()` 另依 `COMPolicyConfig.eq_ch_imp_len` 建立共享 B-005
+`COM.__init__()` 另依 `COMPolicyConfig.eq_ch_imp_len` 建立共享 NUM-003
 impairment-record context；它不改動 channel／pulse 使用的 `COMConfig.link`。
 
 ## Manual file entry
@@ -95,14 +95,14 @@ COM._run_once(run_cfg)
 │                   ├── _realize_ctle_response(...)
 │                   └── _apply_rectangular_unit_pulse(...)
 ├── Stage 2: calculate_pre_dte_imp_common(victim)
-│   ├── build receiver-noise PSD on the shared B-005 record
+│   ├── build receiver-noise PSD on the shared NUM-003 record
 │   └── return sigma_X + S_rn run-local cache
 ├── initialize COMRunStatus
 ├── Stage 3: sampling-phase evaluation
 │   ├── prepare_sampling_phase_common(...)
 │   │   ├── select each XT path phase from the full oversampled response
 │   │   ├── emit full one-sample/UI eq_ch_XT records
-│   │   └── build S_xn through shared B-005 L3
+│   │   └── build S_xn through shared NUM-003 L3
 │   ├── choose initial phase indices
 │   ├── evaluate each requested phase
 │   │   └── calculate_pos_candidate(...)
@@ -117,7 +117,7 @@ COM._run_once(run_cfg)
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
-    │   ├── Stage 5: calculate_post_ffe_imp(...), reusing shared B-005 L3
+    │   ├── Stage 5: calculate_post_ffe_imp(...), reusing shared NUM-003 L3
     │   ├── _assign_post_ffe(...) once
     │   │   └── _apply_rxffe_response(...) using resolved record realization
     │   ├── calculate_COM_DFE(...)
@@ -134,7 +134,7 @@ COM._run_once(run_cfg)
         └── return requested completed status
 ```
 
-Stage 7 建立 MLSD `S_isi` 時也以 full `h_ISI` 呼叫 shared B-005 L3；
+Stage 7 建立 MLSD `S_isi` 時也以 full `h_ISI` 呼叫 shared NUM-003 L3；
 status 中的 `h_ISI` 不先截短。
 
 A `COMMainCursorError` rejects only that phase in the sampling loop. Other exceptions leave `_run_once()` and preserve any status already assigned, as described in the status lifecycle.

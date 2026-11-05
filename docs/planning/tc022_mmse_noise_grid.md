@@ -1,6 +1,6 @@
 # TC-022／TC-022A — MMSE noise-correlation record grid
 
-**狀態：B-005 closed（2026-11-01）；本文保留歷史驗證與 closure evidence。**
+**狀態：NUM-003（legacy B-005）closed（2026-11-01）；本文保留歷史驗證與 closure evidence。**
 
 ## 契約
 
@@ -48,7 +48,7 @@ mapping。這三個入口因此具有同一個一般模式 default。
 `%TEMP%/serdes-tc021-rn-audit/`，修改前備份位於
 `%TEMP%/serdes-tc022-20261013/`。
 
-## B-005 closure evidence
+## NUM-003 closure evidence (legacy B-005)
 
 - XT phase selection 改為一律先讀完整 oversampled response；SiCoPR 五條 XT
   phase 在新舊順序下相同：`23, 7, 6, 31, 0`。

@@ -52,18 +52,18 @@ The two builders share a physical domain but have distinct stage ownership.
 ```text
 COM                                                   [Root: model]
 ├── __init__(cfg)                                     [Root: shared context]
-│   └── _resolve_eq_ch_imp_record_cfg()               [B-005 shared state]
+│   └── _resolve_eq_ch_imp_record_cfg()               [NUM-003 shared state]
 └── _run_once()                                       [L0: stage set]
     ├── Stage 2: common pre-DTE impairment            [L1]
     │   └── calculate_pre_dte_imp_common()            [L2: common-cache set]
     │       ├── receiver-noise construction           [L3]
-    │       │   └── _build_psd_rx_noise()             [L4; B-005 record]
+    │       │   └── _build_psd_rx_noise()             [L4; NUM-003 record]
     │       └── signal variance                       [L3/L4]
     └── Stage 3: sampling-phase evaluation            [L1]
         ├── prepare_sampling_phase_common()           [L2]
         │   ├── XT path phase selection               [L3]
         │   │   └── _select_xtalk_path_phase()        [L4; full response]
-        │   └── eq-channel impairment PSD construction [Shared L3; B-005]
+        │   └── eq-channel impairment PSD construction [Shared L3; NUM-003]
         │       ├── _realize_eq_ch_imp_record()       [L4]
         │       └── _build_eq_ch_imp_psd()            [L4]
         └── calculate_pre_dte_imp_at_pos()            [L2: phase-specific set]
@@ -71,19 +71,19 @@ COM                                                   [Root: model]
             │   └── SampledResponse.from_ir()         [L4]
             ├── transmitter-noise construction        [L3]
             │   ├── _calculate_tx_noise_eq_ch()       [L4]
-            │   └── _build_eq_ch_imp_psd()            [Shared L3; B-005]
+            │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
             ├── jitter-noise construction             [L3]
             │   ├── _calculate_tx_jitter_eq_ch()      [L4]
-            │   └── _build_eq_ch_imp_psd()            [Shared L3; B-005]
+            │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
             ├── ADC-input / quantization              [L3]
-            │   ├── _resolve_adc_input_pmf_config()   [L4: E003/E004, B014]
+            │   ├── _resolve_adc_input_pmf_config()   [L4: NUM-004/NUM-005/NUM-002]
             │   ├── _build_pmf_pam_L()                [L4: exact PAM source]
-            │   ├── clipping PSD/tail selection        [L4: B006]
-            │   └── _build_psd_adc_qn()               [L4: E002 dispatcher]
-            │       ├── _calculate_V_qc_gaussian_approx() [L4: E002]
-            │       └── _calculate_V_qc()             [L4: E002 exact path]
-            │           ├── _build_pmf_interference_178A() [L4: B008 projection]
-            │           └── Pmf1D.gaussian()          [L4: B010]
+            │   ├── clipping PSD/tail selection        [L4: ALG-007]
+            │   └── _build_psd_adc_qn()               [L4: ALG-008 dispatcher]
+            │       ├── _calculate_V_qc_gaussian_approx() [L4: ALG-008]
+            │       └── _calculate_V_qc()             [L4: ALG-008 exact path]
+            │           ├── _build_pmf_interference_178A() [L4: ALG-001 projection]
+            │           └── Pmf1D.gaussian()          [L4: ALG-002]
             └── total-noise covariance                [L3]
                 └── SampledPSD.add() / to_autocorrelation() [L4]
 ```
@@ -96,12 +96,12 @@ cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 
 | Candidate | L3 owner | L4 decision point | Status for this stage |
 |---|---|---|---|
-| B006 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending for specification evidence.** 疑似源於 D3p2 差異；在取得可核對文件前保留現況且不修改。它不改變 full-jitter MMSE covariance。 |
-| B008 discrete-PMF projection | ADC-input / quantization | `_build_pmf_interference_178A()` → `Pmf1D._project_to_grid()` | **Closed 2026-11-03.** PAM source 固定保存在 exact natural grid；`linear`／`nearest`只在 tap scaling 後的 target-grid projection 生效。Selector 由 project policy 明示傳入每個 projection operation，不保存於 PMF object；stage 不得自行重新選擇。B012 ordinate interpolation 不受此分支影響。SiCoPR DFE/final COM golden 不變。 |
-| B010/B011 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule；也涵蓋 `gaussian_approx` 建立的觀察用 PMF。B014 support、B008 projection、B012 scaling、E002 path selection 仍獨立。 |
-| B014 Gaussian support | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending, conditional.** Controls the finite Gaussian PMF support for the exact path. |
-| E002 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending classification.** Chooses `gaussian_approx` or `pmf_exact`; review must decide whether it is retained as an execution-quality control or promoted to an algorithm branch. |
-| E003/E004 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending classification.** Numerical accuracy/cost controls, not automatically algorithm branches. |
+| ALG-007 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending for specification evidence.** 疑似源於 D3p2 差異；在取得可核對文件前保留現況且不修改。它不改變 full-jitter MMSE covariance。 |
+| ALG-001 discrete-PMF projection | ADC-input / quantization | `_build_pmf_interference_178A()` → `Pmf1D._project_to_grid()` | **Closed 2026-11-03.** PAM source 固定保存在 exact natural grid；`linear`／`nearest`只在 tap scaling 後的 target-grid projection 生效。Selector 由 project policy 明示傳入每個 projection operation，不保存於 PMF object；stage 不得自行重新選擇。ALG-003 ordinate interpolation 不受此分支影響。SiCoPR DFE/final COM golden 不變。 |
+| ALG-002 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule；也涵蓋 `gaussian_approx` 建立的觀察用 PMF。NUM-002 support、ALG-001 projection、ALG-003 scaling、ALG-008 path selection 仍獨立。 |
+| NUM-002 Gaussian support | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | **Pending, conditional.** Controls the finite Gaussian PMF support for the exact path. |
+| ALG-008 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending review.** Chooses `gaussian_approx` or `pmf_exact`; it is classified by its algorithm-path effect, independent of runtime storage. |
+| NUM-004/NUM-005 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | Numerical accuracy/cost controls. NUM-004 grid domains are closed; NUM-005 retention remains pending. |
 
 Quantization disabled when `N_qb`／`P_qc` is absent is input/configuration
 availability handling, not a branch behavior.
@@ -169,12 +169,12 @@ prepare_sampling_phase_common(...)
 └── for each aggressor
     ├── select phase from the full oversampled response
     ├── retain the full one-sample/UI eq-channel response
-    ├── apply B-005 only before PSD conversion
+    ├── apply NUM-003 only before PSD conversion
     └── add the PSD to the uncorrelated crosstalk sum
 ```
 
 The aggressor phase selection is independent of the victim `pos` loop. It is
-owned by Stage 3 preparation and cannot be changed by B-005 truncation.
+owned by Stage 3 preparation and cannot be changed by NUM-003 truncation.
 
 The common `COMPSDStatus` populates:
 
@@ -250,7 +250,7 @@ Every stored `S_*` value is a `SampledPSD`. Every stored `h_*` value is a `Sampl
 `adc_input_pmf_grid` owns `rule`, `dy_rel_As`, `dy_abs_max`, and optional
 `dy_override`. The override has highest priority; otherwise the rule selects
 relative-only or relative-with-cap resolution. `pmf_keep_mass` remains the
-separate E-004 retention control. These numerical controls do not affect final
+separate NUM-005 retention control. These numerical controls do not affect final
 DFE/MLSD PMFs.
 
 workbook `execution_profile=sicopr_reference_v1` 時，adapter 已將各 run profile 展開為 exact
@@ -272,7 +272,7 @@ The stage rejects or propagates errors for these conditions:
 - victim sampling produces an empty sequence;
 - the sampled victim response does not have the required positive dominant cursor;
 - jitter finite difference has no valid interior samples;
-- a B-005 record cannot be realized under its declared full/truncated contract;
+- a NUM-003 record cannot be realized under its declared full/truncated contract;
 - PSD grids cannot be added or filtered consistently;
 - `pre_dte_pmf_method` is unsupported;
 - enabled quantization fails to produce a clipping value;
