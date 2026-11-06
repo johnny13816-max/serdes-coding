@@ -9,7 +9,7 @@ v1.0 release 狀態見
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
 branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
-規則維護 RC-20261106-001 已結案；CP-BR 前進至 ALG-005。RC-004 仍為 Proposed，
+規則維護目前處理 RC-20261106-002；完成後恢復 CP-BR 至 ALG-005。RC-004 仍為 Proposed，
 僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -22,6 +22,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
+| RC-20261106-002 — Repository workbook batch maintenance | **Implemented; closure pending** | 建立 repo workbook 預先盤點、批次 authoring/validation、layout-aware render 與 grouped reporting 規則 | 完成規則檢查並 commit/push；之後恢復 CP-BR ALG-005 |
 | CP-BR — 178A stage-by-stage selectable-control review | **EXE-001 closed；Stage 1 resumes at ALG-005** | Pipeline target 收斂至 `mse/dfe/mlsd/all_enabled`，唯一 behavior owner 為 `COM._run_once()`；三個 execution profiles 保留獨立 legal values，且不改已執行 stage 公式。 | 下一個待恢復項目是 `ALG-005 Channel renormalization`。依 algorithm-review flow 先介紹 SDD-first／S4P-first 的差異、path-construction owner、reference evidence gap 與影響範圍；未核准前不修改。 |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |

@@ -132,6 +132,9 @@ Evidence：
   搜尋與狀態檢查只在前置盤點、發現新線索、驗證變更或提交所需時執行；結果未變且無新問題時不重複查詢。
 - 讀取大型 workbook／文件前先確認它是本次契約要求的輸入、權威文件或驗收 evidence；不得為了「順便確認」
   render、recalculate 或檢查無關 workbook。若 workbook 是交付物，才依其專用 skill 完成必要驗證。
+- Repository workbook 是 repo change 的檔案組，不當作多個獨立對話交付物；依
+  [repository workbook batch boundary](project_workflow.md#repository-workbook-batch-boundary) 批次處理。
+  Final report 使用群組摘要與一般可點擊檔案路徑；除非使用者要求逐檔交付，不輸出多份 raw artifact directives。
 - 讀取結果若出現截斷提示、缺頁或內容不完整，必須以分段、縮小範圍或調整輸出量補讀本次任務
   所需內容，並確認缺漏已補齊；不得將截斷結果當作完整文件或完整搜尋結果。無需設定固定行數上限。
   若仍無法完整取得，須明示未讀範圍與對結論的限制，不得宣稱已完整閱讀或審查。

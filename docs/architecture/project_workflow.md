@@ -161,6 +161,25 @@ Open questions:
 - 不在高層直接修補低層結果。選擇策略的層、傳遞設定的層與執行數值操作的 owner 必須分清。
 - 同一責任邊界同步 code、tests、authoritative docs 與 tracker。
 
+### Repository workbook batch boundary
+
+適用於 repository 內的 config、tracker、matrix 與 implementation workbook；它們是同一個
+repository change 的組成檔，不是各自獨立的 chat deliverables。使用者要求單獨交付或分析的 workbook
+仍依 spreadsheet skill 的完整交付流程處理。
+
+- Authoring 前一次盤點所有受影響 workbook，按共用 layout/schema 分組，並列出各組變更欄位／儲存格、
+  每個 profile 的 legal values、預期 formulas/values、data validation 與驗收條件。缺少合法值或驗收
+  定義時先解決，不邊改邊猜。
+- 盤點完成後批次 authoring 一次，再做一輪 final verification。每份受影響 workbook 都要核對其變更值、
+  formula/data-validation integrity 與指定錯誤條件；失敗時只重跑並檢查失敗檔案及其相依範圍。
+  不為了重複確認已通過的檔案再跑整批。
+- 視覺檢查按 distinct layout/schema group 及實際受影響畫面進行：修改前檢視每種 layout 的代表 workbook；
+  修改後只 render 變更視圖及受影響的 dependency。不得僅因多個同型 workbook 都有資料修改，就逐檔重複
+  render 相同畫面。若變更影響特定 workbook 的獨有格式、條件格式、圖表、列印或顯示行為，該檔另行視覺檢查。
+- 欄位／值／公式變更不影響可見呈現時，以逐檔結構與公式驗證作為該部分驗收；不得為沒有視覺影響的
+  workbook 製造 render 工作。此 repo-batch 規則界定 spreadsheet skill 視覺檢查在 repository config/tracker
+  維護中的抽樣與範圍；單獨 workbook deliverable 不適用此縮減。
+
 ### 6. Verification
 
 程式與必要文件完成後才做最終驗證。依契約執行 focused tests 與既定 COM baseline；使用固定 case、

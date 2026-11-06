@@ -3,6 +3,23 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261106-002 — Repository workbook batch maintenance
+
+- 日期／狀態：2026-11-06／Implemented；待 closure commit。
+- 問題：repo 內多份同型 config/tracker/implementation workbook 若逐檔 author、render、回報，會重複工作並增加
+  token/time；修改前若未盤點 legal values 與驗收，亦可能在昂貴驗證後才發現漏項。
+- 依據：使用者提交 workbook maintenance rule_change，自審指出 authoring/verification/render 應批次化，
+  repository workbooks 應作為同一 repo change，回報不應逐檔列 raw artifact directives。
+- 衝突檢查：spreadsheet skill 要求修改前研究既有 workbook format 並 render/view；本規則保留此目的，
+  以每種 distinct layout 的代表 workbook 做 pre-edit 視覺檢視，並對實際改變的視圖及獨有相依呈現做 final render；
+  每個變更 workbook 仍需結構／公式／legal values 驗證。Standalone workbook deliverable 維持完整 skill 流程。
+- 決策：接受批次清單、單輪 authoring/final verification、依 layout 與視覺影響選 render 範圍、repo grouped
+  reporting；驗證失敗只重做受影響範圍。
+- 評估者／授權依據：規則維護對話；使用者在本規則專用對話提交此 rule_change，且已明確授權此對話維護規則。
+- 修改範圍：`project_workflow.md`、`collaboration_contract.md`、本紀錄及 active state；不修改 workbook/code。
+- 驗證：待完成 diff、連結、規則一致性與原問題情境核對。
+- Commit evidence：待 closure commit。
+
 ## RC-20261106-001 — 移除已收斂的 branch review checklist
 
 - 日期／狀態：2026-11-06／Closed。
