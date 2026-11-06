@@ -5,7 +5,7 @@
 
 ## RC-20261106-001 — 移除已收斂的 branch review checklist
 
-- 日期／狀態：2026-11-06／Implemented；待 closure commit。
+- 日期／狀態：2026-11-06／Closed。
 - 問題／位置：`branch_behavior_contract.md` 的 Current review set 仍以問句列出 retired
   `gaussian_n_sigma_override`，並把已分類的 B-019/B-020、E-002–E-006、PMF policy 與 provenance
   當作尚未決定的 review scope。
@@ -17,8 +17,10 @@
   scope 與阻塞證據的未決項目才可列入此 contract 的 current review source。
 - 評估者／授權依據：規則維護對話；使用者詢問規則維護並明確允許刪除過時 checklist entry。
 - 修改範圍：本文件及 `branch_behavior_contract.md`；不變更技術實作、技術結論、roadmap 或 tracker。
-- 驗證：待完成 diff、連結、規則一致性與來源核對。
-- Commit evidence：待 closure commit。
+- 驗證：`git diff --check` 與三份修改文件的 local-link target check 通過；人工核對 registry 的
+  legacy mapping、stage progress、active contracts、roadmap 與 tracker，確認 retired Gaussian override
+  不再列為現行問題，其他未完成 evidence/implementation 有權威記錄位置。僅規則／狀態文件修改。
+- Commit evidence：`9161e63823daaa1009deeccebd927ea72dc46ab0`（規則修改）；closure state 同步於後續 commit。
 
 ## RC-20261104-002 — Project Config classification and evolution
 
