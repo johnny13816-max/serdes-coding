@@ -862,7 +862,7 @@ class COMDTEConfig(COMDataclassText):
 @dataclass(repr=False)
 class COMRunConfig(COMDataclassText):
     """Algorithm policy and stage target for one 178A execution profile."""
-    target: Literal["mse", "dfe", "mlsd", "full"] = "dfe"
+    target: Literal["mse", "dfe", "mlsd", "all_enabled"] = "dfe"
     pre_dte_pmf_method: Literal["gaussian_approx", "pmf_exact"] = "gaussian_approx"
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
@@ -898,8 +898,10 @@ class COMRunConfig(COMDataclassText):
         )
 
     def __post_init__(self) -> None:
-        if self.target not in {"mse", "dfe", "mlsd", "full"}:
-            raise ValueError("COMRunConfig.target must be 'mse', 'dfe', 'mlsd', or 'full'.")
+        if self.target not in {"mse", "dfe", "mlsd", "all_enabled"}:
+            raise ValueError(
+                "COMRunConfig.target must be 'mse', 'dfe', 'mlsd', or 'all_enabled'."
+            )
         if self.pre_dte_pmf_method not in {"gaussian_approx", "pmf_exact"}:
             raise ValueError(
                 "COMRunConfig.pre_dte_pmf_method must be "
@@ -963,9 +965,9 @@ class COMExecutionConfig(COMDataclassText):
     def __post_init__(self) -> None:
         if self.search_sweep.target != "mse":
             raise ValueError("COMExecutionConfig.search_sweep.target must be 'mse'.")
-        if self.search_final.target not in {"dfe", "full"}:
+        if self.search_final.target not in {"dfe", "all_enabled"}:
             raise ValueError(
-                "COMExecutionConfig.search_final.target must be 'dfe' or 'full'."
+                "COMExecutionConfig.search_final.target must be 'dfe' or 'all_enabled'."
             )
         for name in ("search_group_size", "search_top_k"):
             value = int(getattr(self, name))

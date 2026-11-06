@@ -359,6 +359,9 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.reported_der == "baseline_pdf_re_evaluation"
     assert policy.final_pmf_grid == "relative_As"
     assert policy.final_adc_pmf_projection == "reference_support"
+    assert aligned.execution.single_run.target == "all_enabled"
+    assert aligned.execution.search_sweep.target == "mse"
+    assert aligned.execution.search_final.target == "all_enabled"
     effective = COM(aligned)._effective_run_cfg(aligned.execution.search_sweep)
     assert effective.pre_dte_pmf_method == "pmf_exact"
     assert effective.pmf_grid_quality == "fine"
@@ -444,6 +447,9 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
         if len(row) > 2
     }
     assert run_rows[("control", "execution_profile")] == "project_standard"
+    assert run_rows[("single_run", "target")] == "dfe"
+    assert run_rows[("search_sweep", "target")] == "mse"
+    assert run_rows[("search_final", "target")] == "dfe"
     assert "eq_ch_imp_len" in fields
     assert "num_trunc_ui" in fields
     assert "rxffe_record_realization" in fields

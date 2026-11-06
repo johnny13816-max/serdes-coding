@@ -1802,15 +1802,15 @@ class COM:
         ``target="mse"`` returns after the best valid DTE result.
         ``target="dfe"`` additionally produces post-FFE impairment and DFE
         COM PMFs. ``target="mlsd"`` includes that DFE baseline and then runs
-        the enabled MLSD receiver stage. ``target="full"`` includes MLSD only
-        when ``cfg.mlsd.enable`` is true.
+        the enabled MLSD receiver stage. ``target="all_enabled"`` includes
+        MLSD only when ``cfg.mlsd.enable`` is true.
         """
         run_cfg = self._effective_run_cfg(run_cfg)
         self.status = COMStatus()
         started = perf_counter()
 
         mlsd_requested = run_cfg.target == "mlsd" or (
-            run_cfg.target == "full" and self.cfg.mlsd.enable
+            run_cfg.target == "all_enabled" and self.cfg.mlsd.enable
         )
         if run_cfg.target == "mlsd" and not self.cfg.mlsd.enable:
             raise ValueError("target='mlsd' requires cfg.mlsd.enable=True.")
@@ -1935,7 +1935,7 @@ class COM:
         if not isinstance(merged_imp_status, COMImpairmentStatus):
             raise RuntimeError("Merged 178A impairment status is not available after post-FFE impairment.")
 
-        if run_cfg.target in {"dfe", "mlsd", "full"}:
+        if run_cfg.target in {"dfe", "mlsd", "all_enabled"}:
             report("calculate_COM_DFE: start")
             selected_eq_ch = self._require_status().eq_ch
             if selected_eq_ch is None:

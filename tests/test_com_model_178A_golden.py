@@ -22,7 +22,7 @@ def _quantized_digest(values: np.ndarray, *, decimals: int = 12) -> str:
 
 def test_sicopr_akinwale_178a_production_golden() -> None:
     cfg = excel_to_config_178A(str(CONFIG))
-    run_cfg = replace(cfg.execution.single_run, target="full")
+    run_cfg = replace(cfg.execution.single_run, target="all_enabled")
 
     assert cfg.policy.applied_config_profile == "sicopr_reference_v1"
 

@@ -6,6 +6,7 @@ import inspect
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from serdes_coding.models.com_dataclass_text import COMDataclassText
 from serdes_coding.models import com_model_178A as model
@@ -194,3 +195,13 @@ def test_json_snapshot_contract_remains_available() -> None:
         "pos_sweep_method": "each_phase",
         "pos_coarse_stride": 4,
     }
+
+
+@pytest.mark.parametrize("target", ("mse", "dfe", "mlsd", "all_enabled"))
+def test_run_target_contract_accepts_only_canonical_values(target: str) -> None:
+    assert model.COMRunConfig(target=target).target == target
+
+
+def test_run_target_contract_rejects_retired_full_name() -> None:
+    with pytest.raises(ValueError, match="all_enabled"):
+        model.COMRunConfig(target="full")
