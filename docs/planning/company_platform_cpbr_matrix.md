@@ -13,7 +13,6 @@
 | Stage order | ID / control class | rg_name (project config) | Description |
 |---|---|---|---|
 | Stage 0 / S-parameter ingestion | `ALG-001` algorithm policy | `channel.missing_dc_policy` | Missing-DC completion method；實際量測頻率邊界仍是 physical input fact，不由 execution profile 控制。 |
-| Stage 0 / shared PMF utility | `NUM-002` numerical control | `policy.gaussian_n_sigma_override` | Gaussian support span；不改 sigma、dy 或 tail probability。 |
 | Stage 0 / shared PMF utility | `ALG-002` algorithm policy | `policy.pmf_projection_method` | Target-grid projection：`linear` 或 `nearest`。 |
 | Stage 0 / shared PMF utility | `ALG-003` algorithm policy | `policy.pdf_to_pmf_method` | PDF→PMF：`bin_integral` 或 `pmf_sample`。 |
 | Stage 0 / shared PMF utility | `ALG-004` algorithm policy | `policy.pmf_scaling_method` | Scalar PMF scaling：`mass_deposit` 或 `interpolate_ordinates`。 |

@@ -79,7 +79,6 @@ COMConfig
 │   ├── pmf_scaling_method
 │   ├── final_pmf_grid
 │   ├── final_adc_pmf_projection
-│   ├── gaussian_n_sigma_override
 │   ├── added_noise_pdf
 │   ├── mlsd_quantization_psd
 │   ├── sequence_termination
@@ -155,7 +154,6 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `final_pmf_grid.dy_abs_max` | same | 1e-5 V |
 | `final_pmf_grid.dy_override` | same | blank / `None` |
 | `tap_rel_As` | `COMPMFConfig` | 0.001 |
-| `gaussian_n_sigma` | `COMPMFConfig` | 8 |
 | `missing_dc_policy` | `COMChannelConfig` | `skrf`; reference profile selects `mag_phase_trend_to_dc` |
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
@@ -265,8 +263,8 @@ D3p2 evidence 到手前維持 pending；pre-DTE 與 final-COM clipping policy
 `pmf_sample` 則使用 SiCoPR 的 grid-center rule：Gaussian sample 後
 正規化，uniform 選取 `±delta/2` 的最近 centers（含端點）並等權重。
 `COM` orchestration 將此值明示傳入 pre-DTE、final COM、MLSD 的 L2
-helpers；`Pmf1D` 只執行建構，不保存 policy。Gaussian support 仍由 NUM-002
-控制，不能藉此 selector 改變。
+helpers；`Pmf1D` 只執行建構，不保存 policy。178A Gaussian support 固定為
+internal 8σ invariant；`pdf_to_pmf_method` 不能改變 support。
 
 ## Channels
 

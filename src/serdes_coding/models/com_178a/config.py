@@ -38,6 +38,12 @@ class _LeafConfigText(COMDataclassText):
         )
 
 
+# Gaussian PMFs use a fixed support large enough that omitted two-sided mass is
+# at floating-point scale.  This is an internal numerical invariant, not a
+# project-config branch.
+GAUSSIAN_SUPPORT_N_SIGMA = 8.0
+
+
 @dataclass(repr=False)
 class COMChannelConfig(_LeafConfigText):
     """
@@ -352,7 +358,6 @@ class COMPMFConfig(_LeafConfigText):
         "tap_abs_th_override": "V",
         "tap_rel_As": "relative amplitude",
         "keep_mass": "probability",
-        "gaussian_n_sigma": "sigma count",
     }
     dy_override: Optional[float] = None # unit: V, explicit PMF amplitude grid step; if None derive from As
     dy_rel_As: float = 1e-3           # unit: dimensionless, default dy limit = 0.1% of As (from spec)
@@ -360,7 +365,6 @@ class COMPMFConfig(_LeafConfigText):
     tap_abs_th_override: Optional[float] = None # unit: V, explicit tap threshold; if None derive from As
     tap_rel_As: float = 1e-3          # unit: dimensionless, ignore pulse terms below 0.1% of As (from spec)
     keep_mass: float = float(1 - 1e-5) # unit: probability, optional PMF truncation target
-    gaussian_n_sigma: float = 8.0     # unit: sigma, half span for Gaussian PMF construction
 
     def __post_init__(self) -> None:
         if self.dy_override is not None:
@@ -373,7 +377,7 @@ class COMPMFConfig(_LeafConfigText):
             if not np.isfinite(self.tap_abs_th_override) or self.tap_abs_th_override < 0.0:
                 raise ValueError("COMPMFConfig.tap_abs_th_override must be finite and non-negative.")
 
-        for name in ("dy_rel_As", "dy_abs_max", "tap_rel_As", "gaussian_n_sigma"):
+        for name in ("dy_rel_As", "dy_abs_max", "tap_rel_As"):
             value = float(getattr(self, name))
             if not np.isfinite(value) or value <= 0.0:
                 raise ValueError(f"COMPMFConfig.{name} must be finite and positive.")
@@ -409,7 +413,7 @@ class COMPMFConfig(_LeafConfigText):
             dy=dy,
             tap_abs_th=tap_abs_th,
             keep_mass=self.keep_mass,
-            gaussian_n_sigma=self.gaussian_n_sigma,
+            gaussian_n_sigma=GAUSSIAN_SUPPORT_N_SIGMA,
         )
 
 @dataclass(repr=False)
@@ -1099,7 +1103,6 @@ class COMPolicyConfig(COMDataclassText):
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit"
     final_pmf_grid: Literal["fine", "relative_As"] = "fine"
     final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
-    gaussian_n_sigma_override: Optional[float] = None
     added_noise_pdf: Literal["gaussian_addition", "scaled_total_pdf"] = "gaussian_addition"
     mlsd_quantization_psd: Literal[
         "pre_dte_filtered", "main_tap_white"
@@ -1130,7 +1133,6 @@ class COMPolicyConfig(COMDataclassText):
                 self._field("pdf_to_pmf_method", "PDF-to-PMF discretization", stored_unit="policy"),
                 self._field("pmf_scaling_method", "PMF scaling", stored_unit="policy"),
                 self._field("final_pmf_grid", "final PMF grid", stored_unit="policy"),
-                self._field("gaussian_n_sigma_override", "Gaussian support override", stored_unit="sigma count"),
             )),
             TextSection("MLSD methods", (
                 self._field("added_noise_pdf", "added-noise PDF", stored_unit="policy"),
@@ -1178,13 +1180,6 @@ class COMPolicyConfig(COMDataclassText):
         for name, choices in allowed.items():
             if getattr(self, name) not in choices:
                 raise ValueError(f"COMPolicyConfig.{name} must be one of {sorted(choices)}.")
-        if self.gaussian_n_sigma_override is not None:
-            value = float(self.gaussian_n_sigma_override)
-            if not np.isfinite(value) or value <= 0.0:
-                raise ValueError(
-                    "COMPolicyConfig.gaussian_n_sigma_override must be finite and positive."
-                )
-            object.__setattr__(self, "gaussian_n_sigma_override", value)
         if self.eq_ch_imp_len == "full":
             if self.num_trunc_ui is not None:
                 raise ValueError("eq_ch_imp_len='full' requires num_trunc_ui=None.")

@@ -87,6 +87,9 @@ a_an = abs(float(p_an.quantile(der_0)))
 delta_com_an_temp = 20.0 * np.log10(a_an / a_ref)
 ```
 
+`pmf_cfg.gaussian_n_sigma` 是 resolver 產生的 internal derived value，178A 固定
+為 8σ；workbook、execution profile 與 reference profile 均不能覆寫。
+
 `Pmf1D.quantile()` 是離散右連續 CDF 的第一個 `CDF >= der_0` grid point；因此
 此處另有 PMF `dx` 量化誤差。Eq. 50/51 的 PMF 組成、ADC range 是否應重算、
 以及 quantile convention 仍是獨立 review 項目。

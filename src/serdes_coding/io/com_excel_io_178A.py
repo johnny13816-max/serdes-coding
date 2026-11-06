@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from statistics import NormalDist
 
 from ..utilities.link import LinkConfig
 from ..models.com_178a import (
@@ -165,7 +164,6 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
                 fixed.get("dy_abs_max", numerical_control.adc_input_pmf_grid.dy_abs_max)
             ),
             tap_rel_As=_fixed_float(fixed, "tap_rel_As"),
-            gaussian_n_sigma=_fixed_float(fixed, "gaussian_n_sigma"),
         ),
         numerical_control=numerical_control,
         execution=execution,
@@ -318,7 +316,6 @@ def _resolve_project_profile_178A(
         pmf_scaling_method="interpolate_ordinates",
         final_pmf_grid="relative_As",
         final_adc_pmf_projection="reference_support",
-        gaussian_n_sigma_override=NormalDist().inv_cdf(1.0 - der_0),
         added_noise_pdf="scaled_total_pdf",
         mlsd_quantization_psd="main_tap_white",
         sequence_termination="matlab_relative_tail",

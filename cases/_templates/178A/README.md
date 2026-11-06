@@ -10,5 +10,5 @@ ADC-input and final PMF grids are independent `numerical_control` families.
 Each defaults to `rule=relative_As_with_cap`, `dy_rel_As=0.001`,
 `dy_abs_max=1e-5`, and blank `dy_override`. The SiCoPR reference profile
 resolves ADC-input `dy_override=10e-6 V` while final PMF uses `relative_As`
-without an override. `tap_rel_As=0.001` and `gaussian_n_sigma=8` remain PMF
-algorithm defaults. These are project policy, not source Ad Hoc values.
+without an override. `tap_rel_As=0.001` remains a PMF algorithm default.
+Gaussian support is an internal fixed 8σ invariant and is not a workbook control.

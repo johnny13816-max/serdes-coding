@@ -8,27 +8,25 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-06 Asia/Taipei
 Source branch: main
-Source revision: ALG-011 implementation commit 565ccba on origin/main
-Active task: CP-BR; Stage 0 review resumes at NUM-002
-Current phase: ALG-011 closed; ready to introduce NUM-002 Gaussian support
+Source revision: NUM-002 retirement boundary on origin/main; see latest Git commit
+Active task: CP-BR; Stage 0 review resumes at EXE-001
+Current phase: NUM-002 retired as a non-branch; ready to introduce EXE-001 Pipeline target
 Collaboration mode: Co-Build branch review
-Approved boundary: none for NUM-002; review introduction and boundary definition only.
-Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001 retired as non-branch utility behavior.
-In progress: none; NUM-002 review has not started.
+Approved boundary: none for EXE-001; review introduction and boundary definition only.
+Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001 and NUM-002 retired as non-branch behaviors.
+In progress: none; EXE-001 review has not started.
 Blocked: none.
-Next recommended action: introduce NUM-002 Gaussian support in plain language, then show option definitions, all PMF consumers, impact scope, coding-layer tree and discussion items.
+Next recommended action: introduce EXE-001 Pipeline target in plain language, then define mse/dfe/mlsd/full, affected run flow, coding-layer tree and execution-only invariant.
 Next action owner: Codex presents the review introduction; user confirms the review boundary.
-Stop point: do not modify NUM-002 or another pending control before its review contract is approved.
-Evidence links: docs/models/178A/branch_behavior_registry.md; docs/planning/alg011_rxffe_record_realization.md;
-                docs/models/178A/stages/post_ffe.md; tests/test_com_model_178A_golden.py
+Stop point: do not modify EXE-001 or another pending control before its review contract is approved.
+Evidence links: docs/models/178A/branch_behavior_registry.md; docs/planning/num002_gaussian_support.md;
+                docs/planning/178A_algorithm_branch_matrix.xlsx; tests/test_com_model_178A_golden.py
 Dirty-state summary: clean after this closure-document synchronization.
 ```
 
-ALG-011 closure evidence: Stage 5 owns all response realization and records its
-response/PSD grids；Python 3.7 utility export validator passed；fixed SiCoPR
-golden `1 passed`，`COM_DFE=1.5247607834259893 dB` and final
-`COM=2.895898684873246 dB` unchanged. Implementation commit `565ccba` is on
-`origin/main`.
+NUM-002 closure evidence: 178A Gaussian support fixed at internal 8σ；focused
+tests `48 passed`；workbook target/error scans 0；fixed SiCoPR golden `1 passed`，
+`COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。

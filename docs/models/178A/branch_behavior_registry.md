@@ -51,7 +51,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `policy.pmf_scaling_method` | `mass_deposit` | `interpolate_ordinates` | 是 |
 | `numerical_control.final_pmf_grid.rule` | `relative_As_with_cap` | `relative_As` | 是 |
 | `policy.final_adc_pmf_projection` | `annex_d3` | `reference_support` | 是 |
-| `policy.gaussian_n_sigma_override` | `None` | `NormalDist().inv_cdf(1-DER_0)` | 是 |
 | `policy.added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` | 是 |
 | `policy.mlsd_quantization_psd` | `pre_dte_filtered` | `main_tap_white` | 是 |
 | `policy.sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` | 是 |
@@ -72,7 +71,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | ID | Class | Representative stage | Legacy ID | Control | Project default／alternate | Responsibility boundary |
 |---|---|---|---|---|---|---|
 | `ALG-001` | `algorithm_policy` | Stage 0 — S-parameter ingestion | B-019 | `channel.missing_dc_policy` | `error`／`hold`／`skrf`／`mag_phase_trend_to_dc` | `SparamModel.completed_voltage_transfer_function()` owns one completion before analysis-grid or pulse realization. Project workbook default is `skrf`; `sicopr_reference_v1` selects `mag_phase_trend_to_dc`. The actual measured-frequency boundary and high-frequency extension remain independent. |
-| `NUM-002` | `numerical_control` | Stage 0 — shared PMF utility | B-014 | `policy.gaussian_n_sigma_override` | config support／reference `NormalDist().inv_cdf(1-DER_0)` | Controls Gaussian support only; sigma, dy and tail-probability definitions remain unchanged. Earliest owner is the shared Gaussian PMF constructor. |
 | `ALG-002` | `algorithm_policy` | Stage 0 — shared PMF utility | B-008 | `policy.pmf_projection_method` | `linear`／`nearest` | The projection operation receives the method explicitly; `Pmf1D` stores data, not policy. Applies only when an operation deposits onto a target grid. |
 | `ALG-003` | `algorithm_policy` | Stage 0 — shared PMF utility | B-010/B-011 | `policy.pdf_to_pmf_method` | `bin_integral`／`pmf_sample` | Shared Gaussian/uniform PDF→PMF construction across pre-DTE, final COM and MLSD. Each distribution retains its own applicable rule. |
 | `ALG-004` | `algorithm_policy` | Stage 0 — shared PMF utility | B-012 | `policy.pmf_scaling_method` | `mass_deposit`／`interpolate_ordinates` | Direct scalar-PMF resampling only. `mass_deposit` delegates grid placement to `ALG-002`; FIR tap construction does not receive this selector. |
@@ -115,7 +113,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | B-008 | `ALG-002` | Stage 0 shared PMF utility |
 | B-009 | — | Retired selector; historical ID only |
 | B-010/B-011 | `ALG-003` | Merged shared PDF→PMF control |
-| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / `NUM-002` / `ALG-013` | B-013 remains the independent Stage 6 final-grid function set |
+| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / — / `ALG-013` | B-014 retired：178A Gaussian support 固定 8σ，不再是 Project Config；B-013 remains the independent Stage 6 final-grid function set |
 | B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
 | B-019 / B-020 / B-021 | `ALG-001` / — / `ALG-015` | B-020 retired as a selectable control：`force_grid=False` is diagnostic utility behavior, not Project Config；B-021 remains Stage 7 PSD |
 | E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-009` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |

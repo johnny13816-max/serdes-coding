@@ -11,7 +11,7 @@
 | `numerical_control.adc_input_pmf_grid.*` | `COMConfig.numerical_control`；preset 展開到 selected `COMRunConfig` | `_resolve_adc_input_pmf_config()` 建 ADC-input runtime PMF grid | **NUM-004 canonical boundary**：rule、relative spacing、cap、override 只影響 pre-DTE/selected-phase ADC-input domain；reference preset 明示 `10 µV` override。 |
 | `numerical_control.final_pmf_grid.*` | `COMConfig.numerical_control`；preset 展開到 selected `COMRunConfig` | `_resolve_final_com_pmf_config()` 建 final DFE/MLSD runtime PMF grid | **NUM-005 canonical boundary**：與 ADC-input family 獨立；reference preset 使用 `relative_As` 且不繼承 ADC override。 |
 | `pmf_grid_quality`／`pmf_dy_override` | legacy workbook／direct-API compatibility fields | 只在 canonical family 未解析時進入相容 fallback | 新模板不再輸出；不得視為新的 user-facing control。`pmf_keep_mass` 仍是獨立 execution control。 |
-| `tap_rel_As`／`gaussian_n_sigma` | `COMPMFConfig` algorithm policy | PMF tap/support algorithms | 與 NUM-004／NUM-005 grid spacing branches 分離。 |
+| `tap_rel_As` | `COMPMFConfig` algorithm policy | PMF tap threshold | 與 NUM-004／NUM-005 grid spacing branches 分離。Gaussian support 已固定為 internal 8σ，不再是 Project Config。 |
 | `pre_dte_pmf_method=pmf_exact/gaussian_approx` | `COMRunConfig` | 178A `_build_psd_adc_qn()` 選 `_calculate_V_qc()` 或 `_calculate_V_qc_gaussian_approx()`；共同以 Eq. 178A-27/26 形成 ADC step 與 `S_qn` | **目前層級合理**：是 COM 的 ADC-input 模型策略，不屬 generic `Pmf1D` 對外接口。兩法的適用性／預設仍需 spec 與跨 case 審查。 |
 | `floating_mode=heuristic/simplified/spec-defined` | `COMRunConfig` | `COM_MMSE_DTE.run()` 選 floating FFE group 求解流程 | **目前層級合理**：選擇直接改變 MMSE 搜尋，應留在 solver 的明確入口。 |
 | `pos_sweep_method=each_phase/coarse_fine` | `COMRunConfig` | 178A phase 搜尋流程選擇 sampling phase，候選送同一 MMSE solver | **目前層級合理**：屬搜尋政策，不應在 sampled response utility 中做相位篩選。 |

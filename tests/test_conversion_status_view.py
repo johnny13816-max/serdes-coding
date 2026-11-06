@@ -94,7 +94,7 @@ class TestConversionStatusView(unittest.TestCase):
             self.assertNotIn("dy_rel_As", values)
             self.assertNotIn("dy_abs_max", values)
             self.assertEqual(values["tap_rel_As"], 0.001)
-            self.assertEqual(values["gaussian_n_sigma"], 8)
+            self.assertNotIn("gaussian_n_sigma", values)
         finally:
             workbook.close()
 

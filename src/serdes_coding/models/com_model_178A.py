@@ -830,8 +830,6 @@ def _resolve_adc_input_pmf_config(
     pmf_config: COMPMFConfig,
     As: float,
     run_cfg: COMRunConfig,
-    *,
-    gaussian_n_sigma_override: Optional[float] = None,
 ) -> COMPMFRuntimeConfig:
     """Resolve execution-policy PMF settings used before ADC quantization."""
     resolved = pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality)
@@ -846,10 +844,6 @@ def _resolve_adc_input_pmf_config(
             else resolved.dy
         ),
         keep_mass=run_cfg.pmf_keep_mass,
-        gaussian_n_sigma=(
-            resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
-            else gaussian_n_sigma_override
-        ),
     )
 
 
@@ -858,7 +852,6 @@ def _resolve_final_com_pmf_config(
     As: float,
     run_cfg: COMRunConfig,
     *,
-    gaussian_n_sigma_override: Optional[float] = None,
     final_pmf_grid: Literal["fine", "relative_As"] = "fine",
 ) -> COMPMFRuntimeConfig:
     """Resolve accuracy-required PMF settings used to calculate final COM."""
@@ -869,10 +862,6 @@ def _resolve_final_com_pmf_config(
             resolved,
             dy=grid_control.resolve_dy(As),
             keep_mass=1.0,
-            gaussian_n_sigma=(
-                resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
-                else gaussian_n_sigma_override
-            ),
         )
     # In the reference profile, RxFFE is represented with a unit main tap.
     # This model retains the unnormalized main gain, so reference delta_y
@@ -888,10 +877,6 @@ def _resolve_final_com_pmf_config(
             else run_cfg.pmf_dy_override
         ),
         keep_mass=1.0,
-        gaussian_n_sigma=(
-            resolved.gaussian_n_sigma if gaussian_n_sigma_override is None
-            else gaussian_n_sigma_override
-        ),
     )
 
 
@@ -2271,7 +2256,6 @@ class COM:
             self.cfg.pmf,
             imp_cfg.R_LM / (L - 1),
             run_cfg,
-            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
         )
         
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
@@ -2596,7 +2580,6 @@ class COM:
             self.cfg.pmf,
             As,
             run_cfg,
-            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
         )
         p_sig = _build_pmf_pam_L(self.cfg.L)
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
@@ -2852,7 +2835,6 @@ class COM:
             self.cfg.pmf,
             imp_status.As,
             run_cfg,
-            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
             final_pmf_grid=self.cfg.policy.final_pmf_grid,
         )
         As = imp_status.As
@@ -3067,7 +3049,6 @@ class COM:
         )
         pmf_cfg = _resolve_final_com_pmf_config(
             self.cfg.pmf, imp_status.As, run_cfg,
-            gaussian_n_sigma_override=self.cfg.policy.gaussian_n_sigma_override,
             final_pmf_grid=self.cfg.policy.final_pmf_grid,
         )
         # Eqs. (178A-50) and (178A-51): calibrate added receiver noise.

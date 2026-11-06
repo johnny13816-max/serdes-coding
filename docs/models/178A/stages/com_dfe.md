@@ -23,8 +23,8 @@ It does not recompute path, pre-DTE, DTE, or post-FFE results and does not modif
 The current function does not provide a complete clause-by-clause 178A citation for every PMF component. A specification review must therefore confirm the reuse boundary, component membership, quantile convention, and final ratio before this stage can claim spec validation.
 
 TC-019 的 reference preset 會在 adapter 展開成具名 PMF methods。此 stage
-依這些方法讓 ISI／XT／DD 由原始 PAM 振幅乘 tap 後最近落格；Gaussian grid support 由
-`NormalDist().inv_cdf(1-DER_0)` 決定並在 grid 取樣；ADC uniform
+依這些方法讓 ISI／XT／DD 由原始 PAM 振幅乘 tap 後最近落格；Gaussian grid support
+固定為 internal 8σ，並依選定 PDF→PMF method 建構；ADC uniform
 使用最近端點和 clipping-noise PMF 的完整 support，RX FFE tap 縮放
 採 ALG-002 的 mass deposit 與 projection method。ALG-004 的 ordinate
 interpolation 僅適用於 MLSD direct scalar-PMF resampling，不傳入此 FIR

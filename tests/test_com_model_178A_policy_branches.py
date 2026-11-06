@@ -357,7 +357,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert policy.mlsd_quantization_psd == "main_tap_white"
     assert policy.sequence_termination == "matlab_relative_tail"
     assert policy.reported_der == "baseline_pdf_re_evaluation"
-    assert policy.gaussian_n_sigma_override == pytest.approx(3.540083799206174)
     assert policy.final_pmf_grid == "relative_As"
     assert policy.final_adc_pmf_projection == "reference_support"
     effective = COM(aligned)._effective_run_cfg(aligned.execution.search_sweep)
@@ -372,10 +371,9 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     final_grid = _resolve_final_com_pmf_config(
         aligned.pmf, aligned.imp.R_LM / (aligned.L - 1), effective,
         final_pmf_grid=policy.final_pmf_grid,
-        gaussian_n_sigma_override=policy.gaussian_n_sigma_override,
     )
     assert final_grid.dy == pytest.approx(aligned.pmf.dy_rel_As * aligned.imp.R_LM / (aligned.L - 1))
-    assert final_grid.gaussian_n_sigma == pytest.approx(policy.gaussian_n_sigma_override)
+    assert final_grid.gaussian_n_sigma == pytest.approx(8.0)
     exported = aligned.to_export_dict()["derived"]
     assert exported["policy"]["pmf_projection_method"] == "nearest"
     assert "interference_pmf_method" not in exported["policy"]
