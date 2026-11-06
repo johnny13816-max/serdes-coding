@@ -37,7 +37,7 @@ main_tap_white:
 
 ## Current-working-tree golden evidence
 
-正式 `align_to_ref=True`、`target=full` run：selected position `5`、MSE
+正式 `align_to_ref=True`、`target=all_enabled` run：selected position `5`、MSE
 `0.0061912610245255335`、COM DFE `1.5247607834259893 dB`、delta COM
 `1.3711379014472564 dB`、COM MLSD `2.895898684873246 dB`。相對 SiCoPR
 COM MLSD gap 為 `-1.29e-14 dB`。focused validation：27 passed、2 subtests

@@ -7,7 +7,7 @@
 
 - case: `cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx`
 - profile: `sicopr_reference_v1`
-- target: `full`
+- target: `all_enabled`
 - production entry: `COM(cfg)._run_once(run_cfg=..., progress=False)`
 - source revision: `5d1380b`
 

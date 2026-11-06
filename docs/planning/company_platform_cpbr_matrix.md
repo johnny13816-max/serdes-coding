@@ -16,7 +16,7 @@
 | Stage 0 / shared PMF utility | `ALG-002` algorithm policy | `policy.pmf_projection_method` | Target-grid projection：`linear` 或 `nearest`。 |
 | Stage 0 / shared PMF utility | `ALG-003` algorithm policy | `policy.pdf_to_pmf_method` | PDF→PMF：`bin_integral` 或 `pmf_sample`。 |
 | Stage 0 / shared PMF utility | `ALG-004` algorithm policy | `policy.pmf_scaling_method` | Scalar PMF scaling：`mass_deposit` 或 `interpolate_ordinates`。 |
-| Stage 0 / pipeline gate | `EXE-001` execution | `execution.<profile>.target` | 選擇執行至 MSE、DFE、MLSD 或 full；不改已執行 stage 公式。 |
+| Stage 0 / pipeline gate | `EXE-001` execution | `execution.<profile>.target` | 選擇執行至 MSE、DFE、MLSD，或以 `all_enabled` 執行所有已啟用 stage；不改已執行 stage 公式。 |
 | Stage 1 / path construction | `ALG-005` algorithm policy | `policy.channel_renormalization_order` | SDD-first 或 four-port S4P-first renormalization。 |
 | Stage 1 / path construction | `ALG-006` algorithm policy | `policy.out_of_measured` | 有效量測頻帶外 cosine decay 或 zero padding。 |
 | Stage 1 / path construction | `ALG-007` algorithm policy | `policy.ctle_pulse_realization` | Continuous TF 或 bilinear-IIR finite-record pulse realization。 |

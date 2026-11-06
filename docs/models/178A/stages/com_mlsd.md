@@ -192,7 +192,7 @@ reference 數值仍待 review。
 MLSD runs when:
 
 - `cfg.mlsd.enable` is true; and
-- the active target is `mlsd`, or the target is `full` with MLSD enabled.
+- the active target is `mlsd`, or the target is `all_enabled` with MLSD enabled.
 
 A direct `target="mlsd"` with MLSD disabled is rejected. The current implementation also requires exactly one DFE feedback tap: `cfg.dte.N_b == 1` and selected `b_lim.shape == (1,)`.
 

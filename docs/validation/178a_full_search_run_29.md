@@ -13,7 +13,7 @@ Status: verified search artifact evidence for the Akinwale SiCoPR-alignment case
 | Case | `sicopr_akinwale_vendorx_22db/178A` |
 | Execution profile | `sicopr_reference_v1` |
 | Sweep target | `mse` |
-| Final target | `full` |
+| Final target | `all_enabled` |
 | Candidates | 232,848 |
 | Successful sweep rows | 188,601 |
 | Infeasible TX FFE rows | 44,247 |

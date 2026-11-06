@@ -11,12 +11,12 @@
 0. Public GitHub Actions split search — **implemented; release validation remains**
    - `prepare → partial → finalize → verify` 已由 GitHub Actions 執行。
    - v1.0 尚需在 current release candidate 以 `sicopr_reference_v1`、
-     `search_final.target=full` 完成正式 Akinwale full search。
+     `search_final.target=all_enabled` 完成正式 Akinwale full search。
 
 1. COM v1.0 release
    - 正式 scope 與 gate 見
      [`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
-   - 目前優先完成 versioned execution profile、local full-target smoke、
+   - 目前優先完成 versioned execution profile、local all-enabled-target smoke、
      GitHub Akinwale full search、93A support boundary 與 durable output audit。
 
 2. Single-run full output

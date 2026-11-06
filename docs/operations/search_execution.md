@@ -42,7 +42,7 @@ Their manual user input is `case_id`. The workflow resolves `cases/<case_id>/<ve
 
 For 178A, `run_config.control.execution_profile` selects the versioned
 project→runtime preset. `search_sweep.target` must remain `mse`.
-`search_final.target="full"` is required when the requested result includes
+`search_final.target="all_enabled"` is required when the requested result includes
 MLSD/COM_MLSD; a successful `target="dfe"` workflow proves only the DFE search
 scope. The search prepare artifact must preserve the resolved profile and input
 fingerprints before distributed execution begins.

@@ -25,8 +25,8 @@ v1.0 必須同時涵蓋：
 |---|---|---|
 | G1 Repository state | 所有納入 release 的 model/config changes 已分離提交；無未分類修改混入 | release-scope code 已分離提交至 `94e5613`；本次收斂 governance/design-review 文件。canonical worktree 仍有不屬於本項的 reference-data/results 修改，因此尚未切 release candidate |
 | G2 Configuration UX | 新 178A template 使用 versioned `execution_profile`；legacy input 有測試；resolved profile/provenance 可匯出 | 通過：`945dd2b` |
-| G3 Fixed golden | Akinwale `sicopr_reference_v1`, `target=full` production path 在目前 commit 通過既有 intermediate/final tolerances | 通過：pos=5、MSE=`0.0061912610245255335`、COM_DFE=`1.5247607834259893 dB`、COM_MLSD=`2.895898684873246 dB` |
-| G4 Local search | 縮小 candidate set 完成 prepare→partial→finalize→verify，final target 為 `full` | 通過：2 candidates、1 full final、53 PNG hashes；evidence `%TEMP%/serdes-v1-small-search/results` |
+| G3 Fixed golden | Akinwale `sicopr_reference_v1`, `target=all_enabled` production path 在目前 commit 通過既有 intermediate/final tolerances | 通過：pos=5、MSE=`0.0061912610245255335`、COM_DFE=`1.5247607834259893 dB`、COM_MLSD=`2.895898684873246 dB` |
+| G4 Local search | 縮小 candidate set 完成 prepare→partial→finalize→verify，final target 為 `all_enabled` | 通過：2 candidates、1 full final、53 PNG hashes；evidence `%TEMP%/serdes-v1-small-search/results` |
 | G5 GitHub full search | 完整 232,848 candidates 在目前 release candidate commit 成功，artifact verify 通過 | 通過：run `38745800222`，commit `95f7f067`，236/236 jobs；232,848 rows、top 10、530 PNG hashes 全部驗證通過 |
 | G6 178A reference result | Full-search best candidate 記錄 MSE、COM_DFE、ΔCOM、COM_MLSD，並說明與 reference 的比較邊界 | 通過：best index 28969；sweep/final MSE=`0.006361523694460796`/`0.006204188571809303`，COM_DFE=`1.514414278762367 dB`，ΔCOM=`1.3488568555276164 dB`，COM_MLSD=`2.8632711342899833 dB`；固定 reference candidate 仍另行精確對齊 |
 | G7 93A support boundary | 至少一個正式 93A case 通過 single/search smoke；文件明示 validation level 與未驗證範圍 | **未通過**：`ARC-CROSS-001` 尚需建立 current-schema 93A golden case；這是下一個 proposed contract |
@@ -43,14 +43,14 @@ v1.0 必須同時涵蓋：
 case: sicopr_akinwale_vendorx_22db/178A
 execution_profile: sicopr_reference_v1
 search_sweep.target: mse
-search_final.target: full
+search_final.target: all_enabled
 candidate count: 232848
 final ranking input: completed MSE sweep
 final output: DFE and MLSD results for retained candidates
 ```
 
 先以 `%TEMP%` 的專用目錄完成縮小 search。縮小 search 只證明 lifecycle 與
-full-target integration；完整 candidate coverage 只能由 GitHub full search 證明。
+all-enabled-target integration；完整 candidate coverage 只能由 GitHub full search 證明。
 
 ## Release claim boundary
 

@@ -129,7 +129,7 @@ COM._run_once(run_cfg)
     │   ├── calculate_COM_DFE(...)
     │   ├── calculate_COM_MLSD()
     │   └── return DFE plus MLSD status
-    └── full
+    └── all_enabled
         ├── calculate_post_ffe_imp(...)
         ├── calculate_COM_DFE(...)
         ├── calculate_COM_MLSD() when cfg.mlsd.enable is true
