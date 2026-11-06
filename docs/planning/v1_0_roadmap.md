@@ -43,7 +43,9 @@ CP-BR 依 stage-by-stage layered call tree 審查 selectable controls。NUM-003
 missing-DC handling 已於 2026-11-05 關閉；ALG-011（legacy B-004）RX FFE
 record realization 已於 2026-11-06 關閉。原 NUM-001 已確認不是 selectable
 branch；NUM-002 Gaussian support 也已收斂為 internal fixed 8σ 並退休。
-審查順序維持 Stage 0；下一個未開始項目是 EXE-001 Pipeline target。
+EXE-001 Pipeline target 已於 2026-11-06 關閉：`full` 改名為語意明確的
+`all_enabled`，owner 收斂在 `COM._run_once()`，且已驗證共同 stage 數值不變。
+審查順序前進至 Stage 1；下一個待恢復項目是 ALG-005 Channel renormalization。
 ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
 C2M migration 與 public release 維持暫停。
 
