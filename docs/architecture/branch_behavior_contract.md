@@ -126,25 +126,16 @@ The version branch registry remains the durable record of approved behavior.
 The per-stage review-candidate list is temporary: it contains only unresolved
 or pending classification/implementation work, never completed items.
 
-## Current review set
+## Current review sources
 
-The following items are explicitly in scope for review before the registry's
-classification is treated as settled:
-
-| Candidate | Current location | Review question |
-|---|---|---|
-| B-019 missing-DC handling | channel config / branch registry | Is this solely input-boundary handling, as expected, and therefore not a branch? |
-| B-020 utility time-domain cascade | shared utility / branch registry | Is there a real supported selector, or is this a fixed utility contract? |
-| `policy.xtalk_pmf_accumulation` | `COMPolicyConfig` | Does it have a genuine alternate method, or is it fixed behavior that should leave branch configuration? |
-| E-002 `pre_dte_pmf_method` | execution profile | Does its approximation/exact choice make it a model-method branch? |
-| E-003 / E-004 PMF grid and convergence controls | execution profile | Are these coverage/accuracy controls only, or does any option define a distinct numerical method? |
-| E-005 `floating_mode` | execution profile | Does each value select a distinct DTE solve method and therefore require branch treatment? |
-| E-006 phase sweep | execution profile | Is it an L0 evaluation strategy rather than an in-stage model branch? |
-| `gaussian_n_sigma_override` | `COMPolicyConfig` | Is it recorded only as the support branch's parameter rather than a standalone branch? |
-| `final_adc_pmf_projection` | `COMPolicyConfig` | Is it an independent branch or a constrained sub-option of final ADC quantization? |
-| `applied_config_profile` / `config_profile_overrides` | `COMPolicyConfig` | Should provenance be structurally separate from behavior selectors? |
-
-The source inventory is [178A branch behavior registry](../models/178A/branch_behavior_registry.md).  Stage-specific ownership is documented in the corresponding files under `docs/models/178A/stages/`.
+The former candidate checklist duplicated review questions whose decisions are
+now recorded in the [178A branch behavior registry](../models/178A/branch_behavior_registry.md)
+and the [stage-by-stage progress table](../models/178A/stages/README.md#cp-br-review-progress).
+Do not treat resolved classification questions or retired controls as current
+review work. The registry owns current classification and legacy-ID mapping;
+stage documents and `active_contracts.md` identify implementation or evidence
+that remains pending. Add a candidate here only when it is unresolved, has a
+named owner and scope, and records the evidence that blocks a decision.
 
 ## Maintenance rule
 

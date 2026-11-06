@@ -3,6 +3,23 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261106-001 — 移除已收斂的 branch review checklist
+
+- 日期／狀態：2026-11-06／Implemented；待 closure commit。
+- 問題／位置：`branch_behavior_contract.md` 的 Current review set 仍以問句列出 retired
+  `gaussian_n_sigma_override`，並把已分類的 B-019/B-020、E-002–E-006、PMF policy 與 provenance
+  當作尚未決定的 review scope。
+- 證據：NUM-002 retirement contract 固定 178A support 為 internal 8σ；branch registry 已將 B-019
+  映射至 ALG-001、B-020 標記 retired，E-002–E-006 分別映射至 ALG-009、NUM-004、NUM-006、
+  ALG-010、SRCH-001，且另明確記錄 `final_adc_pmf_projection` 與 profile provenance 的分類。
+  stage README、active contracts、roadmap 與 tracker 保留目前未完成項目和 EXE-001 下一 gate。
+- 決策：移除整段過時的 checklist，改以 registry 和 stage progress 為當前分類／待辦來源；只有具名 owner、
+  scope 與阻塞證據的未決項目才可列入此 contract 的 current review source。
+- 評估者／授權依據：規則維護對話；使用者詢問規則維護並明確允許刪除過時 checklist entry。
+- 修改範圍：本文件及 `branch_behavior_contract.md`；不變更技術實作、技術結論、roadmap 或 tracker。
+- 驗證：待完成 diff、連結、規則一致性與來源核對。
+- Commit evidence：待 closure commit。
+
 ## RC-20261104-002 — Project Config classification and evolution
 
 - 日期／狀態：2026-11-04／Implemented；暫存提案依使用者指示移除；尚未 commit 或 Closed。

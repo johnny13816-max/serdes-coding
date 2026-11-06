@@ -9,7 +9,8 @@ v1.0 release 狀態見
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
 branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
-規則維護已結案；RC-004 仍為 Proposed，僅由規則專用對話評估。
+規則維護目前處理 [RC-20261106-001](rule_changes.md)；
+完成後恢復 CP-BR。RC-004 仍為 Proposed，僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
 SiCoPR case。已完成／未完成事實、分離後的目標與恢復條件見
@@ -21,7 +22,8 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage selectable-control review | **NUM-002 retired；Stage 0 resumes at EXE-001** | Gaussian support 已收斂為 178A internal fixed 8σ；workbook／Python Project Config／reference override 均移除。原 NUM-001、NUM-002 均已確認不是 selectable branch。Evidence 見 [`NUM-002 retirement`](num002_gaussian_support.md)。 | 下一個未審查項目是 `EXE-001 Pipeline target`。依 algorithm-review flow 先介紹 `mse/dfe/mlsd/full` 的語意、scope、owner 與 execution-only invariant；未核准前不修改。 |
+| RC-20261106-001 — Remove stale branch-review checklist | **Implemented; closure pending** | 清除 `branch_behavior_contract.md` 中已決議項目被列為 current review 的過期清單；只調整規則文件 | 完成本地連結、規則一致性與證據核對後 commit/push；完成後恢復 CP-BR 的 EXE-001 |
+| CP-BR — 178A stage-by-stage selectable-control review | **Paused for rule maintenance; resumes at EXE-001** | Gaussian support 已收斂為 178A internal fixed 8σ；workbook／Python Project Config／reference override 均移除。原 NUM-001、NUM-002 均已確認不是 selectable branch。Evidence 見 [`NUM-002 retirement`](num002_gaussian_support.md)。 | 規則結案後依 algorithm-review flow 先介紹 `mse/dfe/mlsd/full` 的語意、scope、owner 與 execution-only invariant；未核准前不修改。 |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
