@@ -5,7 +5,7 @@
 
 ## RC-20261106-002 — Repository workbook batch maintenance
 
-- 日期／狀態：2026-11-06／Implemented；待 closure commit。
+- 日期／狀態：2026-11-06／Closed。
 - 問題：repo 內多份同型 config/tracker/implementation workbook 若逐檔 author、render、回報，會重複工作並增加
   token/time；修改前若未盤點 legal values 與驗收，亦可能在昂貴驗證後才發現漏項。
 - 依據：使用者提交 workbook maintenance rule_change，自審指出 authoring/verification/render 應批次化，
@@ -17,8 +17,10 @@
   reporting；驗證失敗只重做受影響範圍。
 - 評估者／授權依據：規則維護對話；使用者在本規則專用對話提交此 rule_change，且已明確授權此對話維護規則。
 - 修改範圍：`project_workflow.md`、`collaboration_contract.md`、本紀錄及 active state；不修改 workbook/code。
-- 驗證：待完成 diff、連結、規則一致性與原問題情境核對。
-- Commit evidence：待 closure commit。
+- 驗證：`git diff --check` 與四份治理文件的 local-link target check 通過；情境核對確認多 workbook
+  同批可一次盤點／author／final verify，每份檔仍逐一核對結構與 formulas，視覺檢查按 layout/受影響畫面執行，
+  有失敗時只重驗受影響範圍；standalone deliverable 保留完整 skill 流程。
+- Commit evidence：`194ce220479c2c2825bf553b333a2e7c0d6f90c2`（規則修改）；closure state 收斂於後續 commit。
 
 ## RC-20261106-001 — 移除已收斂的 branch review checklist
 
