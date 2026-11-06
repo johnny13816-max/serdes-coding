@@ -9,16 +9,16 @@ Handoff state: ACTIVE
 Generated at: 2026-11-06 Asia/Taipei
 Source branch: main
 Source revision: ALG-011 implementation commit 565ccba on origin/main
-Active task: CP-BR; next stage-ordered review not started
-Current phase: ALG-011 closed; ready to introduce ALG-012
+Active task: CP-BR; Stage 0 review resumes at NUM-002
+Current phase: ALG-011 closed; ready to introduce NUM-002 Gaussian support
 Collaboration mode: Co-Build branch review
-Approved boundary: none for ALG-012; review introduction and boundary definition only.
+Approved boundary: none for NUM-002; review introduction and boundary definition only.
 Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001 retired as non-branch utility behavior.
-In progress: none; ALG-012 review has not started.
+In progress: none; NUM-002 review has not started.
 Blocked: none.
-Next recommended action: introduce ALG-012 final-COM V_qc convention in plain language, then show options, impact scope, coding-layer tree and discussion items.
+Next recommended action: introduce NUM-002 Gaussian support in plain language, then show option definitions, all PMF consumers, impact scope, coding-layer tree and discussion items.
 Next action owner: Codex presents the review introduction; user confirms the review boundary.
-Stop point: do not modify ALG-012 or another pending control before its review contract is approved.
+Stop point: do not modify NUM-002 or another pending control before its review contract is approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/planning/alg011_rxffe_record_realization.md;
                 docs/models/178A/stages/post_ffe.md; tests/test_com_model_178A_golden.py
 Dirty-state summary: clean after this closure-document synchronization.
