@@ -47,7 +47,10 @@ EXE-001 Pipeline target 已於 2026-11-06 關閉：`full` 改名為語意明確�
 `all_enabled`，owner 收斂在 `COM._run_once()`，且已驗證共同 stage 數值不變。
 ALG-005 Channel renormalization 已於 2026-11-07 依 D3.2 證據退休為 fixed
 S4P behavior＋native S2P input dispatch，selector 已移除。審查順序繼續
-Stage 1；下一個待討論項目是 ALG-006 Out-of-measured transfer。
+Stage 1。ALG-006 Out-of-measured transfer 已於 2026-11-07 關閉：保留
+`cosine_decay`／`zero_padding`，並讓 analysis-grid `H_21`、bilinear path pulse
+與 victim TX-noise finite record 使用同一 resolved policy。下一個待討論項目是
+ALG-007 CTLE pulse realization。
 ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
 C2M migration 與 public release 維持暫停。
 

@@ -8,28 +8,29 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-07 Asia/Taipei
 Source branch: main
-Source revision: ALG-005 closure boundary on origin/main; see latest Git commit
-Active task: CP-BR; Stage 1 next review is ALG-006
-Current phase: ALG-005 retired as fixed/input-dispatch behavior; ready to introduce ALG-006 Out-of-measured transfer
+Source revision: ALG-006 implementation db0e836 on origin/main; closure status follows in latest Git commit
+Active task: CP-BR; Stage 1 next review is ALG-007
+Current phase: ALG-006 closed; ready to introduce ALG-007 CTLE pulse realization
 Collaboration mode: Co-Build branch review
-Approved boundary: none for ALG-006; review introduction and evidence-boundary definition only.
-Completed: ALG-001, ALG-002, ALG-003, ALG-004, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001, NUM-002 and ALG-005 retired as non-branch behaviors.
-In progress: none; ALG-006 review has not started.
+Approved boundary: none for ALG-007; review introduction and evidence-boundary definition only.
+Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-006, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001, NUM-002 and ALG-005 retired as non-branch behaviors.
+In progress: none; ALG-007 review has not started.
 Blocked: none.
-Next recommended action: introduce ALG-006 Out-of-measured transfer in plain language, then restate cosine-decay／zero-padding semantics, scalar H21 owner, reference evidence and impact boundary.
-Next action owner: Codex presents the ALG-006 review introduction; user confirms the review boundary.
-Stop point: do not modify ALG-006 or another pending control before its review contract is approved.
+Next recommended action: introduce ALG-007 CTLE pulse realization in plain language, then restate continuous_tf／bilinear_iir semantics, owner, reference evidence and impact boundary.
+Next action owner: Codex presents the ALG-007 review introduction; user confirms the review boundary.
+Stop point: do not modify ALG-007 or another pending control before its review contract is approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/call_tree.md;
                 docs/planning/178A_algorithm_branch_matrix.xlsx; tests/test_com_model_178A_golden.py
-Dirty-state summary: clean after ALG-005 implementation and closure-document commits.
+Dirty-state summary: expected clean after ALG-006 implementation and closure-document commits.
 ```
 
-ALG-005 closure evidence: owner fixed at `_build_channel_under_test()`；D3.2
-S4P path is mandatory, native S2P is strict input representation dispatch, and
-the selector has no compatibility alias；focused tests `52 passed`；9 tracked
-178A case/template workbooks have selector matches 0 and the branch matrix has formula errors 0；
-fixed SiCoPR golden `1 passed`，
-`COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
+ALG-006 closure evidence: `resample_tf()` 是共同數值 owner；analysis-grid
+`H_21`、bilinear path pulse 與 victim TX-noise finite record 使用同一 resolved
+`out_of_measured` policy。Focused tests `41 passed`；fixed SiCoPR 67 GHz＋
+zero-padding golden `1 passed`，MSE `0.0061912610245255335`、
+`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 stage
+digests 不變。Implementation `db0e836` 已推送至 `origin/main`；full-suite deviation
+見 `alg006_out_of_measured_transfer.md`。
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。
