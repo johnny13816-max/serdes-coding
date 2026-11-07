@@ -27,7 +27,7 @@ def equation(s, target=92.5):
 
 
 @pytest.mark.parametrize("representation", ["auto", "s4p"])
-def test_sdd_first_is_explicit_and_preserves_raw_s4p(representation):
+def test_differential_domain_renormalization_is_explicit_and_preserves_raw_s4p(representation):
     source = measurement()
     before_s, before_z0 = source.s.copy(), source.z0.copy()
     raw = SparamModel.from_network(source, representation=representation, port_order=ORDER)
@@ -56,7 +56,7 @@ def test_array_constructors_preserve_the_declared_representation():
     np.testing.assert_array_equal(copied.sdd, converted.sdd)
 
 
-def test_s4p_first_matches_full_four_port_oracle_without_mutating_source():
+def test_single_ended_domain_renormalization_matches_four_port_oracle_without_mutation():
     source = measurement()
     before_s, before_z0 = source.s.copy(), source.z0.copy()
     four = source.copy()
@@ -99,43 +99,84 @@ def test_frequency_limit_keeps_first_measured_point_at_or_above_limit(tmp_path):
         raw.limited_to_frequency(0.0)
 
 
-@pytest.mark.parametrize("module", [m93, m178])
-def test_both_channel_builders_apply_sdd_first_equation(tmp_path, module):
+def test_93a_channel_builder_keeps_differential_domain_equation(tmp_path):
     source = measurement()
     source.write_touchstone(str(tmp_path / "victim"))
     cfg = m93.COMChannelConfig(
         victim_s4p_path=str(tmp_path / "victim.s4p"), port_order=ORDER,
         R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
     )
-    channels = (
-        module._build_channel_under_test_93A(cfg)
-        if module is m93 else module._build_channel_under_test(cfg)
-    )
+    channels = m93._build_channel_under_test_93A(cfg)
     measured_sdd = SparamModel.from_network(source, port_order=ORDER).s4p_to_s2p()
     np.testing.assert_allclose(channels[0].sdd, equation(measured_sdd.sdd), atol=1e-12, rtol=0)
 
 
-def test_fixed_sicopr_case_equation_and_vtf():
-    cfg = excel_to_config_178A(str(ROOT / "cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx"))
-    raw = SparamModel.from_touchstone(
-        cfg.channel.victim_s4p_path, representation="s4p", port_order=cfg.channel.port_order,
-    ).limited_to_frequency(cfg.channel.sparam_frequency_limit_Hz)
-    ch = m178._build_channel_under_test(cfg.channel, "sdd_first")[0]
-    np.testing.assert_allclose(ch.sdd, equation(raw.s4p_to_s2p().sdd), atol=1e-10, rtol=0)
-    f = ch.freqs
-    tx = m178._build_txpkg(f, cfg.txpkg_victim)
-    rx = m178._build_rxpkg(f, cfg.rxpkg)
-    all_s = tx.cascade_com_93A(ch).cascade_com_93A(rx)
-    h = all_s.voltage_transfer_function(cfg.channel.gamma_src, cfg.channel.gamma_load)
-    ht = np.exp(-2 * (np.pi * f * cfg.filter.Tr / 1.6832) ** 2)
-    hr = 1 / np.polyval([1, 2.613126, 3.414214, 2.613126, 1], 1j * f / cfg.filter.fr)
-    loss = np.interp(53.125e9, f, -20 * np.log10(abs(h * ht * hr)))
-    assert loss == pytest.approx(37.667089589791686, abs=1e-6)
+def test_178a_s4p_input_uses_d3p2_single_ended_first_order(tmp_path):
+    source = measurement()
+    source.write_touchstone(str(tmp_path / "victim"))
+    cfg = m178.COMChannelConfig(
+        victim_s4p_path=str(tmp_path / "victim.s4p"), port_order=ORDER,
+        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    )
+    expected = (
+        SparamModel.from_network(source, representation="s4p")
+        .renormalized(46.25)
+        .s4p_to_s2p(ORDER)
+    )
+    actual = m178._build_channel_under_test(cfg)[0]
+    np.testing.assert_allclose(actual.sdd, expected.sdd, atol=1e-12, rtol=0)
 
 
-def test_fixed_sicopr_case_s4p_first_closes_all_channel_matrices():
+def test_178a_native_s2p_input_renormalizes_in_differential_domain(tmp_path):
+    source = SparamModel.from_network(measurement(), port_order=ORDER).s4p_to_s2p()
+    source.network.write_touchstone(str(tmp_path / "victim"))
+    cfg = m178.COMChannelConfig(
+        victim_s4p_path=str(tmp_path / "victim.s2p"), port_order=ORDER,
+        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    )
+    actual = m178._build_channel_under_test(cfg)[0]
+    expected = SparamModel.from_network(source.network).renormalized(92.5)
+    np.testing.assert_allclose(actual.sdd, expected.sdd, atol=1e-12, rtol=0)
+    assert [operation.name for operation in actual.history] == [
+        "renormalized", "resampled",
+    ]
+
+
+def test_178a_dispatches_mixed_s4p_and_s2p_collection_per_file(tmp_path):
+    four_port = measurement()
+    four_port.write_touchstone(str(tmp_path / "victim"))
+    two_port = SparamModel.from_network(four_port, port_order=ORDER).s4p_to_s2p()
+    two_port.network.write_touchstone(str(tmp_path / "next"))
+    cfg = m178.COMChannelConfig(
+        victim_s4p_path=str(tmp_path / "victim.s4p"),
+        next_s4p_paths=(str(tmp_path / "next.s2p"),),
+        port_order=ORDER, R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    )
+    victim, next_channel = m178._build_channel_under_test(cfg)
+    expected_victim = (
+        SparamModel.from_network(four_port).renormalized(46.25).s4p_to_s2p(ORDER)
+    )
+    expected_next = SparamModel.from_network(two_port.network).renormalized(92.5)
+    np.testing.assert_allclose(victim.sdd, expected_victim.sdd, atol=1e-12, rtol=0)
+    np.testing.assert_allclose(next_channel.sdd, expected_next.sdd, atol=1e-12, rtol=0)
+
+
+def test_178a_rejects_unsupported_touchstone_without_fallback(tmp_path):
+    source = rf.Network(
+        f=[0, 1e9, 2e9], s=np.zeros((3, 3, 3), dtype=complex), z0=50.0,
+    )
+    source.write_touchstone(str(tmp_path / "victim"))
+    cfg = m178.COMChannelConfig(
+        victim_s4p_path=str(tmp_path / "victim.s3p"),
+        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    )
+    with pytest.raises(ValueError, match="Only differential two-port and single-ended four-port"):
+        m178._build_channel_under_test(cfg)
+
+
+def test_fixed_sicopr_case_d3p2_order_closes_all_channel_matrices():
     cfg = excel_to_config_178A(str(ROOT / "cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx"))
-    channels = m178._build_channel_under_test(cfg.channel, "s4p_first")
+    channels = m178._build_channel_under_test(cfg.channel)
     paths = [cfg.channel.victim_s4p_path, *cfg.channel.next_s4p_paths, *cfg.channel.fext_s4p_paths]
     for path, channel in zip(paths, channels):
         expected = (

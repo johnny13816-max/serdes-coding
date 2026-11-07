@@ -2101,9 +2101,7 @@ class COM:
         2. build path-shared models
         3. build every path-specific model
         """
-        channels = _build_channel_under_test(
-            self.cfg.channel, self.cfg.policy.channel_renormalization_order,
-        )
+        channels = _build_channel_under_test(self.cfg.channel)
         shared = _build_shared_path(self.cfg, channels[0].freqs)
         return _build_paths(self.cfg, shared, channels)
 

@@ -1556,8 +1556,8 @@ class SparamModel:
         Parameters
         ----------
         z0_new:
-            New reference impedance for the internal Sdd two-port. In this
-            class, z0 is differential reference impedance.
+            New reference impedance for the current representation: per-port
+            single-ended impedance for S4P, or differential impedance for S2P.
         s_def:
             scikit-rf wave definition: "power", "pseudo", "traveling", or None.
         """

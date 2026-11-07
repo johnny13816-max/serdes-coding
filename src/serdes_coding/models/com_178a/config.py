@@ -49,8 +49,9 @@ class COMChannelConfig(_LeafConfigText):
     """
     Victim and crosstalk channel configuration using internal formula units.
 
-    freqs and s4p are populated after Touchstone loading. Excel can directly
-    provide the path fields first.
+    Touchstone representation is detected when the channel is loaded.  The
+    ``*_s4p_path`` field names are retained as legacy-compatible path names;
+    they may point to a native differential S2P or a measured single-ended S4P.
     """
     _FIELD_UNITS = {
         "R0": "ohm",
@@ -153,11 +154,7 @@ class COMChannelConfig(_LeafConfigText):
                 continue
 
             try:
-                channel = SparamModel.from_touchstone(
-                    path,
-                    representation="s4p",
-                    port_order=self.port_order,
-                )
+                channel = SparamModel.from_touchstone(path, representation="auto")
                 raw_f_max = float(channel.freqs[-1])
                 channel = (
                     channel
@@ -1086,7 +1083,6 @@ class COMPolicyConfig(COMDataclassText):
     """One-level collection of 178A algorithm policy and its preset provenance."""
 
     out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay"
-    channel_renormalization_order: Literal["sdd_first", "s4p_first"] = "sdd_first"
     pre_dte_adc_clipping_convention: Literal[
         "annex_d3", "matlab_4_17_reference_only"
     ] = "annex_d3"
@@ -1118,7 +1114,6 @@ class COMPolicyConfig(COMDataclassText):
         return (
             TextSection("Channel and pulse", (
                 self._field("out_of_measured", "out-of-measured-band behavior", stored_unit="policy"),
-                self._field("channel_renormalization_order", "channel renormalization order", stored_unit="policy"),
                 self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
                 self._field("rxffe_record_realization", "RX FFE record realization", stored_unit="policy"),
             )),
@@ -1151,14 +1146,12 @@ class COMPolicyConfig(COMDataclassText):
     def _repr_fields(self) -> tuple[TextField, ...]:
         return (
             self._field("applied_config_profile", "applied profile", stored_unit="profile name"),
-            self._field("channel_renormalization_order", "channel renormalization order", stored_unit="policy"),
             self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
         )
 
     def __post_init__(self) -> None:
         allowed = {
             "out_of_measured": {"cosine_decay", "zero_padding"},
-            "channel_renormalization_order": {"sdd_first", "s4p_first"},
             "pre_dte_adc_clipping_convention": {"annex_d3", "matlab_4_17_reference_only"},
             "final_com_vqc_convention": {
                 "selected_phase_adc_input", "sicopr_final_reconstruction"

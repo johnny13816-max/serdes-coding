@@ -225,24 +225,6 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
     np.testing.assert_array_equal(padded[8:], 0.0)
 
 
-def test_178a_renormalization_policy_changes_only_channel_and_downstream(reference_cfg):
-    assert reference_cfg.policy.channel_renormalization_order == "s4p_first"
-    spec_cfg = _with_methods(reference_cfg, channel_renormalization_order="sdd_first")
-    actual = COM(reference_cfg).build_all_paths()
-    spec = COM(spec_cfg).build_all_paths()
-    assert len(actual) == len(spec) == 6
-    assert max(np.max(np.abs(a.S_ch.sdd - b.S_ch.sdd)) for a, b in zip(actual, spec)) > 1e-6
-    for a, b in zip(actual, spec):
-        np.testing.assert_array_equal(a.S_tx.sdd, b.S_tx.sdd)
-        np.testing.assert_array_equal(a.S_rx.sdd, b.S_rx.sdd)
-        np.testing.assert_array_equal(a.H_ffe.tf, b.H_ffe.tf)
-
-
-def test_178a_renormalization_policy_rejects_unknown_method(reference_cfg):
-    with pytest.raises(ValueError, match="channel_renormalization_order"):
-        _with_methods(reference_cfg, channel_renormalization_order="unknown")
-
-
 @pytest.mark.parametrize("pmf_method", ["gaussian_approx", "pmf_exact"])
 def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     reference_cfg, pmf_method
@@ -315,7 +297,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     fixed = book["fixed_config"]
     raw_values = {
         "out_of_measured": "cosine_decay",
-        "channel_renormalization_order": "sdd_first",
         "pre_dte_adc_clipping_convention": "annex_d3",
         "final_com_vqc_convention": "selected_phase_adc_input",
     }
@@ -342,7 +323,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert aligned.policy.applied_config_profile == "sicopr_reference_v1"
     assert aligned.channel.missing_dc_policy == "mag_phase_trend_to_dc"
     assert policy.out_of_measured == "zero_padding"
-    assert policy.channel_renormalization_order == "s4p_first"
+    assert not hasattr(policy, "channel_renormalization_order")
     assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
     assert policy.final_com_vqc_convention == "sicopr_final_reconstruction"
     assert policy.ctle_pulse_realization == "bilinear_iir"
@@ -470,6 +451,23 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
         "pre_dte_adc_clipping_convention", "final_com_vqc_convention",
     ):
         assert old_field not in fields
+
+
+def test_178a_legacy_renormalization_selector_requires_migration(tmp_path):
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "cases" / "_templates" / "178A" / "config.xlsx"
+    )
+    workbook_path = tmp_path / "legacy_channel_selector.xlsx"
+    copy2(source, workbook_path)
+    book = openpyxl.load_workbook(workbook_path)
+    book["fixed_config"].append([
+        "policy", "channel_renormalization_order", "compatibility",
+        "s4p_first", "enum", "retired selector",
+    ])
+    book.save(workbook_path)
+    with pytest.raises(ValueError, match="channel_renormalization_order was retired"):
+        excel_to_config_178A(str(workbook_path))
 
 
 def test_178a_legacy_align_to_ref_remains_a_compatible_alias(tmp_path):

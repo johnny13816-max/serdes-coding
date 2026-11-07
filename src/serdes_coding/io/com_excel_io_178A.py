@@ -69,6 +69,12 @@ def excel_to_search_config_178A(excel_path: str) -> COMSearchConfig:
 
 def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
     fixed = _read_project_fixed_config(excel_path)
+    if "channel_renormalization_order" in fixed:
+        raise ValueError(
+            "fixed_config.channel_renormalization_order was retired. 178A now "
+            "uses D3.2 single-ended renormalization for S4P and automatically "
+            "dispatches native differential S2P input. Remove the legacy field."
+        )
     channel = _read_project_channels(excel_path, channel_config_type=COMChannelConfig)
     der_0 = _fixed_float(fixed, "DER_0")
     execution = _read_project_execution_config(excel_path)
@@ -203,9 +209,6 @@ def _resolve_project_profile_178A(
     configured_num_trunc_ui = _fixed_optional_int(fixed, "num_trunc_ui")
     general_methods = COMPolicyConfig(
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
-        channel_renormalization_order=str(
-            fixed.get("channel_renormalization_order", "sdd_first")
-        ).strip(),
         pre_dte_adc_clipping_convention=str(
             fixed.get("pre_dte_adc_clipping_convention", "annex_d3")
         ).strip(),
@@ -303,7 +306,6 @@ def _resolve_project_profile_178A(
 
     methods = COMPolicyConfig(
         out_of_measured="zero_padding",
-        channel_renormalization_order="s4p_first",
         pre_dte_adc_clipping_convention="matlab_4_17_reference_only",
         final_com_vqc_convention="sicopr_final_reconstruction",
         ctle_pulse_realization="bilinear_iir",
@@ -485,7 +487,6 @@ def _read_project_execution_profile(
 
     legacy_method_fields = {
         "out_of_measured",
-        "channel_renormalization_order",
         "pre_dte_adc_clipping_convention",
         "final_com_vqc_convention",
         "eq_ch_imp_len",

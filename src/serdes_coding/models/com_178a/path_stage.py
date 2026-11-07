@@ -813,7 +813,7 @@ def _realize_ctle_pulse_for_path(shared: COMSharedPath, H_pre: LinkSegment, H_21
     post_ctle, pulse_domain = _realize_ctle_response(H_pre, shared.H_ctf, link_cfg, shared.ctle_pulse_realization, shared.ctle_iir, measured_freqs=measured_freqs, measured_tf=measured_pre_ctle)
     return _apply_rectangular_unit_pulse(post_ctle, X, link_cfg, amplitude, pulse_domain)
 
-def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_order: Literal['sdd_first', 's4p_first']='sdd_first') -> list[SparamModel]:
+def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:
     """
     Build 178A measured-domain channel-under-test S-parameter models.
 
@@ -821,8 +821,6 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_ord
     - index 0: victim
     - following indices: NEXT channels, then FEXT channels
     """
-    if renormalization_order not in ('sdd_first', 's4p_first'):
-        raise ValueError('renormalization_order must be sdd_first or s4p_first.')
     if channel_cfg.victim_s4p_path is None:
         raise ValueError('channel_cfg.victim_s4p_path must be provided.')
     paths = [channel_cfg.victim_s4p_path, *channel_cfg.next_s4p_paths, *channel_cfg.fext_s4p_paths]
@@ -831,23 +829,26 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig, renormalization_ord
         limit = channel_cfg.sparam_frequency_limit_Hz
         return model if limit is None else model.limited_to_frequency(limit)
 
-    if renormalization_order == 'sdd_first':
-        channels = [
-            limited(IEEECOMSparam.from_touchstone(
-                path, representation='s4p', port_order=channel_cfg.port_order,
-            ))
-            .s4p_to_s2p()
-            .renormalized(2.0 * channel_cfg.R0)
-            for path in paths
-        ]
-    else:
-        channels = [
-            limited(SparamModel.from_touchstone(
-                path, representation='s4p', port_order=channel_cfg.port_order,
-            ).renormalized(channel_cfg.R0))
-            .s4p_to_s2p()
-            for path in paths
-        ]
+    def build_one(path: str) -> SparamModel:
+        measured = SparamModel.from_touchstone(path, representation='auto')
+        if measured.representation == 's4p':
+            # IEEE P802.3dj/D3.2 Annex 178A.1.3: transform the measured
+            # single-ended S-parameters to R0 before forming mixed-mode Sdd.
+            return limited(measured.renormalized(channel_cfg.R0)).s4p_to_s2p(
+                channel_cfg.port_order,
+            )
+        if measured.representation == 's2p':
+            # A native differential two-port has no four-port information to
+            # transform.  Its reference impedance is therefore normalized in
+            # the differential domain.  This is input-format dispatch, not an
+            # alternate 178A algorithm.
+            return limited(measured).renormalized(2.0 * channel_cfg.R0)
+        raise ValueError(
+            f'Unsupported channel representation for {path!r}: '
+            f'{measured.representation!r}.'
+        )
+
+    channels = [build_one(path) for path in paths]
     common_freqs = channel_cfg.align_grid(channels)
     return [channel.resampled(common_freqs) for channel in channels]
 

@@ -284,7 +284,6 @@ POLICY_FIXED={'dy_rel_As','dy_abs_max','tap_rel_As','gaussian_n_sigma','keep_mas
 POLICY_FIXED_178A={
     'align_to_ref',
     'out_of_measured',
-    'channel_renormalization_order',
     'pre_dte_adc_clipping_convention',
     'final_com_vqc_convention',
     'eq_ch_imp_len',

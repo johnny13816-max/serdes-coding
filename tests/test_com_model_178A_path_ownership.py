@@ -44,17 +44,14 @@ def test_legacy_93a_named_methods_are_thin_178a_compatibility_wrappers() -> None
     np.testing.assert_array_equal(canonical_h.tf, legacy_h.tf)
 
 
-def test_channel_ingestion_branches_keep_all_sdd_elements() -> None:
+def test_channel_ingestion_d3p2_order_keeps_all_sdd_elements() -> None:
     cfg = excel_to_config_178A(str(CONFIG))
-    expected = {
-        "sdd_first": "57563c7336104f5ed91e498373e832cf9d36fa0bc791f5eaa40b39b69920c152",
-        "s4p_first": "13e30d2be0da54b86d39a01e988e267b62f9597187312fb926ca99b890c9b091",
-    }
-    for method, digest in expected.items():
-        channels = _build_channel_under_test(cfg.channel, method)
-        assert len(channels) == 6
-        assert all(channel.sdd.shape[1:] == (2, 2) for channel in channels)
-        assert _digest([channel.sdd for channel in channels]) == digest
+    channels = _build_channel_under_test(cfg.channel)
+    assert len(channels) == 6
+    assert all(channel.sdd.shape[1:] == (2, 2) for channel in channels)
+    assert _digest([channel.sdd for channel in channels]) == (
+        "13e30d2be0da54b86d39a01e988e267b62f9597187312fb926ca99b890c9b091"
+    )
 
 
 def test_reference_path_stage_layer_digests_are_unchanged() -> None:
