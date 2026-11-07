@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-11-06
+最後核對：2026-11-07
 
 本文件是 178A model 現有具名方法選擇及其分類審查候選的正式索引。新增、修改、重新命名、合併或移除 branch behavior 時，必須在同一變更中更新本文件。歷史 change contract 說明決策過程；本文件描述目前實作。
 
@@ -38,7 +38,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 
 | Runtime control | Project default | `sicopr_reference_v1` | Preset 是否控制 |
 |---|---|---|---|
-| `policy.channel_renormalization_order` | `sdd_first` | `s4p_first` | 是 |
 | `policy.out_of_measured` | `cosine_decay` | `zero_padding` | 是 |
 | `policy.ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | 是 |
 | `policy.rxffe_record_realization` | `linear_fixed_grid` | `finite_record_circshift` | 是；`custom` 亦可選 `linear_expanded_grid` |
@@ -75,7 +74,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `ALG-003` | `algorithm_policy` | Stage 0 — shared PMF utility | B-010/B-011 | `policy.pdf_to_pmf_method` | `bin_integral`／`pmf_sample` | Shared Gaussian/uniform PDF→PMF construction across pre-DTE, final COM and MLSD. Each distribution retains its own applicable rule. |
 | `ALG-004` | `algorithm_policy` | Stage 0 — shared PMF utility | B-012 | `policy.pmf_scaling_method` | `mass_deposit`／`interpolate_ordinates` | Direct scalar-PMF resampling only. `mass_deposit` delegates grid placement to `ALG-002`; FIR tap construction does not receive this selector. |
 | `EXE-001` | `execution` | Stage 0 — pipeline gate | E-001 | `COMRunConfig.target` | `mse/dfe/mlsd/all_enabled` | `COM._run_once()` selects run extent only; `all_enabled` runs every enabled stage and no target changes formulas in stages that execute. |
-| `ALG-005` | `algorithm_policy` | Stage 1 — path construction | B-001 | `policy.channel_renormalization_order` | `sdd_first`／`s4p_first` | `_build_channel_under_test()` owns the ordered representation operations. Pending draft/reference evidence; `_build_path()` must not renormalize again. |
 | `ALG-006` | `algorithm_policy` | Stage 1 — path construction | B-002 | `policy.out_of_measured` | `cosine_decay`／`zero_padding` | Applies only beyond the effective measured boundary of scalar `H_21`; it must not change `S_ch`, `S_all`, or the case frequency limit. |
 | `ALG-007` | `algorithm_policy` | Stage 1 — path construction | B-003 | `policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | CTLE pulse realization under shared-path construction; TX FFE and continuous VTF ownership remain separate. |
 | `NUM-003` | `numerical_control` | Stage 2 — common impairment | B-005 | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`／`truncated` | Shared L3 used by Stages 2, 3, 5 and 7. Only the PSD/correlation record may change; full responses, phase selection and channel grids remain unchanged. |
@@ -108,7 +106,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 
 | Legacy ID | Current ID | Note |
 |---|---|---|
-| B-001 / B-002 / B-003 | `ALG-005` / `ALG-006` / `ALG-007` | Stage 1 path construction |
+| B-001 / B-002 / B-003 | — / `ALG-006` / `ALG-007` | B-001 retired：178A S4P 固定依 D3.2 先做 single-ended renormalization；native S2P 僅為 input dispatch。B-002/B-003 仍是 Stage 1 branches。 |
 | B-004 / B-005 / B-006 / B-007 | `ALG-011` / `NUM-003` / `ALG-008` / `ALG-012` | Reordered by earliest stage and class |
 | B-008 | `ALG-002` | Stage 0 shared PMF utility |
 | B-009 | — | Retired selector; historical ID only |
@@ -124,6 +122,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | 項目 | 分類與原因 |
 |---|---|
 | `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。`ALG-006` 只決定此邊界外如何處理。 |
+| B-001／retired `ALG-005` channel renormalization selector | **固定規範行為＋input representation dispatch**。有 measured S4P 時，178A 依 D3.2 先將 single-ended S-parameters renormalize 至 `R0`，再轉 mixed-mode Sdd；只有 native differential S2P 才在 Sdd domain renormalize 至 `2*R0`。`_build_channel_under_test()` 是唯一語意 owner；失敗不得 fallback，`_build_path()` 不再 renormalize。 |
 | `policy.xtalk_pmf_accumulation` | **固定行為**。目前唯一合法值是 `pathwise_convolution`，沒有 A/B 分支能力；保留是待清理的 API 欄位。 |
 | TX FFE discrete filter 與 `LinkSegment.cascade_ir()` | **等價實作**。對 oversampled pulse 做 shift-sum／convolution，不屬 CTLE branch。 |
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
@@ -153,7 +152,7 @@ layer 只負責在每個 projection operation 明示注入同一個 project poli
 | 範圍 | 主要實作入口 | 主要驗證 |
 |---|---|---|
 | Preset 展開與 provenance | `io/com_excel_io_178A.py::_resolve_project_profile_178A()` | `tests/test_com_model_178A_policy_branches.py` |
-| Channel renormalization | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
+| Channel representation normalization（fixed/input dispatch） | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
 | High-frequency handling | `SparamModel.to_LinkSegment()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py` |
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse_for_path()` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；Stage 6/7 consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |

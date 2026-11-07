@@ -70,7 +70,7 @@ COM                                            [Root: model]
 └── _run_once()                                [L0: stage set]
     └── build_all_paths()                      [L1: Stage 1 — Path Construction]
         ├── _build_channel_under_test()        [L2: channel-under-test]
-        │   ├── channel representation transformation [L3: ALG-005; evidence pending]
+        │   ├── channel representation normalization [L3: fixed D3.2/input dispatch]
         │   │   ├── from_touchstone()          [L4: measured S-parameter ingestion]
         │   │   ├── s4p_to_s2p()               [L4: mode conversion]
         │   │   └── renormalized()             [L4: reference-impedance conversion]
@@ -181,7 +181,6 @@ this L3 block.
 
 | Branch | L3 owner | L4 execution point | Excluded from branch definition |
 |---|---|---|---|
-| ALG-005 channel representation transformation *(pending evidence)* | channel representation transformation | ingestion/conversion/renormalization order in `_build_channel_under_test()` | frequency limit and ordinary file-read failure |
 | ALG-006 transfer extrapolation | transfer extrapolation | `S_all.to_LinkSegment(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data |
 | ALG-007 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
 
@@ -192,7 +191,6 @@ this L3 block.
 | `COMConfig.link` | frequency/time grid and symbol timing consumed by filter and response constructors | common response grid |
 | `COMConfig.channel` | victim/NEXT/FEXT paths, port order, `R0`, source/load reflection coefficients, `missing_dc_policy`, optional `sparam_frequency_limit_Hz` | measured channel ingestion and transfer conversion |
 | `COMConfig.policy.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` |
-| `COMConfig.policy.channel_renormalization_order` | `sdd_first`／`s4p_first` for six measured channels | S4P ingestion before package cascade |
 | `COMConfig.policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
 | `COMConfig.filter` | TX FFE taps and cursor constraint, transition time, receiver filter/equalizer controls, victim/NEXT/FEXT amplitudes | shared and path-specific scalar responses |
 | `txpkg_victim` | nested termination/package/partial-host config | victim TX package |
@@ -241,24 +239,24 @@ The full types and lifecycle are defined in [Status tree](../status_tree.md). Th
 ### 1. Load and align measured channels
 
 ```text
-_build_channel_under_test(channel_cfg, renormalization_order)
-├── read raw single-ended S4P without conversion
-├── sdd_first: optional frequency limit -> s4p_to_s2p()
-│   └── renormalized(2*R_0) in the differential two-port domain
-└── s4p_first: renormalized(R_0) on the full S4P
-    └── optional frequency limit -> s4p_to_s2p()
+_build_channel_under_test(channel_cfg)
+├── read Touchstone and detect actual port representation
+├── measured S4P: renormalized(R_0) on the full single-ended network
+│   └── optional frequency limit -> s4p_to_s2p(port_order)
+└── native differential S2P: optional frequency limit
+    └── renormalized(2*R_0) in the differential domain
 preserve victim -> NEXT -> FEXT order
-align all six Sdd channels to one measured-domain intersection grid
+align all resulting Sdd channels to one measured-domain intersection grid
 ```
 
 Grid alignment uses the overlapping measured frequency band. It performs in-band interpolation and does not intentionally extrapolate the S-parameter files to the model FFT grid at this point.
 When `sparam_frequency_limit_Hz` is set, ingestion retains the first measured
 sample at or above the requested limit and discards later samples. A file that
-ends below the requested limit remains unchanged. For `s4p_first`, the order is
-full S4P renormalization, frequency limit, then mixed-mode Sdd conversion.
-The policy selects the ingestion order only; `_build_path()` never renormalizes
-an already constructed `S_ch`. The default `sdd_first` retains the original
-two-port path, while the SiCoPR case selects `s4p_first`.
+ends below the requested limit remains unchanged. Measured S4P always follows
+the D3.2 single-ended-first order. Native S2P dispatch is legal only when the
+file actually contains two ports; S4P read/conversion failure is an error and
+must not fall back. `_build_path()` never renormalizes an already constructed
+`S_ch`.
 The representation and conversion API is defined by the
 [S-parameter model contract](../../../architecture/sparameter_model_contract.md).
 

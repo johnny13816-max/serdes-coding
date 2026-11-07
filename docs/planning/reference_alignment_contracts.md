@@ -51,7 +51,7 @@ reference 的算法與 case 設定、spec 的強制要求或允許選項、建�
 
 | ID | 算法邊界 | 處理與狀態 |
 | --- | --- | --- |
-| G-001 | Sdd 二埠 renormalization vs SiCoPR 四埠 single-ended 先 renormalize | 使用者核准的 [TC-016](tc016_channel_renormalization_order.md) 已在工作樹實作；舊個別 policy 可讀，新模板由 `align_to_ref` 統一選擇。六路徑正式 S_ch 對舊 reference-only reader 差 0，後者對 SiCoPR dump 最大複數差 `2.78e-15`；仍待隔離提交。 |
+| G-001 | Sdd 二埠 renormalization vs 四埠 single-ended 先 renormalize | **Closed 2026-11-07**。D3.2 Annex 178A.1.3 證明 measured S4P 固定先做 single-ended renormalization；舊 selector 已移除。Native S2P 只依實際 port count dispatch，錯誤不 fallback。歷史 TC-016 六路徑／SiCoPR 證據保留。 |
 | G-002 | 100 GHz 量測＋cosine 延伸 vs SiCoPR `flim=67 GHz`＋zero-pad | [TC-021](tc021_channel_frequency_limit.md) 已把 `flim` 正式映射為 optional case-level measured-frequency limit；[TC-006](tc006_out_of_measured_boundary_revision.md) 保留具名 boundary-extension policy。Akinwale case 明示 67 GHz＋zero-pad；一般模板留白且不由 `align_to_ref` 寫死。 |
 | G-003 | TX transition 時間 delay／連續 sinc pulse vs SiCoPR 的時間位移／M 點離散累加 | 已確認 boxcar／sinc 對應同一 `X(f)H(f)` 脈衝操作；純時間原點在比較座標中處理，不建立平行算法分支。 |
 | G-004 | ADC `P_qc/2`＋完整 jitter vs SiCoPR `P_qc`＋random jitter | [TC-017](tc017_pre_dte_adc_clipping_reference.md) 已核准並於 pre-DTE 建立 reference-only 分支；所持 D3.0 仍為預設。固定 67 GHz 比較的 MSE 差降至 `1.277871e-6`；final COM ADC PMF 不在 TC-017 範圍，完整端到端驗證未結案 |
@@ -71,7 +71,7 @@ TC-003 的搜尋最佳候選與本地 single-run 不同屬比較條件差異。
 | T-001 | 固定 phase=23 的 pre-DTE clipping `V_qc=40.95 mV`，post-FFE final-PMF 路徑重新算得 `40.44 mV`；相應 `S_qn` 不同 | 稽核 Eq. 178A-26 至 29 在 pre／post 兩條路徑的 PMF/PSD 定義，與 E-004 的數值收斂及 G-004 的 reference policy 分開；不以 post `S_total` 代替 Eq. 178A-15 的 pre `S_n`，分類／修正另立契約 |
 | T-003 | DER Eq. 178A-48 是無窮和，本地固定截在 `trunc_len`（本案 128） | TC-009 後固定 phase=23 候選的 65–128 項總和僅 `2.05e-18`、第 128 項 `1.24e-30`，此案 128 項已數值收斂；跨 case 與 128→更大上限仍待驗，超過驗收才提出數值策略契約 |
 
-## CR-001：spec-defined channel renormalization
+## CR-001：spec-defined channel renormalization（歷史 D3.0；已由 2026-11-07 D3.2 closure supersede）
 
 - 狀態：已結案（2026-10-07）；獨立 commit 見 Git history。
 - 原因：S4P ingestion 只指定目標 impedance metadata，沒有轉換 measured Sdd。

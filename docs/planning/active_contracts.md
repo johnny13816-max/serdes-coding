@@ -9,7 +9,7 @@ v1.0 release 狀態見
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
 branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
-規則維護 RC-20261106-002 已結案；CP-BR 恢復至 ALG-005。RC-004 仍為 Proposed，
+規則維護 RC-20261106-002 已結案；CP-BR 已完成 ALG-005 並前進至 ALG-006。RC-004 仍為 Proposed，
 僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -22,7 +22,7 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage selectable-control review | **EXE-001 closed；Stage 1 resumes at ALG-005** | Pipeline target 收斂至 `mse/dfe/mlsd/all_enabled`，唯一 behavior owner 為 `COM._run_once()`；三個 execution profiles 保留獨立 legal values，且不改已執行 stage 公式。 | 下一個待恢復項目是 `ALG-005 Channel renormalization`。依 algorithm-review flow 先介紹 SDD-first／S4P-first 的差異、path-construction owner、reference evidence gap 與影響範圍；未核准前不修改。 |
+| CP-BR — 178A stage-by-stage selectable-control review | **ALG-005 retired；Stage 1 next is ALG-006** | D3.2 證據排除 measured S4P 的 Sdd-first 平行算法；selector 已移除。`_build_channel_under_test()` 固定 S4P single-ended-first，native S2P 僅作 strict input dispatch。 | 下一個討論項目是 `ALG-006 Out-of-measured transfer`：先確認 scalar `H_21` 有效量測邊界外的 cosine decay／zero padding owner、reference alignment 與 impact boundary。 |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
@@ -50,6 +50,7 @@ reporting、C2M migration 或 release 工作。
 | ALG-011（legacy B-004）— RX FFE record realization | Stage 5 sole owner；`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift`；victim、all XT、DDJ、ISI 共用 response grid，NUM-003 獨立決定 PSD record，MLSD 只消費 resolved status。Python 3.7 validator passed；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。Commit `565ccba` 已推送。 |
 | NUM-002（legacy B-014）— Gaussian support | Retired as non-branch。178A 固定 internal 8σ；focused `48 passed`、workbook scans 0、SiCoPR golden `1 passed`；COM_DFE 與 final COM 不變。Evidence 見 `num002_gaussian_support.md`。 |
 | EXE-001（legacy E-001）— Pipeline target | `full` 已改名為 `all_enabled` 且不保留 alias；owner 為 `COM._run_once()`。Focused `43 passed`；七份 workbook legal-value／stale-value／formula-error scans 通過；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。Implementation `68ea755`、workbook/docs `3f2bc73` 已推送。 |
+| ALG-005（legacy B-001）— Channel renormalization | Retired as non-branch。D3.2 measured S4P 固定 single-ended renormalization → mixed-mode；native S2P 僅依 port count dispatch，錯誤不 fallback。Focused `52 passed`、Python 3.7 validator passed、9 份 workbook selector scan 0、matrix formula errors 0；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。 |
 | RC-20261106-001 — Remove stale branch-review checklist | `9161e63823daaa1009deeccebd927ea72dc46ab0`；registry 與 stage progress 為現行分類／待辦來源。 |
 | RC-20261106-002 — Repository workbook batch maintenance | `194ce220479c2c2825bf553b333a2e7c0d6f90c2`；inventory→batch authoring→single final verification，按 layout 與視覺影響 render。 |
 

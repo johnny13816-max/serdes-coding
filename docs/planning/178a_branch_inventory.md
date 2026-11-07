@@ -8,7 +8,7 @@
 
 | 項目 | `False` 現況 | `True` 現況 | 建議歸屬／理由 |
 | --- | --- | --- | --- |
-| `channel_renormalization_order` | 取獨立欄位；預設 `sdd_first` | 強制 `s4p_first` | **獨立 channel ingestion policy**。四埠含 common-mode 的處理方法有物理意義，不應因「非 SiCoPR mode」自動退回 Sdd-first；由輸入／方法選擇明示。 |
+| `channel_renormalization_order` | *(2026-11-07 已退休)* | *(2026-11-07 已退休)* | D3.2 已證明 measured S4P 必須固定 single-ended-first；native S2P 只作 input representation dispatch。現行 preset 不再控制此欄位。 |
 | `out_of_measured` | 取獨立欄位；預設 `cosine_decay` | 強制 `zero_padding` | **獨立量測邊界 policy**。測到 100 GHz 或 67 GHz 是輸入事實，超出量測的處理是 utility 方法；reference mode 不可暗中改變量測截止。 |
 | `ctle_pulse_realization` | `continuous_tf` | `bilinear_iir` | **獨立 pulse-realization method**。後者固定包含 measured composite TF、reference grid、raw IFFT、`1e-3` 截尾、bilinear IIR 與 boxcar；不再拆細項控制。 |
 | `rxffe_record_realization` | `linear_fixed_grid`（另有 `linear_expanded_grid`） | `finite_record_circshift` | **獨立 post-FFE record policy**。fixed 保留原 grid 與 overflow guard；expanded 保存完整 linear record；reference 重現有限記錄 shift-sum。Stage 5 為唯一 owner，Stages 6–7 消費已解析 record。 |
@@ -58,7 +58,7 @@ project config workbook: align_to_ref + 物理輸入 + 明示的獨立 policy
 
 Workbook 可只露出總開關和真正需要使用者控制的物理／量測設定；reference 專用 PMF 細節保存在 versioned adapter 的一張可審核 preset 對照表，而不是散在 `_build_path()`、PMF helper 和 solver 中。原有 workbook 細項若繼續作 legacy input，當開關為 True 時須明確記錄原值與被覆蓋的有效值；不可默默讓 workbook 和執行值矛盾。`to_export_dict()`／結果 manifest 需要列 effective named methods、effective run settings、preset 來源與輸入 S4P 的頻率邊界，便於重現。
 
-**目前 preset 覆蓋範圍**：`s4p_first`、`zero_padding`、`bilinear_iir`、
+**現行 preset 覆蓋範圍**：`zero_padding`、`bilinear_iir`、
 `finite_record_circshift`、fixed-UI noise grid、pre-DTE clipping、final ADC quantization、各來源 PMF
 建構方法由開關一次選到 SiCoPR 對應的**具名值**；這些方法仍可在 Python
 runtime config 各自指定、測試及 A/B。為 golden 比對所需的
@@ -75,9 +75,9 @@ CTLE 與 post-FFE record methods 由 TC-020R2 接入同一 adapter 展開流程�
 - `ctle_pulse_realization` 與 `rxffe_record_realization` 均須保留。前者決定
   pre-CTLE measured response 到 CTLE output pulse 的完整 realization；後者
   決定已取得有限 impulse record 後，RX FFE 如何作用於該 record，責任不同。
-- `channel_renormalization_order`、`out_of_measured`、兩個 ADC convention 與
-  各來源 PMF method 均代表已驗證的獨立算法選擇；`align_to_ref` 只負責一次
-  選定 reference 組合。
+- `channel_renormalization_order` 已退休；`out_of_measured`、兩個 ADC
+  convention 與各來源 PMF method 仍是獨立算法選擇。`align_to_ref` 只負責
+  一次選定仍存在的 reference 組合。
 - `xtalk_pmf_accumulation` 目前型別只有唯一值 `pathwise_convolution`，沒有
   實際分支能力，是多餘的公開控制候選。它的移除屬 PMF config API 清理，
   不混入 TC-020R2；在另案遷移前仍保留既有欄位以免擴大本次變更。

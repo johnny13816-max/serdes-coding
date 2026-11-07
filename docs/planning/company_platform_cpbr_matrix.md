@@ -1,6 +1,6 @@
 # CP-BR — 178A algorithm-branch coverage matrix
 
-> 狀態：**2026-11-05 stage-by-stage reindex 已同步；未完成項仍待逐項 review**。權威技術文件仍為
+> 狀態：**2026-11-07 ALG-005 已退休為 fixed/input-dispatch behavior；未完成項仍待逐項 review**。權威技術文件仍為
 > [`../models/178A/branch_behavior_registry.md`](../models/178A/branch_behavior_registry.md).
 > 本工作矩陣依 model stage 歸納現有算法／數值選擇，供 CP-BR 審查；尚不宣稱
 > coverage 完整。
@@ -17,7 +17,6 @@
 | Stage 0 / shared PMF utility | `ALG-003` algorithm policy | `policy.pdf_to_pmf_method` | PDF→PMF：`bin_integral` 或 `pmf_sample`。 |
 | Stage 0 / shared PMF utility | `ALG-004` algorithm policy | `policy.pmf_scaling_method` | Scalar PMF scaling：`mass_deposit` 或 `interpolate_ordinates`。 |
 | Stage 0 / pipeline gate | `EXE-001` execution | `execution.<profile>.target` | 選擇執行至 MSE、DFE、MLSD，或以 `all_enabled` 執行所有已啟用 stage；不改已執行 stage 公式。 |
-| Stage 1 / path construction | `ALG-005` algorithm policy | `policy.channel_renormalization_order` | SDD-first 或 four-port S4P-first renormalization。 |
 | Stage 1 / path construction | `ALG-006` algorithm policy | `policy.out_of_measured` | 有效量測頻帶外 cosine decay 或 zero padding。 |
 | Stage 1 / path construction | `ALG-007` algorithm policy | `policy.ctle_pulse_realization` | Continuous TF 或 bilinear-IIR finite-record pulse realization。 |
 | Stage 2 / shared L3 (Stages 2, 3, 5, 7) | `NUM-003` numerical control | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | PSD 前使用 full 或 truncated equivalent-channel record。 |
@@ -43,6 +42,8 @@
 - `policy.xtalk_pmf_accumulation`：fixed single-value behavior，不是選擇。
 - Retired B-009 `interference_pmf_method`：已無 selector。
 - Former E-007 final-quantization accumulation：無 selectable control，保留為 deferred technical issue。
+- Retired B-001／ALG-005：178A measured S4P 固定依 D3.2 先做 single-ended
+  renormalization；native S2P 是 input representation dispatch，不是算法分支。
 
 ## CP-BR 下一輪審查欄位
 

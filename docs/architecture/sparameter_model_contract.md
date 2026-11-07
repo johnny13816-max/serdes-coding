@@ -39,17 +39,23 @@ common-mode 或 mode-conversion 資訊。
 
 ## COM channel ingestion
 
-COM path stage 最後仍接收 Sdd/S2P。93A 與 178A 必須顯式建立轉換流程：
+COM path stage 最後接收 Sdd/S2P。`from_touchstone()` 只偵測並保存實際 port
+representation；stage 擁有規範順序，utility 只執行具名操作。
 
 ```text
-sdd_first:
-raw S4P -> optional frequency limit -> S4P-to-Sdd -> differential renormalization
+178A measured S4P (D3.2):
+raw S4P -> single-ended renormalization to R0 -> optional frequency limit -> S4P-to-Sdd
 
-s4p_first:
-raw S4P -> single-ended renormalization -> optional frequency limit -> S4P-to-Sdd
+178A native differential S2P:
+raw S2P -> optional frequency limit -> differential renormalization to 2*R0
+
+93A measured S4P:
+raw S4P -> optional frequency limit -> S4P-to-Sdd -> differential renormalization
 ```
 
-`from_touchstone()` 不知道 COM policy；stage 負責選擇順序，utility 只執行具名操作。
+178A 的兩條路徑是 input-representation dispatch，不是算法 selector。S4P
+解析、port count 或轉換失敗時必須報錯，不得改走 S2P 流程。`*_s4p_path`
+欄位名稱暫時保留相容性，但實際 representation 由 Touchstone port count 決定。
 
 ## Synthetic S4P
 
@@ -72,4 +78,5 @@ S_{mm}=\begin{bmatrix}S_{dd}&0\\0&0\end{bmatrix}
 - raw S4P 的四個 single-ended ports、z0 與 frequency grid 在讀取後保持不變；
 - synthetic S4P 經 Touchstone 寫出／重讀／`s4p_to_s2p()` 後，四個 Sdd 元素皆閉環；
 - 93A 與 178A 固定 golden COM 值不得因 representation refactor 改變；
-- `sdd_first` 與 `s4p_first` 的操作順序及既有數值結果保持不變。
+- 178A S4P ingestion 必須符合 D3.2 single-ended-first 順序；native S2P
+  只在確實沒有四埠資訊時使用 differential-domain normalization。

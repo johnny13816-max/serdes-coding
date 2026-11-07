@@ -6,27 +6,28 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-06 Asia/Taipei
+Generated at: 2026-11-07 Asia/Taipei
 Source branch: main
-Source revision: EXE-001 closure boundary on origin/main; see latest Git commit
-Active task: CP-BR; Stage 1 review resumes at ALG-005
-Current phase: EXE-001 closed; ready to re-introduce ALG-005 Channel renormalization
+Source revision: ALG-005 closure boundary on origin/main; see latest Git commit
+Active task: CP-BR; Stage 1 next review is ALG-006
+Current phase: ALG-005 retired as fixed/input-dispatch behavior; ready to introduce ALG-006 Out-of-measured transfer
 Collaboration mode: Co-Build branch review
-Approved boundary: none for ALG-005; review introduction and evidence-boundary definition only.
-Completed: ALG-001, ALG-002, ALG-003, ALG-004, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001 and NUM-002 retired as non-branch behaviors.
-In progress: none; ALG-005 review has not resumed.
+Approved boundary: none for ALG-006; review introduction and evidence-boundary definition only.
+Completed: ALG-001, ALG-002, ALG-003, ALG-004, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001, NUM-002 and ALG-005 retired as non-branch behaviors.
+In progress: none; ALG-006 review has not started.
 Blocked: none.
-Next recommended action: introduce ALG-005 Channel renormalization in plain language, then restate its options, path-construction owner, reference evidence gap and impact boundary.
-Next action owner: Codex presents the ALG-005 review introduction; user confirms the review boundary.
-Stop point: do not modify ALG-005 or another pending control before its review contract is approved.
+Next recommended action: introduce ALG-006 Out-of-measured transfer in plain language, then restate cosine-decay／zero-padding semantics, scalar H21 owner, reference evidence and impact boundary.
+Next action owner: Codex presents the ALG-006 review introduction; user confirms the review boundary.
+Stop point: do not modify ALG-006 or another pending control before its review contract is approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/call_tree.md;
                 docs/planning/178A_algorithm_branch_matrix.xlsx; tests/test_com_model_178A_golden.py
-Dirty-state summary: clean after this closure-document synchronization.
+Dirty-state summary: clean after ALG-005 implementation and closure-document commits.
 ```
 
-EXE-001 closure evidence: owner fixed at `COM._run_once()`；`full` renamed to
-`all_enabled` without compatibility alias；focused tests `43 passed`；seven
-workbooks have legal profile-specific dropdowns, stale target values 0 and formula errors 0；
+ALG-005 closure evidence: owner fixed at `_build_channel_under_test()`；D3.2
+S4P path is mandatory, native S2P is strict input representation dispatch, and
+the selector has no compatibility alias；focused tests `52 passed`；9 tracked
+178A case/template workbooks have selector matches 0 and the branch matrix has formula errors 0；
 fixed SiCoPR golden `1 passed`，
 `COM_DFE=1.5247607834259893 dB` and final `COM=2.895898684873246 dB` unchanged.
 

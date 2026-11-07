@@ -66,7 +66,6 @@ COMConfig
 │       └── dy_override
 ├── policy: COMPolicyConfig
 │   ├── out_of_measured
-│   ├── channel_renormalization_order
 │   ├── pre_dte_adc_clipping_convention
 │   ├── final_com_vqc_convention
 │   ├── ctle_pulse_realization
@@ -158,7 +157,6 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
-| `channel_renormalization_order` | `COMConfig.policy` | `sdd_first` |
 | `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
 | `final_com_vqc_convention` | `COMConfig.policy` | `selected_phase_adc_input` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
@@ -190,7 +188,7 @@ control.
 `project_standard` 使用專案預設，
 `custom` 讀取 workbook 明示的 advanced/legacy method；`sicopr_reference_v1` 由
 `com_excel_io_178A` 在建構 runtime config 前展開為 SiCoPR／MATLAB 4.17
-具名方法：`mag_phase_trend_to_dc`、`zero_padding`、`s4p_first`、`bilinear_iir`、
+具名方法：`mag_phase_trend_to_dc`、`zero_padding`、`bilinear_iir`、
 `finite_record_circshift`、pre-DTE/final ADC reference 分支，
 `truncated` eq-channel impairment record（本案 4096 UI）、
 以及 `COMPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑
@@ -202,7 +200,7 @@ ADC-input family 的 explicit `dy_override` 設為 `10e-6 V`，並將 final fami
 設為 `relative_As`、final override 留空。Final COM／MLSD 因此仍在專案未正規化
 RX FFE 電壓座標使用 `dy_rel_As*As`，相當於 SiCoPR 主 tap 正規化後的 `dy`
 乘回主 tap gain。
-舊 workbook 的 `align_to_ref` 與個別欄位仍可讀；legacy boolean 為 `True` 時
+舊 workbook 的 `align_to_ref` 與仍受支援的個別欄位可讀；legacy boolean 為 `True` 時
 等價於 `sicopr_reference_v1`，為 `False` 且存在個別 method 時等價於 `custom`。
 Reference profile 以 preset 覆蓋，
 並在 `COMConfig.policy.applied_config_profile`／`config_profile_overrides` 記錄 profile 與
@@ -230,12 +228,12 @@ FEXT 使用同一政策。數值操作由 `SparamModel.to_LinkSegment()` 呼叫
 `sparam_frequency_limit_GHz=67`。一般模板留白，execution profile 本身不強制
 任何固定頻率。
 
-`channel_renormalization_order` 在 S4P reader 選 `sdd_first` 或
-`s4p_first`。前者保留 178A-4 的 Sdd 二埠 renormalization；後者先對
-完整 single-ended 四埠 renormalize 至 `R_0`，再取 Sdd。`COMConfig`
-只選方法；數值處理由 `SparamModel.from_touchstone()`／`from_network()`
-執行，六條 channel 共用。模板預設 `sdd_first`，SiCoPR case 選
-`s4p_first`；此欄位不從 Ad Hoc 映射，也不影響 93A。
+`channel_renormalization_order` 已從 `COMPolicyConfig`、profile 與 workbook
+mapping 移除。舊 workbook 若仍帶此欄位會收到明確 migration error。178A
+由 `_build_channel_under_test()` 依 Touchstone port count dispatch：measured S4P
+固定先對完整 single-ended 四埠 renormalize 至 `R_0`，再取 Sdd；native
+differential S2P 才直接 renormalize 至 `2R_0`。這是 D3.2 固定流程與 input
+format contract，不是 selectable policy，也不改變 93A。
 
 `pre_dte_adc_clipping_convention` 只控制 MMSE 前 ADC clipping 的
 Gaussian noise sigma 與 CDF 左尾門檻。`annex_d3` 是所持 D3.0 Annex

@@ -1,5 +1,11 @@
 # TC-016 — 178A channel S4P/Sdd renormalization 順序正式分支
 
+> **Superseded：**本文件保留 2026-10-11 的歷史 A/B contract。2026-11-07
+> ALG-005 closure 已依 D3.2 Annex 178A.1.3 移除 selector：178A measured S4P
+> 固定 single-ended-first，native S2P 僅為 strict input representation
+> dispatch。現行契約見
+> [`../validation/channel_renormalization.md`](../validation/channel_renormalization.md)。
+
 **狀態：2026-10-11 使用者明確核准；工作樹已實作、分層測試與完整回歸通過，待隔離提交。** 關聯 G-001；分類為平行算法 policy。下列邊界和驗收適用於本次實作。
 
 ## 結論與依據
