@@ -199,6 +199,7 @@ def _calculate_tx_noise_eq_ch(
     imp_cfg: COMImpairmentConfig,
     pos: int,
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"],
+    out_of_measured: Literal["cosine_decay", "zero_padding"],
 ) -> tuple[np.ndarray, float]:
     """
     Build the full sampled no-FFE equivalent channel for transmitter noise.
@@ -229,6 +230,7 @@ def _calculate_tx_noise_eq_ch(
         link_cfg,
         ctle_pulse_realization,
         victim.shared.ctle_iir,
+        out_of_measured=out_of_measured,
         measured_freqs=measured_freqs,
         measured_tf=measured_pre_ctle,
     )
@@ -2280,6 +2282,7 @@ class COM:
             imp_cfg,
             pos,
             self.cfg.policy.ctle_pulse_realization,
+            self.cfg.policy.out_of_measured,
         )
         S_tn = self._build_eq_ch_imp_psd(
             h_tn,

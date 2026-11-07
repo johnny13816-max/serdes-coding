@@ -20,7 +20,7 @@ from serdes_coding.models.com_model_178A import (
     _reference_fd_to_td_record,
     _realize_ctle_response,
 )
-from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse
+from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse, resample_tf
 
 
 def _small_cfg() -> LinkConfig:
@@ -150,7 +150,8 @@ def test_ctle_realization_is_separate_from_common_unit_pulse_application():
     assert isinstance(ctle_iir, COMBilinearCTLE)
     X = IEEECOMFilter.rect_pulse_93A(cfg, 0.4)
     continuous_ctle, continuous_domain = _realize_ctle_response(
-        H_pre, H_ctf, cfg, "continuous_tf", None
+        H_pre, H_ctf, cfg, "continuous_tf", None,
+        out_of_measured="zero_padding",
     )
     continuous = _apply_rectangular_unit_pulse(
         continuous_ctle, X, cfg, 0.4, continuous_domain
@@ -159,13 +160,16 @@ def test_ctle_realization_is_separate_from_common_unit_pulse_application():
 
     bilinear_ctle, bilinear_domain = _realize_ctle_response(
         H_pre, H_ctf, cfg, "bilinear_iir", ctle_iir,
+        out_of_measured="zero_padding",
         measured_freqs=cfg.freqs,
         measured_tf=H_pre.tf,
     )
     bilinear = _apply_rectangular_unit_pulse(
         bilinear_ctle, X, cfg, 0.4, bilinear_domain
     )
-    discrete_kernel = _reference_fd_to_td_record(cfg.freqs, H_pre.tf, cfg)
+    discrete_kernel = _reference_fd_to_td_record(
+        cfg.freqs, H_pre.tf, cfg, out_of_measured="zero_padding"
+    )
     expected_ctle = ctle_iir.filtered(discrete_kernel)
     expected = lfilter(np.ones(cfg.per_ui), [1.0], expected_ctle) * 0.4
     expected_record = np.zeros(cfg.Nfft)
@@ -179,7 +183,53 @@ def test_reference_fd_to_td_requires_alg001_completed_dc_input():
     response = np.exp(-1j * 2.0 * np.pi * freqs * 15e-12)
 
     with pytest.raises(ValueError, match="ALG-001 completed input with DC"):
-        _reference_fd_to_td_record(freqs, response, cfg)
+        _reference_fd_to_td_record(
+            freqs, response, cfg, out_of_measured="zero_padding"
+        )
+
+
+def test_reference_fd_to_td_uses_alg006_out_of_measured_policy():
+    cfg = _small_cfg()
+    measured_freqs = cfg.freqs[:101]
+    delay = 12e-12
+    measured_tf = (
+        0.9 - 0.2 * measured_freqs / measured_freqs[-1]
+    ) * np.exp(-1j * 2.0 * np.pi * measured_freqs * delay)
+
+    def expected_record(method):
+        measured_df = float(measured_freqs[2] - measured_freqs[1])
+        n_steps = max(1, int(np.floor(cfg.f_nyq / measured_df + 0.5)))
+        output_freqs = np.arange(n_steps + 1) * (cfg.f_nyq / n_steps)
+        extended = resample_tf(
+            measured_tf,
+            measured_freqs,
+            output_freqs,
+            out_of_measured=method,
+        )
+        raw = np.fft.irfft(extended, n=2 * n_steps)
+        retained = np.flatnonzero(np.abs(raw) > np.max(np.abs(raw)) * 0.001)
+        return raw[:int(retained[-1]) + 1]
+
+    zero = _reference_fd_to_td_record(
+        measured_freqs,
+        measured_tf,
+        cfg,
+        out_of_measured="zero_padding",
+    )
+    cosine = _reference_fd_to_td_record(
+        measured_freqs,
+        measured_tf,
+        cfg,
+        out_of_measured="cosine_decay",
+    )
+
+    np.testing.assert_allclose(
+        zero, expected_record("zero_padding"), rtol=0.0, atol=1e-15
+    )
+    np.testing.assert_allclose(
+        cosine, expected_record("cosine_decay"), rtol=0.0, atol=1e-15
+    )
+    assert zero.shape != cosine.shape or np.max(np.abs(zero - cosine)) > 0.0
 
 
 def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
@@ -219,10 +269,16 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
 
     pos = int(np.argmax(bilinear[0].pulse.ir)) % cfg.link.per_ui
     h_cont, variance_cont = _calculate_tx_noise_eq_ch(
-        continuous[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos, "continuous_tf"
+        continuous[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
+        "continuous_tf", cfg.policy.out_of_measured,
     )
     h_bilin, variance_bilin = _calculate_tx_noise_eq_ch(
-        bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos, "bilinear_iir"
+        bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
+        "bilinear_iir", cfg.policy.out_of_measured,
+    )
+    h_bilin_cosine, variance_bilin_cosine = _calculate_tx_noise_eq_ch(
+        bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
+        "bilinear_iir", "cosine_decay",
     )
     S_cont = COM(continuous_cfg)._build_eq_ch_imp_psd(
         h_cont, variance_cont, source_name="continuous TX-noise eq-channel"
@@ -232,3 +288,5 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
     )
     assert np.max(np.abs(h_cont - h_bilin)) > 0.0
     assert np.max(np.abs(S_cont.psd - S_bilin.psd)) > 0.0
+    assert variance_bilin_cosine == variance_bilin
+    assert np.max(np.abs(h_bilin_cosine - h_bilin)) > 0.0

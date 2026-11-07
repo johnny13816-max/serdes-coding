@@ -6,7 +6,7 @@
 
 | 分支／控制量 | 設定入口 | 數值責任層 | 判定與後續 |
 | --- | --- | --- | --- |
-| `out_of_measured=cosine_decay/zero_padding` | 178A fixed-config `COMConfig`；victim/NEXT/FEXT 共用 | `SparamModel.to_LinkSegment()` 是 S-to-link 邊界，`LinkSegment.from_tf()`／`resample_tf()` 執行外插 | **本次已修正層級**。舊 `_build_path()` 的 67 GHz 事後補零已移除；高層僅傳 policy。原始 S4P 到 100 GHz，SiCoPR `flim=67 GHz` 屬不同輸入邊界，需另行審核暫存截取輸入。 |
+| `out_of_measured=cosine_decay/zero_padding` | `COMConfig.policy`；victim/NEXT/FEXT 與 victim TX-noise 共用 | `LinkSegment.from_tf()` 與 `_reference_fd_to_td_record()` 都委派給 `resample_tf()`；前者建立 analysis-grid `H_21`，後者建立 bilinear path/TX-noise finite record | **ALG-006 owner 已收斂**。同一 resolved policy 支配所有 completed scalar-transfer consumers；`S_ch`、`S_all`、boundary-in `H_21` 與 case frequency limit 不變。SiCoPR case 明示 67 GHz input boundary＋`zero_padding`；這不構成通用 67 GHz cutoff。 |
 | `missing_dc_policy` | `COMChannelConfig` fixed policy | `SparamModel.to_LinkSegment()` 呼叫 `extrapolated_to_dc()`；LinkSegment 做 grid 轉換 | **層級合理**：DC 是量測 S-parameter 缺口處理，COM 只傳設定。 |
 | `numerical_control.adc_input_pmf_grid.*` | `COMConfig.numerical_control`；preset 展開到 selected `COMRunConfig` | `_resolve_adc_input_pmf_config()` 建 ADC-input runtime PMF grid | **NUM-004 canonical boundary**：rule、relative spacing、cap、override 只影響 pre-DTE/selected-phase ADC-input domain；reference preset 明示 `10 µV` override。 |
 | `numerical_control.final_pmf_grid.*` | `COMConfig.numerical_control`；preset 展開到 selected `COMRunConfig` | `_resolve_final_com_pmf_config()` 建 final DFE/MLSD runtime PMF grid | **NUM-005 canonical boundary**：與 ADC-input family 獨立；reference preset 使用 `relative_As` 且不繼承 ADC override。 |

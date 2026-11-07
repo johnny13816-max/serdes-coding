@@ -220,9 +220,11 @@ truncated PSD/correlation record，不改變 ALG-011 的 response realization。
 `out_of_measured` 控制 terminated scalar `H_21` 從量測 S-parameter grid
 轉到 analysis grid 時的頻帶外處理。`cosine_decay` 保留原本的 cosine
 衰減；`zero_padding` 僅在輸入的最高量測頻點以上補零。victim、NEXT、
-FEXT 使用同一政策。數值操作由 `SparamModel.to_LinkSegment()` 呼叫
-`LinkSegment.from_tf()`／`resample_tf()` 執行，不修改 `S_ch` 或 `S_all`
-矩陣。有效量測上限由 `COMChannelConfig.sparam_frequency_limit_Hz` 決定；
+FEXT 與 victim TX-noise equivalent channel 使用同一政策。analysis-grid
+`H_21` 經 `LinkSegment.from_tf()`，bilinear finite record 經
+`_reference_fd_to_td_record()`；兩者都將數值操作委派給 `resample_tf()`，
+不修改 `S_ch` 或 `S_all` 矩陣。有效量測上限由
+`COMChannelConfig.sparam_frequency_limit_Hz` 決定；
 `zero_padding` 從該有效上限之後生效。Akinwale case 的六個原始 S4P 都到
 100 GHz，而 Ad Hoc `flim=67 GHz` 會映射為 case-level
 `sparam_frequency_limit_GHz=67`。一般模板留白，execution profile 本身不強制

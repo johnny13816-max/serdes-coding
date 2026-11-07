@@ -1,6 +1,6 @@
-# TC-006 修訂 — measured boundary 外插政策與 utility 責任邊界
+# TC-006 修訂 — measured boundary 外插政策與 utility 責任邊界（Historical）
 
-狀態：已核准並在工作樹實作；回歸與獨立提交狀態見 [active_contracts](active_contracts.md)。本修訂取代[原 67 GHz scalar-VTF cutoff 契約](tc006_channel_high_frequency_policy.md)，保留原文作歷史紀錄。
+狀態：歷史契約，非現行技術權威。本修訂曾取代[原 67 GHz scalar-VTF cutoff 契約](tc006_channel_high_frequency_policy.md)；目前 ALG-006 的 consumer-complete owner、驗收與結案證據見 [ALG-006 contract](alg006_out_of_measured_transfer.md)、[Stage 1 path construction](../models/178A/stages/path_construction.md) 與 [branch boundary](../validation/algorithm_branch_boundaries_178A.md)。下文保留原始決策與當時驗證，不應用來推翻現行 call path。
 
 ## 目的與可觀察行為
 

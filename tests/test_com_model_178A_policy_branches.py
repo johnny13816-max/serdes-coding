@@ -57,6 +57,7 @@ def test_178a_out_of_measured_changes_only_scalar_vtf(reference_cfg):
         np.testing.assert_array_equal(zero.S_all.sdd, measured.S_all.sdd)
         np.testing.assert_allclose(zero.H_21.tf[below], measured.H_21.tf[below], rtol=0, atol=0)
         np.testing.assert_array_equal(zero.H_21.tf[above], np.zeros(np.count_nonzero(above)))
+        assert np.max(np.abs(zero.pulse.ir - measured.pulse.ir)) > 0.0
 
 
 def test_178a_separated_grid_controls_do_not_leak_between_domains(reference_cfg):

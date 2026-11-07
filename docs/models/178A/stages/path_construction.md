@@ -97,7 +97,9 @@ COM                                            [Root: model]
                 ├── S-parameter path cascade    [L3]
                 │   └── cascade_com()          [L4: S-parameter cascade]
                 ├── transfer extrapolation      [L3: ALG-006]
-                │   └── to_LinkSegment()       [L4: terminated transfer + extension]
+                │   ├── LinkSegment.from_tf() → resample_tf() [L4: analysis-grid H_21]
+                │   └── _reference_fd_to_td_record() → resample_tf()
+                │                                      [L4: bilinear path/TX-noise record]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
                 ├── realize_ctle_pulse_for_path() [L4: delegated ALG-007]
@@ -112,7 +114,7 @@ the resolved value plus method-specific shared state in `COMSharedPath`.
 per-path work to `_realize_ctle_pulse_for_path()`.
 
 The L3 `CTLE pulse realization` block owns one selector, shared realization
-state, and the extension contract. Its L4
+state, and the CTLE realization contract. Its L4
 `_prepare_ctle_pulse_realization()` creates method-specific shared data once;
 its L4 `_realize_ctle_pulse_for_path()`
 accepts the path-specific `H_pre`／`S_all` context and returns the selected
@@ -147,19 +149,21 @@ _realize_ctle_pulse_for_path(
     X,
     amplitude,
     link_cfg,
+    out_of_measured,  # resolved ALG-006 policy; not an ALG-007 selector
 ) -> LinkSegment  # stored path pulse
 ```
 
 | Boundary | Inputs | Output / responsibility |
 |---|---|---|
 | L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; `bilinear_iir` creates the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
-| L4 `_realize_ctle_pulse_for_path()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; measured-domain `S_all`; channel source/load context; `kind`; already selected rectangular pulse `X` | Owns any measured-grid pre-CTLE reconstruction required by the resolved method, delegates the numerical CTLE formula to `_realize_ctle_response()`, and applies the unit pulse. Returns the stored path pulse. |
+| L4 `_realize_ctle_pulse_for_path()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X` | Owns any measured-grid pre-CTLE reconstruction required by the resolved CTLE method, forwards ALG-006 to the common resampling kernel, delegates the CTLE formula to `_realize_ctle_response()`, and applies the unit pulse. Returns the stored path pulse. |
 
-The call site must not pass a selector into `_realize_ctle_pulse_for_path()`.
-Method
-selection is complete at prepare time.  A new realization method therefore
-adds only its shared preparation and per-path realization implementation under
-this L3 block.
+The call site must not pass an ALG-007 selector into
+`_realize_ctle_pulse_for_path()`; CTLE method selection is complete at prepare
+time. It does pass the independent resolved ALG-006 policy so every
+measured-to-Nyquist consumer uses one transfer-extrapolation method. A new CTLE
+realization method therefore adds only its shared preparation and per-path
+realization implementation under this L3 block.
 
 #### Non-ownership and invariants
 
@@ -174,14 +178,15 @@ this L3 block.
   record pulse formation for `bilinear_iir`.
 - A bilinear realization requires matching `LinkConfig.Fs`, valid measured
   pre-CTLE data, and finite-record length not exceeding `LinkConfig.Nfft`.
-- The result for a selected method remains identical to the pre-consolidation
-  ALG-007 path for the same fully resolved config.
+- The `zero_padding` reference configuration remains identical to the
+  pre-ALG-006-convergence bilinear path. Selecting `cosine_decay` intentionally
+  changes the out-of-measured input to that same CTLE realization.
 
 ### Algorithm-branch placement
 
 | Branch | L3 owner | L4 execution point | Excluded from branch definition |
 |---|---|---|---|
-| ALG-006 transfer extrapolation | transfer extrapolation | `S_all.to_LinkSegment(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data |
+| ALG-006 transfer extrapolation | transfer extrapolation | `LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate to `resample_tf(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data；`ctle_pulse_realization`, which selects the CTLE formula |
 | ALG-007 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
 
 ## Required input objects
@@ -190,7 +195,7 @@ this L3 block.
 |---|---|---|
 | `COMConfig.link` | frequency/time grid and symbol timing consumed by filter and response constructors | common response grid |
 | `COMConfig.channel` | victim/NEXT/FEXT paths, port order, `R0`, source/load reflection coefficients, `missing_dc_policy`, optional `sparam_frequency_limit_Hz` | measured channel ingestion and transfer conversion |
-| `COMConfig.policy.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` |
+| `COMConfig.policy.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` and every bilinear finite-record consumer derived from the same completed transfer |
 | `COMConfig.policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
 | `COMConfig.filter` | TX FFE taps and cursor constraint, transition time, receiver filter/equalizer controls, victim/NEXT/FEXT amplitudes | shared and path-specific scalar responses |
 | `txpkg_victim` | nested termination/package/partial-host config | victim TX package |
@@ -320,7 +325,10 @@ LinkSegment.from_tf -> resample_tf
           -> H_21 on analysis grid, applying out_of_measured above measured f_max
 H_ffe + H_t + H_21 + H_r cascade
           -> pre-CTLE response
-pre-CTLE response + selected CTLE realization
+completed measured H_21 + measured-grid pre-CTLE reconstruction
+          -> _reference_fd_to_td_record -> resample_tf with the same out_of_measured
+          -> bilinear path/TX-noise finite record when selected
+analysis-grid or finite-record pre-CTLE response + selected CTLE realization
           -> post-CTLE response
 post-CTLE response + common rectangular symbol pulse
           -> pulse
@@ -338,14 +346,17 @@ TX FFE 在上游依 path kind 選定並完成串接，不屬於 CTLE 分支。
 重新計算 terminated transfer。之後經 `_reference_fd_to_td_record()` 建立 reference spacing 的 raw
 IFFT finite record、保留 3Tr 時間原點、停用 causality correction，並以固定
 `1e-3` peak threshold 截尾，再通過共用 `COMBilinearCTLE` 與 boxcar unit pulse。
-這些是該具名方法的固定定義，不拆成額外 policy 欄位。
+其中 measured-to-Nyquist extension 由獨立 ALG-006 policy 控制；CTLE IIR、
+raw IFFT、時間原點與截尾仍是 ALG-007 該具名方法的固定定義，不拆成額外欄位。
 後者依前者的 frequency／finite-record 表示法保留原本的 convolution semantics，
 但不引入額外 project policy。
 
-`_build_path()` forwards the chosen policy once and stores the completed measured
-transfer in `COMPath`. `SparamModel.completed_voltage_transfer_function()` owns
-missing-DC completion, and `LinkSegment.from_tf()`／`resample_tf()` own numerical frequency
-extension. `cosine_decay` retains the existing extrapolation; `zero_padding`
+`_build_path()` forwards the chosen policy and stores the completed measured
+transfer in `COMPath`. `_calculate_tx_noise_eq_ch()` forwards the same resolved
+policy for the victim TX-noise equivalent channel.
+`SparamModel.completed_voltage_transfer_function()` owns missing-DC completion;
+`LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate numerical
+frequency extension to `resample_tf()`. `cosine_decay` retains the existing extrapolation; `zero_padding`
 sets the complex terminated `H_21` strictly to zero only above the measured
 input's effective highest frequency. The endpoint sample stays unchanged.
 The optional frequency limit is applied earlier at `SparamModel` ingestion, so
