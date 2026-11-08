@@ -13,12 +13,13 @@ from serdes_coding.models.com_model_178A import (
     _apply_fir_finite_record,
     _apply_rxffe_response,
     _build_channel_under_test,
-    _apply_rectangular_unit_pulse,
     _build_paths,
     _calculate_tx_noise_eq_ch,
     _build_shared_path,
+)
+from serdes_coding.models.com_178a.path_stage import (
+    _apply_rectangular_unit_pulse,
     _reference_fd_to_td_record,
-    _realize_ctle_response,
 )
 from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse, resample_tf
 
@@ -130,7 +131,7 @@ def test_rxffe_owner_covers_fixed_expanded_and_circular_records():
     )
 
 
-def test_ctle_realization_is_separate_from_common_unit_pulse_application():
+def test_common_unit_pulse_application_preserves_each_realization_domain():
     cfg = _small_cfg()
     pre_ir = np.zeros(cfg.Nfft)
     pre_ir[10:26] = np.exp(-np.arange(16) / 3.0)
@@ -149,28 +150,21 @@ def test_ctle_realization_is_separate_from_common_unit_pulse_application():
     )
     assert isinstance(ctle_iir, COMBilinearCTLE)
     X = IEEECOMFilter.rect_pulse_93A(cfg, 0.4)
-    continuous_ctle, continuous_domain = _realize_ctle_response(
-        H_pre, H_ctf, cfg, "continuous_tf", None,
-        out_of_measured="zero_padding",
-    )
     continuous = _apply_rectangular_unit_pulse(
-        continuous_ctle, X, cfg, 0.4, continuous_domain
+        H_pre.cascade_tf(H_ctf), X, cfg, 0.4, "frequency_tf"
     )
     np.testing.assert_array_equal(continuous.tf, H_pre.cascade_tf(H_ctf).cascade_tf(X).tf)
 
-    bilinear_ctle, bilinear_domain = _realize_ctle_response(
-        H_pre, H_ctf, cfg, "bilinear_iir", ctle_iir,
-        out_of_measured="zero_padding",
-        measured_freqs=cfg.freqs,
-        measured_tf=H_pre.tf,
-    )
-    bilinear = _apply_rectangular_unit_pulse(
-        bilinear_ctle, X, cfg, 0.4, bilinear_domain
-    )
     discrete_kernel = _reference_fd_to_td_record(
         cfg.freqs, H_pre.tf, cfg, out_of_measured="zero_padding"
     )
     expected_ctle = ctle_iir.filtered(discrete_kernel)
+    ctle_record = np.zeros(cfg.Nfft)
+    ctle_record[:len(expected_ctle)] = expected_ctle * cfg.Fs
+    bilinear_ctle = IEEECOMFilter._from_finite_record_ir(ctle_record, cfg)
+    bilinear = _apply_rectangular_unit_pulse(
+        bilinear_ctle, X, cfg, 0.4, "finite_record_ir"
+    )
     expected = lfilter(np.ones(cfg.per_ui), [1.0], expected_ctle) * 0.4
     expected_record = np.zeros(cfg.Nfft)
     expected_record[:len(expected)] = expected
@@ -244,18 +238,47 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
     bilinear_cfg = replace(
         cfg, policy=replace(cfg.policy, ctle_pulse_realization="bilinear_iir")
     )
+    bilinear_cosine_cfg = replace(
+        bilinear_cfg,
+        policy=replace(bilinear_cfg.policy, out_of_measured="cosine_decay"),
+    )
     continuous_shared = _build_shared_path(continuous_cfg, channels[0].freqs)
     bilinear_shared = _build_shared_path(bilinear_cfg, channels[0].freqs)
     assert continuous_shared.ctle_pulse_realization == "continuous_tf"
     assert bilinear_shared.ctle_pulse_realization == "bilinear_iir"
     assert continuous_shared.ctle_iir is None
     assert isinstance(bilinear_shared.ctle_iir, COMBilinearCTLE)
+    with pytest.raises(ValueError, match="continuous_tf realization must not store"):
+        replace(continuous_shared, ctle_iir=bilinear_shared.ctle_iir)
+    with pytest.raises(ValueError, match="bilinear_iir realization requires"):
+        replace(bilinear_shared, ctle_iir=None)
     continuous = _build_paths(continuous_cfg, continuous_shared, channels)
     bilinear = _build_paths(bilinear_cfg, bilinear_shared, channels)
+    bilinear_cosine = _build_paths(
+        bilinear_cosine_cfg,
+        _build_shared_path(bilinear_cosine_cfg, channels[0].freqs),
+        channels,
+    )
     assert len(continuous) == len(bilinear) == 6
     assert all(path.shared.ctle_pulse_realization == "continuous_tf" for path in continuous)
     assert all(path.shared.ctle_pulse_realization == "bilinear_iir" for path in bilinear)
     assert all(path.shared.ctle_iir is bilinear_shared.ctle_iir for path in bilinear)
+    assert continuous[0].pulse_no_txffe is not None
+    assert bilinear[0].pulse_no_txffe is not None
+    assert bilinear_cosine[0].pulse_no_txffe is not None
+    assert all(path.pulse_no_txffe is None for path in continuous[1:])
+    assert all(path.pulse_no_txffe is None for path in bilinear[1:])
+    expected_continuous_no_txffe = (
+        continuous[0].H_t
+        .cascade_tf(continuous[0].H_21)
+        .cascade_tf(continuous[0].H_r)
+        .cascade_tf(continuous[0].H_ctf)
+        .cascade_tf(continuous[0].X)
+    )
+    np.testing.assert_array_equal(
+        continuous[0].pulse_no_txffe.tf,
+        expected_continuous_no_txffe.tf,
+    )
 
     for lhs, rhs in zip(continuous, bilinear):
         np.testing.assert_array_equal(lhs.S_tx.sdd, rhs.S_tx.sdd)
@@ -269,16 +292,25 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
 
     pos = int(np.argmax(bilinear[0].pulse.ir)) % cfg.link.per_ui
     h_cont, variance_cont = _calculate_tx_noise_eq_ch(
-        continuous[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
-        "continuous_tf", cfg.policy.out_of_measured,
+        continuous[0], cfg.link, cfg.imp, pos,
     )
     h_bilin, variance_bilin = _calculate_tx_noise_eq_ch(
-        bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
-        "bilinear_iir", cfg.policy.out_of_measured,
+        bilinear[0], cfg.link, cfg.imp, pos,
     )
     h_bilin_cosine, variance_bilin_cosine = _calculate_tx_noise_eq_ch(
-        bilinear[0], cfg.link, cfg.channel, cfg.filter, cfg.imp, pos,
-        "bilinear_iir", "cosine_decay",
+        bilinear_cosine[0], cfg.link, cfg.imp, pos,
+    )
+    np.testing.assert_array_equal(
+        h_cont,
+        continuous[0].pulse_no_txffe.ir[pos::cfg.link.per_ui],
+    )
+    np.testing.assert_array_equal(
+        h_bilin,
+        bilinear[0].pulse_no_txffe.ir[pos::cfg.link.per_ui],
+    )
+    np.testing.assert_array_equal(
+        h_bilin_cosine,
+        bilinear_cosine[0].pulse_no_txffe.ir[pos::cfg.link.per_ui],
     )
     S_cont = COM(continuous_cfg)._build_eq_ch_imp_psd(
         h_cont, variance_cont, source_name="continuous TX-noise eq-channel"

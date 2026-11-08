@@ -40,11 +40,10 @@ try:
     )
     from .com_178a.path_stage import (
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
-        _apply_rectangular_unit_pulse, _build_H_ctf, _build_H_ffe,
+        _build_H_ctf, _build_H_ffe,
         _build_H_ffe_next, _build_H_r, _build_H_t,
         _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
-        _build_shared_path, _build_txpkg, _evaluate_pre_ctle_on_measured_grid,
-        _realize_ctle_response, _reference_fd_to_td_record,
+        _build_shared_path, _build_txpkg,
     )
 except ImportError:
     # Support direct interactive execution of this canonical module.
@@ -74,11 +73,10 @@ except ImportError:
     )
     from serdes_coding.models.com_178a.path_stage import (
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
-        _apply_rectangular_unit_pulse, _build_H_ctf, _build_H_ffe,
+        _build_H_ctf, _build_H_ffe,
         _build_H_ffe_next, _build_H_r, _build_H_t,
         _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
-        _build_shared_path, _build_txpkg, _evaluate_pre_ctle_on_measured_grid,
-        _realize_ctle_response, _reference_fd_to_td_record,
+        _build_shared_path, _build_txpkg,
     )
 
 
@@ -194,54 +192,18 @@ def _build_psd_from_DFT_response(
 def _calculate_tx_noise_eq_ch(
     victim: COMPath,
     link_cfg: LinkConfig,
-    channel_cfg: COMChannelConfig,
-    ft_cfg: COMFilterConfig,
     imp_cfg: COMImpairmentConfig,
     pos: int,
-    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"],
-    out_of_measured: Literal["cosine_decay", "zero_padding"],
 ) -> tuple[np.ndarray, float]:
     """
-    Build the full sampled no-FFE equivalent channel for transmitter noise.
+    Sample the Stage 1 no-TX-FFE pulse for the transmitter-noise channel.
 
     Reference:
     - IEEE 802.3 Annex 178A.1.7.3, Eq. 178A-19 and Eq. 178A-20.
     """
-    H_pre_noffe = (
-        victim.H_t
-        .cascade_tf(victim.H_21)
-        .cascade_tf(victim.H_r)
-    )
-    X_v = IEEECOMFilter.rect_pulse(link_cfg, ft_cfg.A_v)
-    measured_freqs = None
-    measured_pre_ctle = None
-    if ctle_pulse_realization == "bilinear_iir":
-        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(
-            victim.H_21_measured_freqs,
-            victim.H_21_measured_tf,
-            link_cfg,
-            ft_cfg,
-            kind="victim",
-            include_txffe=False,
-        )
-    post_ctle_noffe, pulse_domain = _realize_ctle_response(
-        H_pre_noffe,
-        victim.H_ctf,
-        link_cfg,
-        ctle_pulse_realization,
-        victim.shared.ctle_iir,
-        out_of_measured=out_of_measured,
-        measured_freqs=measured_freqs,
-        measured_tf=measured_pre_ctle,
-    )
-    pulse_noffe = _apply_rectangular_unit_pulse(
-        post_ctle_noffe,
-        X_v,
-        link_cfg,
-        ft_cfg.A_v,
-        pulse_domain,
-    )
-    h_tn = pulse_noffe.ir[int(pos)::link_cfg.per_ui]
+    if victim.pulse_no_txffe is None:
+        raise ValueError("victim.pulse_no_txffe must be built during Stage 1.")
+    h_tn = victim.pulse_no_txffe.ir[int(pos)::link_cfg.per_ui]
     variance = 10 ** (-imp_cfg.SNR_TX / 10)
     return h_tn, variance
 
@@ -1765,6 +1727,12 @@ class COM:
             victim.pulse.ir,
             source_name="victim pulse causal_ir",
         )
+        if victim.pulse_no_txffe is None:
+            raise ValueError("victim.pulse_no_txffe must be built during Stage 1.")
+        victim.pulse_no_txffe.validate_causal_ir(
+            victim.pulse_no_txffe.ir,
+            source_name="victim pulse_no_txffe causal_ir",
+        )
 
     def run(
         self,
@@ -2277,12 +2245,8 @@ class COM:
         h_tn, tx_noise_variance = _calculate_tx_noise_eq_ch(
             victim,
             link_cfg,
-            self.cfg.channel,
-            ft_cfg,
             imp_cfg,
             pos,
-            self.cfg.policy.ctle_pulse_realization,
-            self.cfg.policy.out_of_measured,
         )
         S_tn = self._build_eq_ch_imp_psd(
             h_tn,

@@ -27,6 +27,19 @@ class COMSharedPath(COMDataclassText):
     ctle_iir: Optional[Any] = None
     ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
 
+    def __post_init__(self) -> None:
+        if self.ctle_pulse_realization == "continuous_tf":
+            if self.ctle_iir is not None:
+                raise ValueError("continuous_tf realization must not store ctle_iir.")
+            return
+        if self.ctle_pulse_realization == "bilinear_iir":
+            if self.ctle_iir is None:
+                raise ValueError("bilinear_iir realization requires ctle_iir.")
+            return
+        raise ValueError(
+            "ctle_pulse_realization must be continuous_tf or bilinear_iir."
+        )
+
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Shared filters", (
@@ -63,6 +76,7 @@ class COMPath(COMDataclassText):
     H_all: LinkSegment
     X: Any
     pulse: LinkSegment
+    pulse_no_txffe: Optional[LinkSegment] = None
 
     @property
     def H_ffe(self) -> Any:
@@ -96,6 +110,12 @@ class COMPath(COMDataclassText):
                 self._field("H_21", "terminated channel response", stored_unit="dimensionless", summary="shape"),
                 self._field("H_all", "equalized channel response", stored_unit="dimensionless", summary="shape"),
                 self._field("pulse", "pulse response", stored_unit="V", summary="shape"),
+                self._field(
+                    "pulse_no_txffe",
+                    "pulse response without TX FFE",
+                    stored_unit="V",
+                    summary="shape",
+                ),
             )),
         )
 

@@ -767,37 +767,6 @@ def _prepare_ctle_pulse_realization(link_cfg: LinkConfig, ft_cfg: COMFilterConfi
         raise ValueError('COMFilterConfig178A is missing required bilinear CTF fields: ' + ', '.join(missing))
     return IEEECOMFilter.build_rx_equalizer_bilinear(link_cfg, g_1=required['g_1'], g_2=required['g_2'], f_z1=required['f_z1'], f_z2=required['f_z2'], f_p1=required['f_p1'], f_p2=required['f_p2'], f_p3=required['f_p3'])
 
-def _realize_ctle_response(pre_ctle: LinkSegment, H_ctf: LinkSegment, link_cfg: LinkConfig, realization: Literal['continuous_tf', 'bilinear_iir'], ctle_iir: Optional[COMBilinearCTLE], *, out_of_measured: Literal['cosine_decay', 'zero_padding'], measured_freqs: Optional[np.ndarray]=None, measured_tf: Optional[np.ndarray]=None) -> tuple[LinkSegment, Literal['frequency_tf', 'finite_record_ir']]:
-    """Realize only the CTLE output from an already-built pre-CTLE response.
-
-    TX FFE, channel/package cascade, receiver filtering, and symbol-pulse
-    formation are outside this boundary.  The returned domain tag tells the
-    common symbol-pulse helper how to preserve the selected realization's
-    numerical convolution semantics.
-    """
-    if realization == 'continuous_tf':
-        return (pre_ctle.cascade_tf(H_ctf), 'frequency_tf')
-    if realization != 'bilinear_iir':
-        raise ValueError('CTLE pulse realization must be continuous_tf or bilinear_iir.')
-    if ctle_iir is None:
-        raise ValueError('bilinear_iir realization requires shared.ctle_iir.')
-    if not np.isclose(ctle_iir.Fs, link_cfg.Fs, rtol=0.0, atol=0.0):
-        raise ValueError('shared.ctle_iir sample rate must match LinkConfig.Fs.')
-    if measured_freqs is None or measured_tf is None:
-        raise ValueError('bilinear_iir realization requires the measured pre-CTLE TF.')
-    discrete_kernel = _reference_fd_to_td_record(
-        measured_freqs,
-        measured_tf,
-        link_cfg,
-        out_of_measured=out_of_measured,
-    )
-    ctle_ir = ctle_iir.filtered(discrete_kernel)
-    ctle_record = np.zeros(link_cfg.Nfft, dtype=float)
-    if len(ctle_ir) > link_cfg.Nfft:
-        raise COMLengthMismatchError(f'bilinear CTLE finite record exceeds LinkConfig.Nfft: len={len(ctle_ir)}, Nfft={link_cfg.Nfft}.')
-    ctle_record[:len(ctle_ir)] = ctle_ir * link_cfg.Fs
-    return (IEEECOMFilter._from_finite_record_ir(ctle_record, link_cfg), 'finite_record_ir')
-
 def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_cfg: LinkConfig, amplitude: float, domain: Literal['frequency_tf', 'finite_record_ir']) -> LinkSegment:
     """Apply the common one-UI rectangular symbol pulse after CTLE realization."""
     if domain == 'frequency_tf':
@@ -814,13 +783,49 @@ def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_c
     pulse_record[:len(pulse_ir)] = pulse_ir
     return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
 
-def _realize_ctle_pulse_for_path(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding']) -> LinkSegment:
-    """Realize one path pulse using the method resolved in shared path state."""
-    measured_freqs = measured_pre_ctle = None
-    if shared.ctle_pulse_realization == 'bilinear_iir':
-        measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(H_21_measured_freqs, H_21_measured_tf, link_cfg, ft_cfg, kind=kind)
-    post_ctle, pulse_domain = _realize_ctle_response(H_pre, shared.H_ctf, link_cfg, shared.ctle_pulse_realization, shared.ctle_iir, out_of_measured=out_of_measured, measured_freqs=measured_freqs, measured_tf=measured_pre_ctle)
-    return _apply_rectangular_unit_pulse(post_ctle, X, link_cfg, amplitude, pulse_domain)
+def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding'], *, include_txffe: bool=True) -> LinkSegment:
+    """Realize one complete path pulse at the Stage 1 ALG-007 owner."""
+    if shared.ctle_pulse_realization == 'continuous_tf':
+        return _apply_rectangular_unit_pulse(
+            H_pre.cascade_tf(shared.H_ctf),
+            X,
+            link_cfg,
+            amplitude,
+            'frequency_tf',
+        )
+    if shared.ctle_pulse_realization != 'bilinear_iir':
+        raise ValueError('CTLE pulse realization must be continuous_tf or bilinear_iir.')
+    if shared.ctle_iir is None:
+        raise ValueError('bilinear_iir realization requires shared.ctle_iir.')
+    if not np.isclose(shared.ctle_iir.Fs, link_cfg.Fs, rtol=0.0, atol=0.0):
+        raise ValueError('shared.ctle_iir sample rate must match LinkConfig.Fs.')
+    measured_freqs, measured_pre_ctle = _evaluate_pre_ctle_on_measured_grid(
+        H_21_measured_freqs,
+        H_21_measured_tf,
+        link_cfg,
+        ft_cfg,
+        kind=kind,
+        include_txffe=include_txffe,
+    )
+    discrete_kernel = _reference_fd_to_td_record(
+        measured_freqs,
+        measured_pre_ctle,
+        link_cfg,
+        out_of_measured=out_of_measured,
+    )
+    ctle_ir = shared.ctle_iir.filtered(discrete_kernel)
+    ctle_record = np.zeros(link_cfg.Nfft, dtype=float)
+    if len(ctle_ir) > link_cfg.Nfft:
+        raise COMLengthMismatchError(f'bilinear CTLE finite record exceeds LinkConfig.Nfft: len={len(ctle_ir)}, Nfft={link_cfg.Nfft}.')
+    ctle_record[:len(ctle_ir)] = ctle_ir * link_cfg.Fs
+    post_ctle = IEEECOMFilter._from_finite_record_ir(ctle_record, link_cfg)
+    return _apply_rectangular_unit_pulse(
+        post_ctle,
+        X,
+        link_cfg,
+        amplitude,
+        'finite_record_ir',
+    )
 
 def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:
     """
@@ -901,8 +906,24 @@ def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COM
     )
     H_pre = H_ffe.cascade_tf(shared.H_t).cascade_tf(H_21).cascade_tf(shared.H_r)
     H_all = H_pre.cascade_tf(shared.H_ctf)
-    pulse = _realize_ctle_pulse_for_path(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured)
-    return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21_measured_freqs=H_21_measured_freqs, H_21_measured_tf=H_21_measured_tf, H_21=H_21, H_all=H_all, X=X, pulse=pulse)
+    pulse = _realize_ctle_pulse(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured)
+    pulse_no_txffe = None
+    if kind == 'victim':
+        H_pre_no_txffe = shared.H_t.cascade_tf(H_21).cascade_tf(shared.H_r)
+        pulse_no_txffe = _realize_ctle_pulse(
+            shared,
+            H_pre_no_txffe,
+            H_21_measured_freqs,
+            H_21_measured_tf,
+            ft_cfg,
+            kind,
+            X,
+            amplitude,
+            link_cfg,
+            out_of_measured,
+            include_txffe=False,
+        )
+    return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21_measured_freqs=H_21_measured_freqs, H_21_measured_tf=H_21_measured_tf, H_21=H_21, H_all=H_all, X=X, pulse=pulse, pulse_no_txffe=pulse_no_txffe)
 
 def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     """
@@ -944,5 +965,5 @@ __all__ = [
     "COMBilinearCTLE", "IEEECOMFilter", "IEEECOMSparam",
     "_build_H_ctf", "_build_H_ffe", "_build_H_ffe_next", "_build_H_r", "_build_H_t",
     "_build_channel_under_test", "_build_path", "_build_paths", "_build_rxpkg",
-    "_build_shared_path", "_build_txpkg", "_prepare_ctle_pulse_realization", "_realize_ctle_pulse_for_path",
+    "_build_shared_path", "_build_txpkg", "_prepare_ctle_pulse_realization", "_realize_ctle_pulse",
 ]

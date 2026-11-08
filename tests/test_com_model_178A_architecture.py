@@ -94,13 +94,20 @@ def test_178a_migrated_leaf_field_contracts_match_the_previous_boundary() -> Non
         (COMChannelConfig, com_93A.COMChannelConfig),
         (COMPMFConfig, com_93A.COMPMFConfig),
         (COMPMFRuntimeConfig, com_93A.COMPMFRuntimeConfig),
-        (COMPath, com_93A.COMPath),
         (COMSearchCandidate, com_93A.COMSearchCandidate),
         (COMSearchConfig, com_93A.COMSearchConfig),
     ):
         assert [(item.name, item.default, item.default_factory) for item in fields(owned)] == [
             (item.name, item.default, item.default_factory) for item in fields(previous)
         ]
+
+    path_fields = fields(COMPath)
+    previous_path_fields = fields(com_93A.COMPath)
+    assert [item.name for item in path_fields[:-1]] == [
+        item.name for item in previous_path_fields
+    ]
+    assert path_fields[-1].name == "pulse_no_txffe"
+    assert path_fields[-1].default is None
 
     assert [item.name for item in fields(COMSharedPath)] == [
         *[item.name for item in fields(com_93A.COMSharedPath)],
