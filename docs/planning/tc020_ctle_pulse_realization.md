@@ -1,9 +1,14 @@
 # TC-020 — 178A CTLE pulse realization 具名分支
 
-狀態：**已核准、工作樹實作中；共用 CTLE 物件與 CTLE/unit-pulse 責任邊界已完成，raw impulse
-準備／截尾／tail policy 尚未納入核准範圍。** 問題分類為
+狀態：**TC-020R3 已於 2026-11-08 結案並同步至 `origin/main`。** 問題分類為
 `G-009 / design diff`。本項保留 Eq. 178A-14 的 continuous-frequency CTLE，
 另提供 COM MATLAB 4.17／SiCoPR 的 causal bilinear-IIR pulse realization。
+
+R3 取代下文 R2 的 ownership 描述：Stage 1 `_build_path()` 透過單一
+`_realize_ctle_pulse()` 執行 ALG-007，並同時建立 victim `pulse` 與
+`pulse_no_txffe`。Stage 3 不再重建 CTLE pulse，也不接收 ALG-006／ALG-007
+selector。下文保留 R2 歷史與公式證據；若責任邊界文字衝突，以本段及
+「TC-020R3 closure」為準。
 
 ## Goal:
 
@@ -25,10 +30,10 @@ continuous 方法錯誤，也不建立 boxcar／時間原點分支。
 | project→runtime adapter | `src/serdes_coding/io/com_excel_io_178A.py::_resolve_project_profile_178A()` | reference preset 將 `ctle_pulse_realization` 覆蓋為 `bilinear_iir`，並逐項輸出 raw/effective/profile provenance。模板不新增細節欄位。 |
 | protected runtime config | `src/serdes_coding/models/com_model_178A.py::COMConfig.policy` | 驗證 `continuous_tf/bilinear_iir` 具名欄位；直接 Python API 可獨立選擇。 |
 | 178A filter math | 同檔 `IEEECOMFilter` | 新增 178A bilinear section coefficient builder 與 causal IR filtering method。不得把方法放進 generic `LinkSegment`。 |
-| candidate status | 同檔 `COMBilinearCTLE`、178A `COMSharedPath.ctle_iir` | `COMBilinearCTLE` 直接保存兩段 `b/a` 係數與 `Fs`；每個 filter candidate 建立一次，由 victim/NEXT/FEXT/TX-noise 共用。不增加額外 status wrapper，也不在 root `COMStatus` 重複保存。 |
-| CTLE realization orchestration | 同檔新增 `_realize_ctle_response()`；修改 `_build_path()`／`_build_paths()` 直接傳具名方法 | helper 只把已建立的 pre-CTLE response 轉成 post-CTLE response；`continuous_tf` 使用 `H_ctf`，`bilinear_iir` 使用兩段 causal IIR。TX FFE、channel/package、`H_r` 與 unit pulse 均在此責任邊界之外。`H_all` 仍使用 continuous `H_ctf`。 |
+| candidate status | `COMBilinearCTLE`、178A `COMSharedPath`、`COMPath` | `COMBilinearCTLE` 保存兩段 `b/a` 與 `Fs`；shared state 驗證 method/IIR 一致性。Victim `COMPath` 保存 `pulse_no_txffe`，NEXT/FEXT 為 `None`。 |
+| CTLE realization orchestration | `path_stage.py::_realize_ctle_pulse()`、`_build_path()` | 單一 owner 依 shared method 完成 CTLE 與 unit pulse；`_build_path()` 對 victim 再以 `include_txffe=False` 建立 no-TX-FFE pulse。`H_all` 仍使用 continuous `H_ctf`。 |
 | common unit pulse | 同檔新增 `_apply_rectangular_unit_pulse()` | 對 post-CTLE response 套用同一個一 UI rectangular symbol pulse；frequency response 維持 frequency-domain cascade，causal-IIR response 維持 causal moving sum。domain 只保存數值表示法，不是另一個 project policy。 |
-| TX noise | 同檔 `_build_psd_tx_noise()` 及呼叫點 | 先建立不含 TX FFE 的 pre-CTLE response，再使用同一 CTLE realization 與 unit-pulse helpers，確保 signal、XT、jitter 與 `h_tn/S_tn` 採相同 CTLE 方法。 |
+| TX noise | `com_model_178A.py::_calculate_tx_noise_eq_ch()` | 只抽樣 Stage 1 的 `victim.pulse_no_txffe` 並回傳 variance；不得重建 response 或接收 ALG-006/007 selector。 |
 | tests | 新增 `tests/test_com_model_178A_ctle_pulse.py`；更新 policy boundary test | 驗證係數、穩定性、time filtering、adapter 展開、三種 path、TX noise、固定 candidate 與一般模式不變。 |
 | docs/status | `docs/models/178A/config_tree.md`、`stages/path_construction.md`、`stages/pre_dte.md`、`docs/planning/active_contracts.md`、`reference_alignment_contracts.md`、本檔 | 記錄 runtime method、`H_all`/`pulse` 語義、證據與結案狀態。 |
 
@@ -139,7 +144,32 @@ ratio `3.90894e-6`（limit `1e-6`）。因此這是受控 COM_DFE audit，不是
 pipeline 已端到端通過。證據在 `%TEMP%/serdes-tc020-dfe-20261013/` 與
 `%TEMP%/serdes-tc020-mmse-20261013/`。
 
+## TC-020R3 closure（2026-11-08）
+
+- `COMPath.pulse_no_txffe: LinkSegment | None` 是 Stage 1 output；victim 必須有值，
+  NEXT／FEXT 固定為 `None`。它與 `pulse` 使用同一 completed `H_21`、ALG-006、
+  ALG-007、`H_t`、`H_r`、CTLE、`A_v`、一 UI rectangular input pulse、時間原點與
+  causal/tail guard，唯一差異是是否串接 TX FFE。
+- `_realize_ctle_pulse()` 是每條 pulse 的唯一 ALG-007 execution owner；不再傳遞
+  `pulse_domain`，也移除 `_realize_ctle_response()` 與
+  `_realize_ctle_pulse_for_path()` 的平行責任。
+- `COMSharedPath` 驗證 method-specific state：`continuous_tf` 必須沒有
+  `ctle_iir`；`bilinear_iir` 必須保存 `ctle_iir`。
+- `_calculate_tx_noise_eq_ch()` 僅從 `victim.pulse_no_txffe.ir[pos::per_ui]`
+  抽樣並計算 TX-noise variance；Stage 3 不再讀 CTLE params、ALG-006 或 ALG-007。
+- `H_all`、CTLE 公式、bilinear coefficients、raw IFFT、`1e-3` 截尾、時間原點、
+  ALG-006 與所有下游公式均未改變。
+- Focused regression `38 passed`。SiCoPR production golden 通過：MSE
+  `0.0061912610245255335`、COM_DFE `1.5247607834259893 dB`、final COM
+  `2.895898684873246 dB`，DTE／eq-channel／noise digests 全部不變。
+- Full suite：`193 passed, 17 skipped, 11 failed`。失敗均為既存 stale
+  architecture/MLSD/post-FFE expectations、缺少 local-only reference workbook，
+  或 Windows sandbox temp/fingerprint 環境問題；依契約不在 R3 修正。
+- Implementation commit：`e676a45`（已推送）。
+
 ## Open questions:
+
+無。下一個 branch review 是 ALG-008。
 
 2026-10-13 核准 TC-020R2 後，`bilinear_iir` 已完成為單一具名方法：
 measured composite pre-CTLE TF → reference frequency grid → raw IFFT（不做

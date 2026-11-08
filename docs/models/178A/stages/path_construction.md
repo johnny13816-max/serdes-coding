@@ -89,7 +89,7 @@ COM                                            [Root: model]
         │   │   └── _build_rxpkg()             [L4: RX package composite]
         │   └── CTLE pulse realization          [L3: ALG-007 owner]
         │       ├── _prepare_ctle_pulse_realization() [L4: shared setup]
-        │       └── _realize_ctle_pulse_for_path()    [L4: per-path realization]
+        │       └── _realize_ctle_pulse()             [L4: sole pulse owner]
         └── _build_paths()                     [L2: path-specific construction]
             └── _build_path() × victim/NEXT/FEXT [structural path coordinator]
                 ├── TX package construction     [L3]
@@ -102,7 +102,8 @@ COM                                            [Root: model]
                 │                                      [L4: bilinear path/TX-noise record]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
-                ├── realize_ctle_pulse_for_path() [L4: delegated ALG-007]
+                ├── _realize_ctle_pulse() × pulse / victim pulse_no_txffe
+                │                                  [L4: ALG-007 execution]
                 └── COMPath()                  [L4: stage-output record]
 ```
 
@@ -111,17 +112,16 @@ COM                                            [Root: model]
 `_build_shared_path()` resolves `policy.ctle_pulse_realization` once and stores
 the resolved value plus method-specific shared state in `COMSharedPath`.
 `_build_path()` never receives or selects a realization method; it delegates
-per-path work to `_realize_ctle_pulse_for_path()`.
+each complete pulse to `_realize_ctle_pulse()`.
 
 The L3 `CTLE pulse realization` block owns one selector, shared realization
 state, and the CTLE realization contract. Its L4
 `_prepare_ctle_pulse_realization()` creates method-specific shared data once;
-its L4 `_realize_ctle_pulse_for_path()`
-accepts the path-specific `H_pre`／`S_all` context and returns the selected
-post-CTLE pulse. The lower-level `_realize_ctle_response()` remains the
-numerical primitive for the two realization formulae; it is not a configuration
-selection point. `H_all` remains the common continuous VTF for reporting and
-is outside ALG-007 ownership.
+its L4 `_realize_ctle_pulse()` accepts the path-specific pre-CTLE context and
+returns one complete pulse. It is the only function that executes the two
+realization formulae; no lower helper receives the ALG-007 selector or returns a
+domain-selection token. `H_all` remains the common continuous VTF for reporting
+and is outside ALG-007 ownership.
 
 ### ALG-007 interface contract
 
@@ -139,7 +139,7 @@ _prepare_ctle_pulse_realization(
 ) -> ctle_iir | None
     # caller stores method and result in COMSharedPath
 
-_realize_ctle_pulse_for_path(
+_realize_ctle_pulse(
     shared,
     H_pre,
     S_all,
@@ -150,16 +150,17 @@ _realize_ctle_pulse_for_path(
     amplitude,
     link_cfg,
     out_of_measured,  # resolved ALG-006 policy; not an ALG-007 selector
+    include_txffe=True,
 ) -> LinkSegment  # stored path pulse
 ```
 
 | Boundary | Inputs | Output / responsibility |
 |---|---|---|
 | L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; `bilinear_iir` creates the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
-| L4 `_realize_ctle_pulse_for_path()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X` | Owns any measured-grid pre-CTLE reconstruction required by the resolved CTLE method, forwards ALG-006 to the common resampling kernel, delegates the CTLE formula to `_realize_ctle_response()`, and applies the unit pulse. Returns the stored path pulse. |
+| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X`; whether TX FFE is included | Sole ALG-007 execution owner. It performs any required measured-grid reconstruction, CTLE formula and one-UI pulse application, then returns one stored full-rate pulse. |
 
 The call site must not pass an ALG-007 selector into
-`_realize_ctle_pulse_for_path()`; CTLE method selection is complete at prepare
+`_realize_ctle_pulse()`; CTLE method selection is complete in shared state
 time. It does pass the independent resolved ALG-006 policy so every
 measured-to-Nyquist consumer uses one transfer-extrapolation method. A new CTLE
 realization method therefore adds only its shared preparation and per-path
@@ -187,7 +188,7 @@ realization implementation under this L3 block.
 | Branch | L3 owner | L4 execution point | Excluded from branch definition |
 |---|---|---|---|
 | ALG-006 transfer extrapolation | transfer extrapolation | `LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate to `resample_tf(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data；`ctle_pulse_realization`, which selects the CTLE formula |
-| ALG-007 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus `_realize_ctle_pulse_for_path()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind and pulse amplitude |
+| ALG-007 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus sole execution owner `_realize_ctle_pulse()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind, pulse amplitude, and downstream phase sampling |
 
 ## Required input objects
 
@@ -219,7 +220,8 @@ COMSharedPath
 ├── S_rx
 ├── H_r
 ├── H_ctf
-└── ctle_iir: COMBilinearCTLE | None
+├── ctle_iir: COMBilinearCTLE | None
+└── ctle_pulse_realization
 ```
 
 Each `COMPath` adds path-specific data:
@@ -234,8 +236,14 @@ COMPath
 ├── H_21
 ├── H_all
 ├── X
-└── pulse
+├── pulse
+└── pulse_no_txffe: LinkSegment | None
 ```
+
+`pulse_no_txffe` 僅 victim 建立；NEXT／FEXT 固定為 `None`。Victim 的兩條
+pulse 共享 completed `H_21`、ALG-006/007、`H_t`、`H_r`、CTLE、`A_v`、
+一 UI rectangular input、時間原點與 guard，唯一 pipeline-input 差異是
+`pulse` 包含 TX FFE、`pulse_no_txffe` 不包含。
 
 The full types and lifecycle are defined in [Status tree](../status_tree.md). The stage replaces `status.paths` as one list; it does not merge individual paths into an existing list.
 
@@ -332,14 +340,16 @@ analysis-grid or finite-record pre-CTLE response + selected CTLE realization
           -> post-CTLE response
 post-CTLE response + common rectangular symbol pulse
           -> pulse
+victim H_t + H_21 + H_r + the same CTLE/unit pulse realization
+          -> pulse_no_txffe
 pre-CTLE response + continuous H_ctf
           -> H_all for VTF/reporting
 ```
 
 `ctle_pulse_realization` 控制完整的 pre-CTLE-to-pulse realization。
 TX FFE 在上游依 path kind 選定並完成串接，不屬於 CTLE 分支。
-`_realize_ctle_response()` 擁有 CTLE method selection；
-`_apply_rectangular_unit_pulse()` 擁有共同的一 UI symbol-pulse formation。
+`_realize_ctle_pulse()` 是 CTLE method selection 與完整 pulse formation 的
+唯一 execution owner；`_apply_rectangular_unit_pulse()` 只是無 policy 的數值 helper。
 `continuous_tf` 直接在 analysis grid 串接 continuous CTF 與 unit-pulse TF。
 `bilinear_iir` 則由 `_evaluate_pre_ctle_on_measured_grid()` 直接接收 ALG-001
 已完成的 scalar `H_21` 並建立 measured-domain composite TF，不再從 `S_all`
@@ -351,9 +361,9 @@ raw IFFT、時間原點與截尾仍是 ALG-007 該具名方法的固定定義，
 後者依前者的 frequency／finite-record 表示法保留原本的 convolution semantics，
 但不引入額外 project policy。
 
-`_build_path()` forwards the chosen policy and stores the completed measured
-transfer in `COMPath`. `_calculate_tx_noise_eq_ch()` forwards the same resolved
-policy for the victim TX-noise equivalent channel.
+`_build_path()` stores the completed measured transfer plus both victim pulses in
+`COMPath`. `_calculate_tx_noise_eq_ch()` only samples stored
+`victim.pulse_no_txffe`; it does not receive ALG-006/007 policy or rebuild CTLE.
 `SparamModel.completed_voltage_transfer_function()` owns missing-DC completion;
 `LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate numerical
 frequency extension to `resample_tf()`. `cosine_decay` retains the existing extrapolation; `zero_padding`
@@ -407,9 +417,9 @@ This stage does not downgrade errors to search rows. The search layer decides wh
 | Consumer | Data read |
 |---|---|
 | pre-DTE common impairment | victim path plus every aggressor `pulse.ir` |
-| per-phase pre-DTE impairment | victim `pulse`, `H_t`, `H_21`, `H_r`, and `H_ctf` through path proxies/fields |
+| per-phase pre-DTE impairment | victim `pulse.ir` and `pulse_no_txffe.ir`; Stage 3 does not rebuild either pulse |
 | post-FFE impairment | selected victim `pulse.ir` |
-| path reporting | stored `S_tx`, `S_ch`, `S_all`, completed measured `H_21`, analysis-grid `H_21`, `H_all`, `X`, `pulse`, and shared responses |
+| path reporting | stored `S_tx`, `S_ch`, `S_all`, completed measured `H_21`, analysis-grid `H_21`, `H_all`, `X`, `pulse`, optional `pulse_no_txffe`, and shared responses |
 | search | rebuilds this entire stage for each concrete filter candidate |
 
 Reporting reads stored `COMPath` objects. It must not recreate packages, filters, cascades, or pulses from config.

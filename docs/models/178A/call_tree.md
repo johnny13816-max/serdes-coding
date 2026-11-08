@@ -88,12 +88,11 @@ COM._run_once(run_cfg)
 │       ├── _build_shared_path(config, frequency grid)
 │       └── _build_paths(config, shared blocks, channels)
 │           └── _build_path(...) for victim, NEXT, and FEXT paths
-│               ├── continuous_tf: frequency-domain CTF + unit pulse
-│               └── bilinear_iir
-│                   ├── _evaluate_pre_ctle_on_measured_grid(...)
-│                   ├── _reference_fd_to_td_record(...)
-│                   ├── _realize_ctle_response(...)
-│                   └── _apply_rectangular_unit_pulse(...)
+│               ├── _realize_ctle_pulse(...) -> path.pulse
+│               │   ├── continuous_tf: frequency-domain CTF + unit pulse
+│               │   └── bilinear_iir: measured TF -> finite record -> IIR + unit pulse
+│               └── victim only: _realize_ctle_pulse(include_txffe=False)
+│                   └── path.pulse_no_txffe
 ├── Stage 2: calculate_pre_dte_imp_common(victim)
 │   ├── build receiver-noise PSD on the shared NUM-003 record
 │   └── return sigma_X + S_rn run-local cache
@@ -107,6 +106,7 @@ COM._run_once(run_cfg)
 │   ├── evaluate each requested phase
 │   │   └── calculate_pos_candidate(...)
 │   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
+│   │       │   └── sample victim.pulse_no_txffe -> h_tn
 │   │       └── Stage 4: calculate_MMSE_DTE(...)
 │   │           ├── COM_MMSE_DTE(...).run(...)
 │   │           └── build H_rxffe from selected w_lim representation

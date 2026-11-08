@@ -92,24 +92,31 @@ COMPath
 │   ├── S_rx
 │   ├── H_r
 │   ├── H_ctf
-│   └── ctle_iir: COMBilinearCTLE | None
+│   ├── ctle_iir: COMBilinearCTLE | None
+│   └── ctle_pulse_realization
 ├── S_tx
 ├── S_ch
 ├── S_all
 ├── H_21
 ├── H_all
 ├── X
-└── pulse
+├── pulse
+└── pulse_no_txffe: LinkSegment | None
 ```
 
 Every path points to the same `COMSharedPath` object. In `bilinear_iir` mode,
 `ctle_iir` directly owns both sections' `b/a` coefficients and `Fs`; the victim,
-NEXT, FEXT, and TX-noise flow reuse this one object for the candidate. In
+NEXT and FEXT reuse this one object for the candidate. In
 `continuous_tf` mode it is `None`. It is not duplicated on root `COMStatus`, and
 there is no separate pulse-realization status wrapper. TX package, measured
 channel, augmented S-parameter model, scalar responses, and pulse are
 path-specific. Reporting reads these objects directly and must not rebuild them
 from configuration.
+
+`pulse_no_txffe` 只在 victim path 有值；NEXT／FEXT 為 `None`。它是與
+`pulse` 同一 Stage 1 owner 建立的 full-rate response，兩者只差是否包含 TX FFE。
+Stage 3 從它抽樣 `h_tn`；`COMPreDTEEqChannelStatus.h_tn` 仍保存選定 phase 的
+sampled response，因此兩者位於不同 lifecycle/status branches，不重複責任。
 
 ## Run status
 

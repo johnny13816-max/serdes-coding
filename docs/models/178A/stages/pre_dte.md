@@ -70,7 +70,7 @@ COM                                                   [Root: model]
             ├── sampled equivalent-channel formation  [L3]
             │   └── SampledResponse.from_ir()         [L4]
             ├── transmitter-noise construction        [L3]
-            │   ├── _calculate_tx_noise_eq_ch()       [L4]
+            │   ├── _calculate_tx_noise_eq_ch()       [L4: sample stored pulse_no_txffe]
             │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
             ├── jitter-noise construction             [L3]
             │   ├── _calculate_tx_jitter_eq_ch()      [L4]
@@ -143,7 +143,7 @@ The `victim` argument is accepted by the current public method but is not read i
 
 | Input | Required data | Use |
 |---|---|---|
-| `victim` | `pulse.ir`, `H_t`, `H_21`, `H_r`, `H_ctf`, optional shared `ctle_iir` | victim samples, TX-noise path, and jitter response; TX noise reuses the candidate's selected CTLE pulse realization |
+| `victim` | `pulse.ir`, `pulse_no_txffe.ir` | victim samples, jitter response, and TX-noise sampling; all CTLE/ALG-006/ALG-007 work is already complete in Stage 1 |
 | `pos` | integer in `[0, per_ui)` | victim phase selection |
 | `common` | `sigma_X`, `S_rn`, `S_xn`, and their integrated values | reused phase-independent components |
 | `h_XTs_dsamp` | one-dimensional sampled response for each aggressor | selected candidate equivalent-channel status |
@@ -191,7 +191,7 @@ calculate_pre_dte_imp_at_pos(...)
 ├── resolve ADC-input PMF runtime config
 ├── sample victim pulse at pos -> h_dsamp
 ├── enforce positive dominant main cursor
-├── _calculate_tx_noise_eq_ch(...) -> full h_tn
+├── sample victim.pulse_no_txffe at pos -> h_tn
 ├── _build_eq_ch_imp_psd(h_tn, ...) -> S_tn
 ├── _calculate_tx_jitter_eq_ch(...) -> full h_J
 ├── _build_eq_ch_imp_psd(h_J, ...) -> S_jn

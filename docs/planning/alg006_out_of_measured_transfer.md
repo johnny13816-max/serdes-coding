@@ -21,7 +21,7 @@ input boundary；ALG-007 只選 CTLE realization，不擁有 out-of-measured 方
 COMConfig.policy.out_of_measured
 └─ _build_paths() / _build_path()                 forwarding only
    ├─ LinkSegment.from_tf() -> resample_tf()      H_21 / H_all consumer
-   └─ _realize_ctle_pulse_for_path()
+   └─ _realize_ctle_pulse()
       └─ _reference_fd_to_td_record()
          └─ resample_tf()                         bilinear path/TX-noise consumer
 ```

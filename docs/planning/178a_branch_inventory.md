@@ -35,12 +35,13 @@
 | TX 時間原點、sinc／boxcar unit-pulse 表示 | 已驗證為比較座標與等價表示；**不建立算法分支**。 |
 | MLSD reference realization | `COMPolicyConfig` 保留 `added_noise_pdf`、`sequence_termination`、`reported_der` 三個具名方法；`align_to_ref=True` 由 adapter 展開成 TC-023 reference 組合。Eq. 178A-49 sign 是直接修正，不是分支。 |
 
-## TC-020R2 完成狀態
+## TC-020R3 完成狀態
 
-[TC-020](tc020_ctle_pulse_realization.md) 已依 TC-020R2 完成上述兩個具名
+[TC-020](tc020_ctle_pulse_realization.md) 已依 TC-020R3 完成上述兩個具名
 runtime methods；Excel adapter 的 reference preset 分別選 `bilinear_iir`
 與 `finite_record_circshift`。`H_all` 仍保留 Eq. 178A-14 continuous VTF；model
-不讀取 `align_to_ref` boolean。
+不讀取 `align_to_ref` boolean。Stage 1 sole owner 同時產生 path `pulse` 與
+victim-only `pulse_no_txffe`；Stage 3 只抽樣後者，不再重跑 CTLE realization。
 
 ## 2026-10-12 已實作邊界
 
