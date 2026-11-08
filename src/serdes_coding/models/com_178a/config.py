@@ -1084,8 +1084,8 @@ class COMPolicyConfig(COMDataclassText):
 
     out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay"
     pre_dte_adc_clipping_convention: Literal[
-        "annex_d3", "matlab_4_17_reference_only"
-    ] = "annex_d3"
+        "full_jitter_half_tail", "rj_only_full_tail_reference"
+    ] = "full_jitter_half_tail"
     final_com_vqc_convention: Literal[
         "selected_phase_adc_input", "sicopr_final_reconstruction"
     ] = "selected_phase_adc_input"
@@ -1152,7 +1152,7 @@ class COMPolicyConfig(COMDataclassText):
     def __post_init__(self) -> None:
         allowed = {
             "out_of_measured": {"cosine_decay", "zero_padding"},
-            "pre_dte_adc_clipping_convention": {"annex_d3", "matlab_4_17_reference_only"},
+            "pre_dte_adc_clipping_convention": {"full_jitter_half_tail", "rj_only_full_tail_reference"},
             "final_com_vqc_convention": {
                 "selected_phase_adc_input", "sicopr_final_reconstruction"
             },

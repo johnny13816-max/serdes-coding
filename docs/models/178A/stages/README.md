@@ -48,7 +48,8 @@ and in the [branch registry](../branch_behavior_registry.md).
 
 NUM-003 (legacy B-005) closed on 2026-11-01 after implementation,
 documentation/workbook sync, unchanged SiCoPR golden COM values, branch
-isolation tests, and full non-GUI regression. ALG-008 and ALG-012 are pending
-D3p2 evidence. ALG-012's RG name and observability status are recorded without
+isolation tests, and full non-GUI regression. ALG-008 closed after D3.2 confirmed
+the project clipping convention and the sole Stage 3 owner. ALG-012 remains pending
+D3p2 review. ALG-012's RG name and observability status are recorded without
 changing its numerical flow; main-tap accumulation is a separate deferred
 issue, not an ALG-012 option.

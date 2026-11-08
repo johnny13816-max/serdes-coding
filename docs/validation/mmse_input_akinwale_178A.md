@@ -2,7 +2,7 @@
 
 ## 2026-10-11 TC-017：pre-DTE clipping 對照分支
 
-本節使用正式 `pre_dte_adc_clipping_convention=matlab_4_17_reference_only`，仍以同一 locked candidate、67 GHz 暫存 S-parameter measured boundary、已知時間原點對齊、`pmf_exact`、`dy=10 µV`、`keep_mass=1` 比較；**不代表原始 100 GHz case 的整體 COM 已對齊**。分支只改 pre-DTE clipping 的 random-jitter-only Gaussian sigma 與左尾 `P_qc`；`R_n` 的完整 jitter 項及 MMSE solver 不變。模板及舊 workbook 缺欄時仍用 `annex_d3`。
+本節使用正式 `pre_dte_adc_clipping_convention=rj_only_full_tail_reference`，仍以同一 locked candidate、67 GHz 暫存 S-parameter measured boundary、已知時間原點對齊、`pmf_exact`、`dy=10 µV`、`keep_mass=1` 比較；**不代表原始 100 GHz case 的整體 COM 已對齊**。分支只改 pre-DTE clipping 的 random-jitter-only Gaussian sigma 與左尾 `P_qc`；`R_n` 的完整 jitter 項及 MMSE solver 不變。模板及舊 workbook 缺欄時使用 `full_jitter_half_tail`。
 
 | 固定候選指標 | SiCoPR | 專案 Annex D3 分支 | 專案 MATLAB 4.17 對照分支 |
 | --- | ---: | ---: | ---: |

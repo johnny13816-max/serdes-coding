@@ -49,9 +49,11 @@ ALG-005 Channel renormalization 已於 2026-11-07 依 D3.2 證據退休為 fixed
 S4P behavior＋native S2P input dispatch，selector 已移除。審查順序繼續
 Stage 1。ALG-006 Out-of-measured transfer 已於 2026-11-07 關閉：保留
 `cosine_decay`／`zero_padding`，並讓 analysis-grid `H_21`、bilinear path pulse
-與 victim TX-noise finite record 使用同一 resolved policy。下一個待討論項目是
-ALG-007 CTLE pulse realization。
-ALG-008（legacy B-006）仍待 D3p2 evidence；93A、reporting、
+與 victim TX-noise finite record 使用同一 resolved policy。ALG-007 CTLE pulse
+realization 與 ALG-008 pre-DTE ADC clipping convention 均已完成。ALG-008 由
+`calculate_pre_dte_imp_at_pos()` 單一 owner 執行；D3.2 確認 full-jitter／`P_qc/2`
+project method，MATLAB 4.17 RJ-only／`P_qc` 保留為 reference-only 對照。
+下一個待討論項目是 ALG-009 ADC-input PMF method；93A、reporting、
 C2M migration 與 public release 維持暫停。
 
 ## 與其他狀態文件的分工

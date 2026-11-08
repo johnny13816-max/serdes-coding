@@ -43,7 +43,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `policy.rxffe_record_realization` | `linear_fixed_grid` | `finite_record_circshift` | 是；`custom` 亦可選 `linear_expanded_grid` |
 | `policy.eq_ch_imp_len` | `full` | `truncated` | 是；workbook 保留獨立控制 |
 | `policy.num_trunc_ui` | `None` | `4096` | 是；只在 `truncated` 時適用 |
-| `policy.pre_dte_adc_clipping_convention` | `annex_d3` | `matlab_4_17_reference_only` | 是 |
+| `policy.pre_dte_adc_clipping_convention` | `full_jitter_half_tail` | `rj_only_full_tail_reference` | 是 |
 | `policy.final_com_vqc_convention` | `selected_phase_adc_input` | `sicopr_final_reconstruction` | 是 |
 | `policy.pmf_projection_method` | `linear` | `nearest` | 是 |
 | `policy.pdf_to_pmf_method` | `bin_integral` | `pmf_sample` | 是 |
@@ -78,7 +78,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `ALG-007` | `algorithm_policy` | Stage 1 — path construction | B-003 | `policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | `_realize_ctle_pulse()` is the sole execution owner for path pulses and victim-only `pulse_no_txffe`; Stage 3 samples the stored no-TX-FFE pulse and does not receive this selector. TX FFE and continuous `H_all` ownership remain separate. |
 | `NUM-003` | `numerical_control` | Stage 2 — common impairment | B-005 | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`／`truncated` | Shared L3 used by Stages 2, 3, 5 and 7. Only the PSD/correlation record may change; full responses, phase selection and channel grids remain unchanged. |
 | `SRCH-001` | `search` | Stage 3 — phase scheduling | E-006 | `pos_sweep_method`, `pos_coarse_stride` | `each_phase`／`coarse_fine` | Selects evaluated phases; every visited candidate enters the same Stage 4 solver. |
-| `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `annex_d3`／`matlab_4_17_reference_only` | Changes clipping PMF/tail convention and therefore `V_qc → delta → S_qn`; other jitter PSD remains RJ+DDJ. Pending D3p2 evidence. |
+| `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `full_jitter_half_tail`／`rj_only_full_tail_reference` | `calculate_pre_dte_imp_at_pos()` is the sole execution owner. D3.2 confirms full jitter and the `P_qc/2` tail for the project method; the alternate retains the MATLAB 4.17 RJ-only, `P_qc` comparison. Direct effects stop at `V_qc → delta → S_qn → R_n`; selected phase/taps may indirectly change later COM, but this selector never controls the final ADC PMF. |
 | `ALG-009` | `algorithm_policy` | Stage 3 — per-phase ADC input | E-002 | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | Selects the approximate or complete PMF flow used to obtain ADC-input `V_qc`; reference profile selects exact. |
 | `NUM-004` | `numerical_control` | Stage 3 — ADC-input PMF grid | E-003 | `numerical_control.adc_input_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_adc_input_pmf_config()` owns the ADC-input grid function set used by pre-DTE and selected-phase ADC-input PMF. It must not control the final domain. |
 | `NUM-005` | `numerical_control` | Stage 6 — final PMF grid | B-013 | `numerical_control.final_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_final_com_pmf_config()` owns the final DFE/MLSD grid function set. It shares the control shape with NUM-004 but not its RG group or impact boundary. |

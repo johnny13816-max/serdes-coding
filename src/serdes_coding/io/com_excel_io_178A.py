@@ -210,7 +210,7 @@ def _resolve_project_profile_178A(
     general_methods = COMPolicyConfig(
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
         pre_dte_adc_clipping_convention=str(
-            fixed.get("pre_dte_adc_clipping_convention", "annex_d3")
+            fixed.get("pre_dte_adc_clipping_convention", "full_jitter_half_tail")
         ).strip(),
         final_com_vqc_convention=str(
             fixed.get("final_com_vqc_convention", "selected_phase_adc_input")
@@ -306,7 +306,7 @@ def _resolve_project_profile_178A(
 
     methods = COMPolicyConfig(
         out_of_measured="zero_padding",
-        pre_dte_adc_clipping_convention="matlab_4_17_reference_only",
+        pre_dte_adc_clipping_convention="rj_only_full_tail_reference",
         final_com_vqc_convention="sicopr_final_reconstruction",
         ctle_pulse_realization="bilinear_iir",
         rxffe_record_realization="finite_record_circshift",

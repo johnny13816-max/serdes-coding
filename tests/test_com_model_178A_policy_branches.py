@@ -230,8 +230,8 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
 def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     reference_cfg, pmf_method
 ):
-    assert reference_cfg.policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
-    annex_cfg = _with_methods(reference_cfg, pre_dte_adc_clipping_convention="annex_d3")
+    assert reference_cfg.policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
+    project_cfg = _with_methods(reference_cfg, pre_dte_adc_clipping_convention="full_jitter_half_tail")
     paths = COM(reference_cfg).build_all_paths()
     victim, xtalks = paths[0], paths[1:]
     model = COM(reference_cfg)
@@ -248,24 +248,24 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     reference_eq, reference = model.calculate_pre_dte_imp_at_pos(
         victim, 23, common, h_xt_dsamp, run_cfg
     )
-    annex_eq, annex = COM(annex_cfg).calculate_pre_dte_imp_at_pos(
+    project_eq, project = COM(project_cfg).calculate_pre_dte_imp_at_pos(
         victim, 23, common, h_xt_dsamp, run_cfg
     )
 
     ref_psd = reference.pre_dte.psd
-    annex_psd = annex.pre_dte.psd
-    assert reference.pre_dte.adc_input.clipping_convention == "matlab_4_17_reference_only"
-    assert annex.pre_dte.adc_input.clipping_convention == "annex_d3"
-    assert reference.pre_dte.adc_input.V_qc < annex.pre_dte.adc_input.V_qc
+    project_psd = project.pre_dte.psd
+    assert reference.pre_dte.adc_input.clipping_convention == "rj_only_full_tail_reference"
+    assert project.pre_dte.adc_input.clipping_convention == "full_jitter_half_tail"
+    assert reference.pre_dte.adc_input.V_qc < project.pre_dte.adc_input.V_qc
     if pmf_method == "pmf_exact":
         assert reference.pre_dte.adc_input.p_n is reference.pre_dte.adc_input.p_ga
-        assert annex.pre_dte.adc_input.p_n is annex.pre_dte.adc_input.p_ga
-    np.testing.assert_array_equal(reference_eq.h_dsamp.ir, annex_eq.h_dsamp.ir)
+        assert project.pre_dte.adc_input.p_n is project.pre_dte.adc_input.p_ga
+    np.testing.assert_array_equal(reference_eq.h_dsamp.ir, project_eq.h_dsamp.ir)
     for name in ("S_rn", "S_xn", "S_tn", "S_jn"):
-        np.testing.assert_array_equal(getattr(ref_psd, name).psd, getattr(annex_psd, name).psd)
+        np.testing.assert_array_equal(getattr(ref_psd, name).psd, getattr(project_psd, name).psd)
     np.testing.assert_allclose(
-        ref_psd.S_total.psd - annex_psd.S_total.psd,
-        ref_psd.S_qn.psd - annex_psd.S_qn.psd,
+        ref_psd.S_total.psd - project_psd.S_total.psd,
+        ref_psd.S_qn.psd - project_psd.S_qn.psd,
         rtol=0,
         atol=1e-25,
     )
@@ -298,7 +298,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     fixed = book["fixed_config"]
     raw_values = {
         "out_of_measured": "cosine_decay",
-        "pre_dte_adc_clipping_convention": "annex_d3",
+        "pre_dte_adc_clipping_convention": "full_jitter_half_tail",
         "final_com_vqc_convention": "selected_phase_adc_input",
     }
     for row in fixed.iter_rows(min_row=4):
@@ -325,7 +325,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert aligned.channel.missing_dc_policy == "mag_phase_trend_to_dc"
     assert policy.out_of_measured == "zero_padding"
     assert not hasattr(policy, "channel_renormalization_order")
-    assert policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only"
+    assert policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
     assert policy.final_com_vqc_convention == "sicopr_final_reconstruction"
     assert policy.ctle_pulse_realization == "bilinear_iir"
     assert policy.rxffe_record_realization == "finite_record_circshift"

@@ -2278,7 +2278,7 @@ class COM:
         # covariance. Only the ADC clipping input changes in the reference
         # comparison branch.
         S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
-        if self.cfg.policy.pre_dte_adc_clipping_convention == "matlab_4_17_reference_only":
+        if self.cfg.policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference":
             S_jn_clip = self._build_eq_ch_imp_psd(
                 h_J,
                 sigma_X**2 * imp_cfg.sigma_RJ**2,

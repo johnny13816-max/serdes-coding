@@ -157,7 +157,7 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
 | `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
-| `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `annex_d3` |
+| `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `full_jitter_half_tail` |
 | `final_com_vqc_convention` | `COMConfig.policy` | `selected_phase_adc_input` |
 | `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
 | `rxffe_record_realization` | `COMConfig.policy`（workbook `fixed_config` 可明示；profile 可覆蓋） | `linear_fixed_grid` |
@@ -238,14 +238,14 @@ differential S2P 才直接 renormalize 至 `2R_0`。這是 D3.2 固定流程與 
 format contract，不是 selectable policy，也不改變 93A。
 
 `pre_dte_adc_clipping_convention` 只控制 MMSE 前 ADC clipping 的
-Gaussian noise sigma 與 CDF 左尾門檻。`annex_d3` 是所持 D3.0 Annex
-的預設：clipping Gaussian 含完整 jitter，左尾 `P_qc/2`。
-`matlab_4_17_reference_only` 供 SiCoPR／COM MATLAB 4.17 對照：clipping
+Gaussian noise sigma 與 CDF 左尾門檻。`full_jitter_half_tail` 是 D3.2
+確認的專案預設：clipping Gaussian 含完整 jitter，左尾 `P_qc/2`。
+`rj_only_full_tail_reference` 供 SiCoPR／COM MATLAB 4.17 對照：clipping
 Gaussian 僅含 random jitter，左尾 `P_qc`。兩者送入 MMSE 的 jitter
 PSD 仍含 random jitter 與 DDJ；切換只經 `V_qc → S_qn` 改變 `R_n`。
 後續 selected-phase final COM 會另外建立 ADC-input PMF，此欄位不
-控制該階段。reference-only 分支不是 general method；新版規範釐清後
-再決定是否合併。詳見 [TC-017](../../planning/tc017_pre_dte_adc_clipping_reference.md)。
+控制該階段。它仍可能透過 selected phase／DTE taps 間接影響後續 COM；
+reference-only 分支不是 general method。詳見 [TC-017](../../planning/tc017_pre_dte_adc_clipping_reference.md)。
 
 `final_com_vqc_convention` 獨立選擇 final DFE COM 的 clipping-voltage
 來源，不改 pre-DTE `S_qn`、MMSE 或 post-FFE reporting PSD。

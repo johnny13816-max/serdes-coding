@@ -96,7 +96,7 @@ cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 
 | Candidate | L3 owner | L4 decision point | Status for this stage |
 |---|---|---|---|
-| ALG-008 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **Pending for specification evidence.** 疑似源於 D3p2 差異；在取得可核對文件前保留現況且不修改。它不改變 full-jitter MMSE covariance。 |
+| ALG-008 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **D3.2 evidence confirmed.** `full_jitter_half_tail` is the project method; `rj_only_full_tail_reference` remains a MATLAB 4.17 comparison. It does not remove full jitter from MMSE covariance. |
 | ALG-002 discrete-PMF projection | ADC-input / quantization | `_build_pmf_interference_178A()` → `Pmf1D._project_to_grid()` | **Closed 2026-11-03.** PAM source 固定保存在 exact natural grid；`linear`／`nearest`只在 tap scaling 後的 target-grid projection 生效。Selector 由 project policy 明示傳入每個 projection operation，不保存於 PMF object；stage 不得自行重新選擇。ALG-004 ordinate interpolation 不受此分支影響。SiCoPR DFE/final COM golden 不變。 |
 | ALG-003 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule；也涵蓋 `gaussian_approx` 建立的觀察用 PMF。Gaussian support 固定 8σ；ALG-002 projection、ALG-004 scaling、ALG-009 path selection 仍獨立。 |
 | ALG-009 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Pending review.** Chooses `gaussian_approx` or `pmf_exact`; it is classified by its algorithm-path effect, independent of runtime storage. |
@@ -257,7 +257,7 @@ PMF、`keep_mass=1` 與 ADC-input explicit `dy=10 µV`；同時把
 pre-DTE clipping、離散訊號最近落格及 Gaussian reference sampling 寫入
 具名 runtime methods。此 stage 與 `Pmf1D` 都不讀取 profile selector。
 
-For `annex_d3`, clipping uses the full-jitter `S_ga=S_rn+S_xn+S_tn+S_jn` and left-tail `P_qc/2`. `matlab_4_17_reference_only` uses random-jitter-only `S_jn_RJ` **only for the clipping Gaussian sigma** and left-tail `P_qc`. Both modes keep the full `S_jn` in `S_total=S_ga+S_qn` and therefore in MMSE `R_n`. `COMAdcInputPMF.clipping_convention` records the selected mode separately from `method` (`pmf_exact` or `gaussian_approx`). The latter mode is a reference comparison branch, not a general 178A claim. The later final-COM ADC PMF calculation does not use this pre-DTE selector.
+For `full_jitter_half_tail`, clipping uses the full-jitter `S_ga=S_rn+S_xn+S_tn+S_jn` and left-tail `P_qc/2`, matching D3.2 Eq. (178A-29) through Eq. (178A-31). `rj_only_full_tail_reference` uses random-jitter-only `S_jn_RJ` **only for the clipping Gaussian sigma** and left-tail `P_qc`. Both modes keep the full `S_jn` in `S_total=S_ga+S_qn` and therefore in MMSE `R_n`. `COMAdcInputPMF.clipping_convention` records the selected mode separately from `method` (`pmf_exact` or `gaussian_approx`). The latter mode is a reference comparison branch, not a general 178A claim. The later final-COM ADC PMF calculation does not use this pre-DTE selector, although changed phase or DTE taps can indirectly change later COM.
 
 This pre-DTE policy does not control the accuracy-required final COM PMF configuration; final COM resolves its own PMF settings in the later COM DFE stage.
 
