@@ -6,31 +6,31 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-07 Asia/Taipei
+Generated at: 2026-11-09 Asia/Taipei
 Source branch: main
-Source revision: ALG-006 implementation db0e836 on origin/main; closure status follows in latest Git commit
-Active task: CP-BR; Stage 1 next review is ALG-007
-Current phase: ALG-006 closed; ready to introduce ALG-007 CTLE pulse realization
+Source revision: ALG-009 retirement 5dd16f8 on origin/main
+Active task: CP-BR; Stage 3 next review is NUM-006
+Current phase: ALG-009 retired; ready to introduce NUM-006 PMF retained-mass control
 Collaboration mode: Co-Build branch review
-Approved boundary: none for ALG-007; review introduction and evidence-boundary definition only.
-Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-006, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001, NUM-002 and ALG-005 retired as non-branch behaviors.
-In progress: none; ALG-007 review has not started.
+Approved boundary: none for NUM-006; review introduction and evidence-boundary definition only.
+Completed: ALG-001, ALG-002, ALG-003, ALG-004, ALG-006, ALG-007, ALG-008, EXE-001, ALG-011, NUM-003, NUM-004 and NUM-005. Former NUM-001, NUM-002, ALG-005 and ALG-009 retired as non-branch behaviors.
+In progress: none; NUM-006 review has not started.
 Blocked: none.
-Next recommended action: introduce ALG-007 CTLE pulse realization in plain language, then restate continuous_tf／bilinear_iir semantics, owner, reference evidence and impact boundary.
-Next action owner: Codex presents the ALG-007 review introduction; user confirms the review boundary.
-Stop point: do not modify ALG-007 or another pending control before its review contract is approved.
+Next recommended action: introduce NUM-006 `pmf_keep_mass` in plain language, then confirm cost/accuracy semantics, owner, affected PMF convolutions and reference setting.
+Next action owner: Codex presents the NUM-006 review introduction; user confirms the review boundary.
+Stop point: do not modify NUM-006 or another pending control before its review contract is approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md; docs/models/178A/call_tree.md;
-                docs/planning/178A_algorithm_branch_matrix.xlsx; tests/test_com_model_178A_golden.py
-Dirty-state summary: expected clean after ALG-006 implementation and closure-document commits.
+                docs/models/178A/stages/pre_dte.md; tests/test_com_model_178A_golden.py
+Dirty-state summary: expected clean after ALG-009 closure snapshot commit.
 ```
 
-ALG-006 closure evidence: `resample_tf()` 是共同數值 owner；analysis-grid
-`H_21`、bilinear path pulse 與 victim TX-noise finite record 使用同一 resolved
-`out_of_measured` policy。Focused tests `41 passed`；fixed SiCoPR 67 GHz＋
-zero-padding golden `1 passed`，MSE `0.0061912610245255335`、
-`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 stage
-digests 不變。Implementation `db0e836` 已推送至 `origin/main`；full-suite deviation
-見 `alg006_out_of_measured_transfer.md`。
+ALG-009 closure evidence: `_build_psd_adc_qn()` 固定直接執行 exact PMF；
+`pre_dte_pmf_method` 已從 runtime config 與 tracked workbook 移除。Legacy
+`pmf_exact` row 可讀，`gaussian_approx` 明確拒絕。Focused tests `45 passed`；
+fixed SiCoPR golden `1 passed`，pre-DTE `V_qc=0.04162 V`、
+`delta=0.0013212698412698415 V`、MSE `0.0061912610245255335`、
+`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。
+Implementation `5dd16f8` 已推送至 `origin/main`。
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。
