@@ -185,7 +185,6 @@ def test_json_snapshot_contract_remains_available() -> None:
     cfg = model.COMRunConfig(target="mse", pmf_dy_override=2.5e-6)
     assert cfg._json_value(cfg) == {
         "target": "mse",
-        "pre_dte_pmf_method": "gaussian_approx",
         "pmf_grid_quality": "fine",
         "pmf_keep_mass": 0.99999,
         "pmf_dy_override": 2.5e-6,

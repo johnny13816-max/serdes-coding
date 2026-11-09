@@ -54,7 +54,6 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `policy.mlsd_quantization_psd` | `pre_dte_filtered` | `main_tap_white` | 是 |
 | `policy.sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` | 是 |
 | `policy.reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` | 是 |
-| `execution.*.pre_dte_pmf_method` | profile 值 | `pmf_exact` | 是 |
 | `execution.*.pmf_keep_mass` | profile 值 | `1.0` | 是 |
 | `numerical_control.adc_input_pmf_grid.dy_override` | workbook 值 | `10e-6 V` | 是 |
 | `numerical_control.final_pmf_grid.dy_override` | workbook 值 | `None` | 是 |
@@ -79,7 +78,7 @@ RG fields 共同完整定義；RG 數量本身不是分支數量。即使兩組 
 | `NUM-003` | `numerical_control` | Stage 2 — common impairment | B-005 | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | `full`／`truncated` | Shared L3 used by Stages 2, 3, 5 and 7. Only the PSD/correlation record may change; full responses, phase selection and channel grids remain unchanged. |
 | `SRCH-001` | `search` | Stage 3 — phase scheduling | E-006 | `pos_sweep_method`, `pos_coarse_stride` | `each_phase`／`coarse_fine` | Selects evaluated phases; every visited candidate enters the same Stage 4 solver. |
 | `ALG-008` | `algorithm_policy` | Stage 3 — per-phase ADC input | B-006 | `policy.pre_dte_adc_clipping_convention` | `full_jitter_half_tail`／`rj_only_full_tail_reference` | `calculate_pre_dte_imp_at_pos()` is the sole execution owner. D3.2 confirms full jitter and the `P_qc/2` tail for the project method; the alternate retains the MATLAB 4.17 RJ-only, `P_qc` comparison. Direct effects stop at `V_qc → delta → S_qn → R_n`; selected phase/taps may indirectly change later COM, but this selector never controls the final ADC PMF. |
-| `ALG-009` | `algorithm_policy` | Stage 3 — per-phase ADC input | E-002 | `pre_dte_pmf_method` | `gaussian_approx`／`pmf_exact` | Selects the approximate or complete PMF flow used to obtain ADC-input `V_qc`; reference profile selects exact. |
+| `ALG-009` | `retired_nonbranch` | Stage 3 — per-phase ADC input | E-002 | none；legacy workbook `pmf_exact` row is read-compatible | fixed `pmf_exact` | Retired after measured review: Gaussian approximation saved about 1.5–2% per phase-candidate evaluation but changed `V_qc` by 75.9–85.8%, MSE by about 30%, and the selected phase in the fixed SiCoPR case. `_build_psd_adc_qn()` now directly owns the exact PMF flow. |
 | `NUM-004` | `numerical_control` | Stage 3 — ADC-input PMF grid | E-003 | `numerical_control.adc_input_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_adc_input_pmf_config()` owns the ADC-input grid function set used by pre-DTE and selected-phase ADC-input PMF. It must not control the final domain. |
 | `NUM-005` | `numerical_control` | Stage 6 — final PMF grid | B-013 | `numerical_control.final_pmf_grid.*` | `relative_As`／`relative_As_with_cap` plus override | `_resolve_final_com_pmf_config()` owns the final DFE/MLSD grid function set. It shares the control shape with NUM-004 but not its RG group or impact boundary. |
 | `NUM-006` | `numerical_control` | Stage 3 — ADC-input PMF convergence | E-004 | `pmf_keep_mass` | `1-1e-5`／reference `1.0` | Controls ADC-input convolution retained mass only; it does not own grid spacing. |
@@ -114,7 +113,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / — / `ALG-013` | B-014 retired：178A Gaussian support 固定 8σ，不再是 Project Config；B-013 remains the independent Stage 6 final-grid function set |
 | B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
 | B-019 / B-020 / B-021 | `ALG-001` / — / `ALG-015` | B-020 retired as a selectable control：`force_grid=False` is diagnostic utility behavior, not Project Config；B-021 remains Stage 7 PSD |
-| E-001 / E-002 / E-003 / E-004 | `EXE-001` / `ALG-009` / `NUM-004` / `NUM-006` | Reclassified by actual function-set effect |
+| E-001 / E-002 / E-003 / E-004 | `EXE-001` / — / `NUM-004` / `NUM-006` | E-002 retired with ALG-009 after exact PMF became fixed behavior；others reclassified by actual function-set effect |
 | E-005 / E-006 / E-007 | `ALG-010` / `SRCH-001` / — | E-007 is a deferred non-selectable issue |
 
 ## 不是分支的項目

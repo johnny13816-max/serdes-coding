@@ -363,7 +363,6 @@ def _resolve_project_profile_178A(
     def aligned_run(name: str, run_cfg: COMRunConfig) -> COMRunConfig:
         effective = replace(
             run_cfg,
-            pre_dte_pmf_method="pmf_exact",
             pmf_grid_quality="fine",
             pmf_keep_mass=1.0,
             pmf_dy_override=None,
@@ -371,7 +370,7 @@ def _resolve_project_profile_178A(
             final_pmf_grid=reference_final_grid,
         )
         for field_name in (
-            "pre_dte_pmf_method", "pmf_grid_quality", "pmf_keep_mass", "pmf_dy_override"
+            "pmf_grid_quality", "pmf_keep_mass", "pmf_dy_override"
         ):
             raw = getattr(run_cfg, field_name)
             value = getattr(effective, field_name)
@@ -530,6 +529,15 @@ def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
 
     def run_profile(name: str) -> COMRunConfig:
         values = profiles.get(name, {})
+        legacy_pmf_method = values.get("pre_dte_pmf_method")
+        if not _is_blank(legacy_pmf_method):
+            legacy_pmf_method = str(legacy_pmf_method).strip()
+            if legacy_pmf_method != "pmf_exact":
+                raise ValueError(
+                    f"run_config.{name}.pre_dte_pmf_method={legacy_pmf_method!r} "
+                    "is retired; 178A pre-DTE ADC-input clipping now always uses "
+                    "the exact PMF flow."
+                )
         dy_override = values.get("pmf_dy_override")
         legacy_grid_quality = values.get(
             "pmf_grid_quality",
@@ -537,7 +545,6 @@ def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
         )
         return COMRunConfig(
             target=_run_str(values, name, "target"),
-            pre_dte_pmf_method=_run_str(values, name, "pre_dte_pmf_method"),
             pmf_grid_quality=str(legacy_grid_quality).strip(),
             pmf_keep_mass=float(values.get("pmf_keep_mass", 1 - 1e-5)),
             pmf_dy_override=None if _is_blank(dy_override) else float(dy_override),

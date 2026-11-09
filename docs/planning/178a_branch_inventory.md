@@ -18,7 +18,7 @@
 | 離散 tap PMF projection | 線性質量分配 | 最近格點 | **ALG-002 algorithm policy**；`policy.pmf_projection_method` 由 caller 明示傳入會重新投影 grid 的 operation，`Pmf1D` 不保存 policy。PAM source atoms 在自然 grid 精確保存，tap scaling 後才套用 projection。 |
 | PDF→PMF discretization（ALG-003） | `bin_integral`：Gaussian bin integral、uniform bin overlap | `pmf_sample`：Gaussian grid-center sample、uniform nearest-center inclusive sample | **shared L3 policy** `policy.pdf_to_pmf_method`；各 distribution 保留自己的 rule。178A Gaussian support 固定 internal 8σ；PMF scaling 仍由 ALG-004 擁有。 |
 | ADC-input／final PMF grid | NUM-004 `adc_input_pmf_grid.*`／NUM-005 `final_pmf_grid.*` | ADC-input `10 µV` override；final `relative_As` 且無 override | **兩個獨立 function-set branches**。兩者共用 field shape，但 RG group、owner、stage 與 reference preset 不互相洩漏。 |
-| `COMRunConfig` PMF 執行設定 | 保留 ALG-009 `pre_dte_pmf_method`、NUM-006 `pmf_keep_mass` 等 runtime-effective controls | reference preset 展開對齊行為 | `pmf_grid_quality`／`pmf_dy_override` 已降為 legacy compatibility；canonical grid controls 由 NUM-004／NUM-005 分別展開至 runtime。 |
+| `COMRunConfig` PMF 執行設定 | ALG-009 已退休，pre-DTE 固定 exact PMF；保留 NUM-006 `pmf_keep_mass` 等 runtime-effective controls | reference preset 只展開仍有效的對齊行為 | legacy workbook 的 `pre_dte_pmf_method=pmf_exact` 可讀但不保存；`gaussian_approx` 明確拒絕。`pmf_grid_quality`／`pmf_dy_override` 仍為 legacy compatibility。 |
 
 `align_to_ref=False` **不是單一「spec 模式」**：它仍允許舊 workbook 個別 `out_of_measured`、renormalization 和 ADC convention 欄位，且 run policy 各自獨立。`True` 由 adapter 覆蓋成 reference 具名值；`COMConfig.to_export_dict()` 匯出 effective policy／execution、profile 名稱及 raw/effective override。
 
@@ -28,7 +28,7 @@
 | --- | --- |
 | S4P 檔案、port order、reference impedance、`sparam_frequency_limit_GHz` | **case 輸入與 provenance**。TC-021 已將 SiCoPR `flim` 建模為獨立輸入；Akinwale 原檔 100 GHz、case limit 67 GHz。`zero_padding` 從有效 67 GHz 邊界後生效。 |
 | `missing_dc_policy` | channel/utility 的量測缺口 policy。 |
-| `pmf_keep_mass`、`pre_dte_pmf_method` | 前者是 NUM-006 numerical control，後者是 ALG-009 algorithm policy；不同 single/search profile 可展開不同有效值並應記錄。PMF grid spacing 由 NUM-004／NUM-005 各自的 function set 擁有。 |
+| `pmf_keep_mass` | NUM-006 numerical control；不同 single/search profile 可展開不同有效值並應記錄。Former ALG-009 已收斂成 fixed exact-PMF behavior；PMF grid spacing 仍由 NUM-004／NUM-005 各自的 function set 擁有。 |
 | `floating_mode`、`pos_sweep_method`／stride | MMSE／sampling-phase 搜尋演算法或加速 policy；不是 reference 物理公式。 |
 | `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；`force_grid=False` 是 diagnostic/caller-owned complete-record behavior，不另立 selectable branch。ALG-011 由 Stage 5 owner 明示使用。 |
 | `SampledPSD.filtered_by()` 的 grid 檢查 | utility 一致性契約，無隱藏 regrid 分支。 |

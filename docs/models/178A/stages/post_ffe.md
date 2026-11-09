@@ -201,8 +201,8 @@ The automated test explicitly checks that replacing every fixed-grid display PSD
 The stage uses the supplied run's effective `adc_input_pmf_grid` and
 `pmf_keep_mass` while resolving selected-phase ADC-input PMF material. Its
 `dy_override` bypasses that family's relative/absolute rule and cannot affect
-the final-PMF family. `pre_dte_pmf_method` does not choose the post-FFE method:
-enabled post-FFE ADC-input material is always built through the exact path.
+the final-PMF family. Enabled pre-DTE and post-FFE ADC-input material are both
+built through their fixed exact paths; neither stage exposes a PMF-method selector.
 
 The stage does not read `cfg.execution.single_run` implicitly; the caller passes the active single-run, search-sweep, or search-final profile.
 

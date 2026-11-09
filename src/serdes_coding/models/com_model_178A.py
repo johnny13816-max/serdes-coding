@@ -344,50 +344,6 @@ def _calculate_V_qc(
         method="pmf_exact",
     )
 
-def _calculate_V_qc_gaussian_approx(
-    p_sig: Pmf1D,
-    h_dsamp: np.ndarray,
-    sigma_ga: float,
-    P_qc: float,
-    pmf_cfg: COMPMFRuntimeConfig,
-    *,
-    cdf_tail: Optional[float] = None,
-    pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
-) -> COMAdcInputPMF:
-    """
-    Fast approximation for 178A pre-DTE quantization clipping amplitude.
-
-    The exact 178A.1.7.6 path builds ``p_sn = conv[p_s, p_ga]`` and finds the
-    clipping point from its CDF. This approximation keeps the same target tail
-    probability but approximates the noisy signal amplitude as Gaussian with
-    variance equal to signal variance plus Gaussian-noise variance.
-    """
-    from statistics import NormalDist
-
-    x = p_sig.x
-    probs = p_sig.pmf
-    mu_x = float(np.sum(x * probs))
-    var_x = float(np.sum((x - mu_x)**2 * probs))
-    var_signal = var_x * float(np.sum(np.asarray(h_dsamp, dtype=float)**2))
-    sigma_sn = float(np.sqrt(max(0.0, var_signal + float(sigma_ga)**2)))
-    tail = float(P_qc) / 2.0 if cdf_tail is None else float(cdf_tail)
-    V_qc = float(NormalDist().inv_cdf(1.0 - tail) * sigma_sn)
-    p_sn = Pmf1D.gaussian(
-        mu=0.0,
-        sigma=sigma_sn,
-        dx=pmf_cfg.dy,
-        n_sigma=pmf_cfg.gaussian_n_sigma,
-        unit="volt",
-        name="ADC-input Gaussian approximation",
-        pdf_to_pmf_method=pdf_to_pmf_method,
-    )
-    return COMAdcInputPMF(
-        p_sig=p_sig,
-        p_sn=p_sn,
-        V_qc=V_qc,
-        method="gaussian_approx",
-    )
-
 def _build_psd_adc_qn(
     p_sig: Pmf1D, 
     h_dsamp: np.ndarray, 
@@ -396,38 +352,20 @@ def _build_psd_adc_qn(
     N_qb: int,
     pmf_cfg: COMPMFRuntimeConfig, 
     link_cfg: LinkConfig,
-    vqc_method: str = "gaussian_approx",
     *,
     cdf_tail: Optional[float] = None,
-    L: Optional[int] = None,
     pmf_methods: COMPolicyConfig = COMPolicyConfig(),
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[SampledPSD, COMAdcInputPMF]:
 
-    if vqc_method == "gaussian_approx":
-        adc_input_pmf = _calculate_V_qc_gaussian_approx(
-            p_sig,
-            h_dsamp,
-            sigma_ga,
-            P_qc,
-            pmf_cfg,
-            cdf_tail=cdf_tail,
-            pdf_to_pmf_method=pdf_to_pmf_method,
-        )
-        V_qc = adc_input_pmf.V_qc
-        if V_qc is None:
-            raise RuntimeError("Gaussian-approximate ADC input did not resolve V_qc.")
-    elif vqc_method == "pmf_exact":
-        adc_input_pmf = _calculate_V_qc(
-            p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg, cdf_tail=cdf_tail,
-            pmf_methods=pmf_methods,
-            pdf_to_pmf_method=pdf_to_pmf_method,
-        )
-        V_qc = adc_input_pmf.V_qc
-        if V_qc is None:
-            raise RuntimeError("Exact ADC-input PMF did not resolve V_qc.")
-    else:
-        raise ValueError("vqc_method must be 'gaussian_approx' or 'pmf_exact'.")
+    adc_input_pmf = _calculate_V_qc(
+        p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg, cdf_tail=cdf_tail,
+        pmf_methods=pmf_methods,
+        pdf_to_pmf_method=pdf_to_pmf_method,
+    )
+    V_qc = adc_input_pmf.V_qc
+    if V_qc is None:
+        raise RuntimeError("Exact ADC-input PMF did not resolve V_qc.")
 
     # 178A-27
     delta = 2 * V_qc / (2**N_qb - 1)
@@ -2303,9 +2241,7 @@ class COM:
                 N_qb = imp_cfg.N_qb,
                 pmf_cfg = pmf_cfg, 
                 link_cfg = eq_ch_imp_record_cfg,
-                vqc_method=run_cfg.pre_dte_pmf_method,
                 cdf_tail=cdf_tail,
-                L=L,
                 pmf_methods=self.cfg.policy,
                 pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
             )
@@ -3204,7 +3140,6 @@ if __name__ == "__main__":
     RUN_MODE = "single_run"  # "single_run" or "search_run"
     EXEC_POLICY: dict[str, dict[str, object]] = {
         # Example override:
-        # "single_run": {"pre_dte_pmf_method": "pmf_exact"},
     }
 
     CASE_ROOT = PROJECT_ROOT / "cases" / CASE_ID / "178A"

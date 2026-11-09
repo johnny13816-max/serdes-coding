@@ -226,9 +226,8 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
     np.testing.assert_array_equal(padded[8:], 0.0)
 
 
-@pytest.mark.parametrize("pmf_method", ["gaussian_approx", "pmf_exact"])
 def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
-    reference_cfg, pmf_method
+    reference_cfg,
 ):
     assert reference_cfg.policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
     project_cfg = _with_methods(reference_cfg, pre_dte_adc_clipping_convention="full_jitter_half_tail")
@@ -241,7 +240,6 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     )
     run_cfg = replace(
         reference_cfg.execution.single_run,
-        pre_dte_pmf_method=pmf_method,
         pmf_dy_override=1e-5,
         pmf_keep_mass=1.0,
     )
@@ -257,9 +255,10 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     assert reference.pre_dte.adc_input.clipping_convention == "rj_only_full_tail_reference"
     assert project.pre_dte.adc_input.clipping_convention == "full_jitter_half_tail"
     assert reference.pre_dte.adc_input.V_qc < project.pre_dte.adc_input.V_qc
-    if pmf_method == "pmf_exact":
-        assert reference.pre_dte.adc_input.p_n is reference.pre_dte.adc_input.p_ga
-        assert project.pre_dte.adc_input.p_n is project.pre_dte.adc_input.p_ga
+    assert reference.pre_dte.adc_input.method == "pmf_exact"
+    assert project.pre_dte.adc_input.method == "pmf_exact"
+    assert reference.pre_dte.adc_input.p_n is reference.pre_dte.adc_input.p_ga
+    assert project.pre_dte.adc_input.p_n is project.pre_dte.adc_input.p_ga
     np.testing.assert_array_equal(reference_eq.h_dsamp.ir, project_eq.h_dsamp.ir)
     for name in ("S_rn", "S_xn", "S_tn", "S_jn"):
         np.testing.assert_array_equal(getattr(ref_psd, name).psd, getattr(project_psd, name).psd)
@@ -345,7 +344,6 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert aligned.execution.search_sweep.target == "mse"
     assert aligned.execution.search_final.target == "all_enabled"
     effective = COM(aligned)._effective_run_cfg(aligned.execution.search_sweep)
-    assert effective.pre_dte_pmf_method == "pmf_exact"
     assert effective.pmf_grid_quality == "fine"
     assert effective.pmf_keep_mass == 1.0
     assert effective.pmf_dy_override is None
@@ -417,6 +415,50 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert direct.execution == aligned.execution
 
 
+@pytest.mark.parametrize("profile", ["single_run", "search_sweep", "search_final"])
+def test_178a_legacy_exact_pre_dte_pmf_method_is_accepted(profile, tmp_path):
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "cases" / "sicopr_akinwale_vendorx_22db" / "178A" / "config.xlsx"
+    )
+    workbook_path = tmp_path / f"legacy_exact_{profile}.xlsx"
+    copy2(source, workbook_path)
+    book = openpyxl.load_workbook(workbook_path)
+    book["run_config"].append([
+        profile,
+        "pre_dte_pmf_method",
+        "pmf_exact",
+        "enum",
+        "Legacy compatibility row.",
+    ])
+    book.save(workbook_path)
+
+    cfg = excel_to_config_178A(str(workbook_path))
+
+    assert not hasattr(getattr(cfg.execution, profile), "pre_dte_pmf_method")
+
+
+def test_178a_legacy_gaussian_pre_dte_pmf_method_is_rejected(tmp_path):
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "cases" / "sicopr_akinwale_vendorx_22db" / "178A" / "config.xlsx"
+    )
+    workbook_path = tmp_path / "legacy_gaussian.xlsx"
+    copy2(source, workbook_path)
+    book = openpyxl.load_workbook(workbook_path)
+    book["run_config"].append([
+        "search_sweep",
+        "pre_dte_pmf_method",
+        "gaussian_approx",
+        "enum",
+        "Retired legacy row.",
+    ])
+    book.save(workbook_path)
+
+    with pytest.raises(ValueError, match="gaussian_approx.*retired"):
+        excel_to_config_178A(str(workbook_path))
+
+
 def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     root = Path(__file__).resolve().parents[1]
     template = root / "cases" / "_templates" / "178A" / "config.xlsx"
@@ -445,6 +487,7 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert "dy_rel_As" not in fields
     assert "dy_abs_max" not in fields
     run_fields = {parameter for _, parameter in run_rows}
+    assert "pre_dte_pmf_method" not in run_fields
     assert "pmf_grid_quality" not in run_fields
     assert "pmf_dy_override" not in run_fields
     for old_field in (

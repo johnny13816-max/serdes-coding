@@ -858,9 +858,8 @@ class COMDTEConfig(COMDataclassText):
 
 @dataclass(repr=False)
 class COMRunConfig(COMDataclassText):
-    """Algorithm policy and stage target for one 178A execution profile."""
+    """Stage target and numerical controls for one 178A execution profile."""
     target: Literal["mse", "dfe", "mlsd", "all_enabled"] = "dfe"
-    pre_dte_pmf_method: Literal["gaussian_approx", "pmf_exact"] = "gaussian_approx"
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
     pmf_dy_override: Optional[float] = None  # V; bypass derived PMF grid step when set
@@ -874,7 +873,6 @@ class COMRunConfig(COMDataclassText):
         return (
             TextSection("Execution target", (
                 self._field("target", "terminal calculation target", stored_unit="policy"),
-                self._field("pre_dte_pmf_method", "pre-DTE PMF method", stored_unit="policy"),
                 self._field("floating_mode", "floating-tap mode", stored_unit="policy"),
                 self._field("pos_sweep_method", "sampling-position sweep", stored_unit="policy"),
                 self._field("pos_coarse_stride", "coarse sampling stride", stored_unit="sample count"),
@@ -898,11 +896,6 @@ class COMRunConfig(COMDataclassText):
         if self.target not in {"mse", "dfe", "mlsd", "all_enabled"}:
             raise ValueError(
                 "COMRunConfig.target must be 'mse', 'dfe', 'mlsd', or 'all_enabled'."
-            )
-        if self.pre_dte_pmf_method not in {"gaussian_approx", "pmf_exact"}:
-            raise ValueError(
-                "COMRunConfig.pre_dte_pmf_method must be "
-                "'gaussian_approx' or 'pmf_exact'."
             )
         if self.pmf_grid_quality not in {"coarse", "fine"}:
             raise ValueError("COMRunConfig.pmf_grid_quality must be 'coarse' or 'fine'.")

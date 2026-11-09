@@ -40,7 +40,7 @@ and in the [branch registry](../branch_behavior_registry.md).
 | 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-001, ALG-002, ALG-003, ALG-004, EXE-001；former NUM-001 and NUM-002 retired as non-branches | No additional Stage 0 owner |
 | 1 Path construction | Recorded | ALG-006, ALG-007 | ALG-005 retired 2026-11-07 as fixed D3.2/input-dispatch behavior |
 | 2 Common impairment | Recorded | NUM-003 shared-L3 ownership and config exposure；legacy B-009 removed | No additional Stage 2 owner |
-| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid | SRCH-001, ALG-008, ALG-009, NUM-006 |
+| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid；ALG-008；ALG-009 retired as fixed exact-PMF behavior | SRCH-001, NUM-006 |
 | 4 MMSE DTE | Recorded | None under current CP-BR pass | ALG-010 |
 | 5 Post-FFE impairment | Recorded | NUM-003 shared-L3 consumer；ALG-011 | No additional Stage 5 owner |
 | 6 DFE COM | Recorded | NUM-005 final-grid domain | ALG-012 pending D3p2 evidence；ALG-013 |

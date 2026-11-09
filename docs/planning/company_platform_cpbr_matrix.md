@@ -22,7 +22,7 @@
 | Stage 2 / shared L3 (Stages 2, 3, 5, 7) | `NUM-003` numerical control | `policy.eq_ch_imp_len`, `policy.num_trunc_ui` | PSD 前使用 full 或 truncated equivalent-channel record。 |
 | Stage 3 / phase scheduling | `SRCH-001` search | `execution.<profile>.pos_sweep_method`, `pos_coarse_stride` | Exhaustive 或 coarse/fine phase evaluation。 |
 | Stage 3 / per-phase ADC | `ALG-008` algorithm policy | `policy.pre_dte_adc_clipping_convention` | Annex D3 或 reference-only RJ/tail clipping。 |
-| Stage 3 / per-phase ADC | `ALG-009` algorithm policy | `execution.<profile>.pre_dte_pmf_method` | Gaussian approximation 或 exact PMF flow。 |
+| Stage 3 / per-phase ADC | former `ALG-009` — retired non-branch | none；legacy `pmf_exact` row is read-compatible | `_build_psd_adc_qn()` fixed exact PMF flow；Gaussian approximation removed after cost/accuracy review。 |
 | Stage 3 / ADC-input PMF grid | `NUM-004` numerical control | `numerical_control.adc_input_pmf_grid.*` | `_resolve_adc_input_pmf_config()` function set；只影響 ADC-input domain。 |
 | Stage 3 / ADC-input PMF | `NUM-006` numerical control | `execution.<profile>.pmf_keep_mass` | Retained-mass convergence；不擁有 grid spacing。 |
 | Stage 4 / MMSE DTE | `ALG-010` algorithm policy | `execution.<profile>.floating_mode` | Heuristic、simplified 或 spec-defined floating-tap solve。 |

@@ -177,9 +177,10 @@ DFE/MLSD PMFs only. The legacy shared `dy_rel_As`, `dy_abs_max`,
 read-compatible but are not emitted by new templates.
 
 All remaining PMF controls and `missing_dc_policy` are labeled `policy`. There is
-no `quantization_vqc_method` row in the 178A project template: it has no 178A
-runtime owner. `run_config.pre_dte_pmf_method` is the applicable execution
-control.
+no `quantization_vqc_method` or `pre_dte_pmf_method` row in the 178A project
+template. Pre-DTE ADC-input clipping uses the fixed exact-PMF flow owned by
+`_build_psd_adc_qn()`; a legacy workbook row is accepted only when its value is
+`pmf_exact`.
 
 `run_config.control.execution_profile` 是新版 178A 模板的 facade selector；
 合法值為 `project_standard`、`sicopr_reference_v1`、`custom`。NUM-003 的
@@ -292,8 +293,7 @@ Fixed baselines and search candidates are separate. The current fixed baselines 
 | `search_final` | Second step; final evaluation of retained candidates |
 | `search` | Orchestration values `group_size` and `top_k` |
 
-Each canonical run profile supplies `target`, `pre_dte_pmf_method`,
-`pmf_keep_mass`, `floating_mode`, `pos_sweep_method`, and
+Each canonical run profile supplies `target`, `pmf_keep_mass`, `floating_mode`, `pos_sweep_method`, and
 `pos_coarse_stride`. Grid values come from the two fixed-config
 `numerical_control` families rather than duplicated run rows. The existing
 `execution_profile` expands effective controls: project standard uses accurate
