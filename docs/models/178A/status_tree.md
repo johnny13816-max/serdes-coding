@@ -124,8 +124,8 @@ sampled response，因此兩者位於不同 lifecycle/status branches，不重�
 
 | Field | Type/domain | Producer | Consumer |
 |---|---|---|---|
-| `pmf_grid_quality` | optional legacy/effective annotation | `_run_once()` from selected `COMRunConfig` | compatibility report annotation；canonical grid evidence is the resolved ADC-input/final PMF runtime config |
-| `pmf_keep_mass` | optional probability | `_run_once()` from selected `COMRunConfig` | report annotation |
+| `pmf_grid_quality` | optional effective annotation | `_run_once()` from resolved `cfg.num` | report annotation；canonical grid evidence is the resolved ADC-input/final PMF runtime config |
+| `pmf_keep_mass` | optional probability | `_run_once()` from resolved `cfg.num` | report annotation |
 | `mse_by_pos` | list indexed by phase; `float V²` or `None` | phase evaluation loop | phase/MSE report |
 | `main_cursor_error_by_pos` | list indexed by phase; message or `None` | phase evaluation loop | invalid-phase report |
 | `coarse_pos` | phase indices | initial sweep | phase/MSE report |

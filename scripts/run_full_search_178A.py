@@ -8,7 +8,7 @@ import math
 import os
 from pathlib import Path
 import subprocess
-from serdes_coding.io.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
+from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.search.com_search_178A import (
     _read_csv, create_search_plan, finalize_search, merge_partial_results, run_partial_group,
 )
@@ -21,7 +21,10 @@ MAX_WORKERS = 256
 
 def _load(case_root: Path):
     path = case_root / "config.xlsx"
-    return excel_to_config_178A(str(path)), excel_to_search_config_178A(str(path))
+    return (
+        excel_to_config_178A(str(path), run_mode="search_sweep"),
+        excel_to_config_178A(str(path), run_mode="search_final"),
+    )
 
 
 def _input_key(path: Path, *, root: Path, fallback: str) -> str:
@@ -36,18 +39,18 @@ def _input_key(path: Path, *, root: Path, fallback: str) -> str:
 def _fingerprint(case_root: Path, cfg):
     root = Path(__file__).resolve().parents[1]
     files = [("case/config.xlsx", case_root / "config.xlsx")]
-    for name, label in (
-        ("victim_s4p_path", "victim"),
-        ("next_s4p_paths", "next"),
-        ("fext_s4p_paths", "fext"),
+    for bindings, label in (
+        ((cfg.src.channel.victim,), "victim"),
+        (cfg.src.channel.next, "next"),
+        (cfg.src.channel.fext, "fext"),
     ):
-        value = getattr(cfg.channel, name, None)
-        if value:
-            paths = [value] if isinstance(value, str) else value
-            files.extend(
-                (f"channel/{label}/{index:03d}/{Path(item).name}", Path(item))
-                for index, item in enumerate(paths)
+        files.extend(
+            (
+                f"channel/{label}/{index:03d}/{Path(binding.path).name}",
+                Path(binding.path),
             )
+            for index, binding in enumerate(bindings)
+        )
     fingerprints = {}
     for fallback, path in files:
         key = _input_key(path, root=root, fallback=fallback)
@@ -87,28 +90,37 @@ def _check_inputs(case_root, cfg, output):
 
 
 def prepare(case_root, output, matrix_output):
-    cfg, search = _load(case_root)
+    sweep_cfg, final_cfg = _load(case_root)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"Search output must be fresh: {output}")
-    count = len(search.candidates(cfg.filter))
+    search = sweep_cfg.srch
+    count = search.candidate_count(sweep_cfg.filter)
     # Small verification cases exercise more than one artifact/merge group.
     group_size = min(GROUP_SIZE, max(1, count // 2))
-    cfg = replace(cfg, execution=replace(cfg.execution, search_group_size=group_size))
-    artifacts = create_search_plan(cfg, search, output)
+    search = replace(search, group_size=group_size)
+    sweep_cfg = sweep_cfg._resolved_copy(srch=search)
+    final_cfg = final_cfg._resolved_copy(
+        srch=replace(final_cfg.srch, group_size=group_size)
+    )
+    artifacts = create_search_plan(sweep_cfg, output)
     groups = _read_csv(artifacts.group_plan_path, ("group_id",))
     groups_per_worker = max(GROUPS_PER_WORKER, math.ceil(len(groups) / MAX_WORKERS))
     if count <= 4:
         groups_per_worker = 1
     workers = [[int(g["group_id"]) for g in groups[i:i+groups_per_worker]]
                for i in range(0, len(groups), groups_per_worker)]
-    resolved_config = cfg.to_export_dict()
+    resolved_config = {
+        "search_sweep": sweep_cfg.to_export_dict(),
+        "search_final": final_cfg.to_export_dict(),
+        "search": search._json_value(search),
+    }
     resolved_config_path = output / "resolved_config.json"
     resolved_config_path.write_text(json.dumps(resolved_config, indent=2), encoding="utf-8")
     plan = {
         "candidates": count,
-        "top_k": cfg.execution.search_top_k,
+        "top_k": search.final_top_k,
         "workers": workers,
-        "inputs": _fingerprint(case_root, cfg),
+        "inputs": _fingerprint(case_root, sweep_cfg),
         "resolved_config_sha256": hashlib.sha256(resolved_config_path.read_bytes()).hexdigest(),
         "revision": _revision(Path(__file__).resolve().parents[1]),
     }
@@ -120,11 +132,11 @@ def prepare(case_root, output, matrix_output):
 
 
 def partial(case_root, output, worker_id):
-    cfg, search = _load(case_root)
-    plan = _check_inputs(case_root, cfg, output)
+    sweep_cfg, _ = _load(case_root)
+    plan = _check_inputs(case_root, sweep_cfg, output)
     for group_id in plan["workers"][worker_id]:
         print(f"Worker {worker_id}: group {group_id} start", flush=True)
-        run_partial_group(cfg, search, output, group_id)
+        run_partial_group(sweep_cfg, output, group_id)
 
 
 def verify_outputs(output):
@@ -156,9 +168,9 @@ def verify_outputs(output):
 
 
 def finalize(case_root, output):
-    cfg, search = _load(case_root)
-    _check_inputs(case_root, cfg, output)
-    status = finalize_search(cfg, search, output, include_plots=True)
+    sweep_cfg, final_cfg = _load(case_root)
+    _check_inputs(case_root, sweep_cfg, output)
+    status = finalize_search(final_cfg, output, include_plots=True)
     verify_outputs(output)
     print(f"Finalized best candidate {status.best_row.idx}; COM={status.COM}", flush=True)
 

@@ -1,4 +1,5 @@
 from dataclasses import fields, replace
+from inspect import signature
 from pathlib import Path
 from shutil import copy2
 
@@ -9,27 +10,61 @@ import pytest
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import (
     COM,
+    COMAlgorithmPolicyConfig,
+    COMExecutionConfig,
+    COMNumericalControlConfig,
     COMPMFGridControl,
-    COMPolicyConfig,
-    COMRunConfig,
+    COMSearchConfig,
+    COMSourceConfig,
     _resolve_adc_input_pmf_config,
     _resolve_final_com_pmf_config,
 )
 
 
 def _with_methods(cfg, **changes):
-    return replace(cfg, policy=replace(cfg.policy, **changes))
+    return replace(cfg, alg=replace(cfg.alg, **changes))
 
 
-def test_178a_branch_registry_covers_policy_and_run_fields():
+def test_178a_branch_registry_covers_runtime_domain_fields():
     root = Path(__file__).resolve().parents[1]
     registry = (
         root / "docs" / "models" / "178A" / "branch_behavior_registry.md"
     ).read_text(encoding="utf-8")
-    for field in fields(COMPolicyConfig):
-        assert field.name in registry
-    for field in fields(COMRunConfig):
-        assert field.name in registry
+    for config_type in (
+        COMSourceConfig.ChannelBinding,
+        COMSourceConfig.Channel,
+        COMSourceConfig,
+        COMAlgorithmPolicyConfig,
+        COMNumericalControlConfig,
+        COMSearchConfig,
+        COMExecutionConfig,
+    ):
+        for field in fields(config_type):
+            assert field.name in registry
+
+
+def test_178a_com_owns_one_resolved_run_without_stage_forwarding():
+    assert set(signature(COM.run).parameters) == {"self", "progress"}
+    for method_name in (
+        "calculate_pre_dte_imp_at_pos",
+        "calculate_pos_candidate",
+        "_initial_pos_sweep_indices",
+        "_fine_pos_sweep_indices",
+        "calculate_MMSE_DTE",
+        "calculate_post_ffe_imp",
+        "calculate_COM_DFE",
+        "calculate_COM_MLSD",
+    ):
+        assert "run_cfg" not in signature(getattr(COM, method_name)).parameters
+
+
+def test_178a_runtime_domains_are_canonical_and_legacy_names_are_absent(reference_cfg):
+    root_fields = {item.name for item in fields(type(reference_cfg))}
+    assert {"src", "alg", "num", "srch", "exe"}.issubset(root_fields)
+    assert {"policy", "numerical_control", "execution"}.isdisjoint(root_fields)
+    assert not hasattr(reference_cfg, "policy")
+    assert not hasattr(reference_cfg, "numerical_control")
+    assert not hasattr(reference_cfg, "execution")
 
 
 @pytest.fixture(scope="module")
@@ -41,7 +76,7 @@ def reference_cfg():
 
 
 def test_178a_out_of_measured_changes_only_scalar_vtf(reference_cfg):
-    assert reference_cfg.policy.out_of_measured == "zero_padding"
+    assert reference_cfg.alg.out_of_measured == "zero_padding"
     measured_cfg = _with_methods(reference_cfg, out_of_measured="cosine_decay")
     zero_paths = COM(reference_cfg).build_all_paths()
     measured_paths = COM(measured_cfg).build_all_paths()
@@ -62,25 +97,25 @@ def test_178a_out_of_measured_changes_only_scalar_vtf(reference_cfg):
 
 def test_178a_separated_grid_controls_do_not_leak_between_domains(reference_cfg):
     As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
-    run_cfg = replace(
-        reference_cfg.execution.search_sweep,
+    num_cfg = replace(
+        reference_cfg.num,
         adc_input_pmf_grid=replace(
-            reference_cfg.execution.search_sweep.adc_input_pmf_grid,
+            reference_cfg.num.adc_input_pmf_grid,
             dy_override=2e-5,
         ),
     )
-    resolved = _resolve_adc_input_pmf_config(reference_cfg.pmf, As, run_cfg)
+    resolved = _resolve_adc_input_pmf_config(reference_cfg.pmf, As, num_cfg)
     assert resolved.dy == 2e-5
-    assert resolved.keep_mass == run_cfg.pmf_keep_mass
-    final = _resolve_final_com_pmf_config(reference_cfg.pmf, As, run_cfg)
+    assert resolved.keep_mass == num_cfg.pmf_keep_mass
+    final = _resolve_final_com_pmf_config(reference_cfg.pmf, As, num_cfg)
     assert final.dy == pytest.approx(
-        run_cfg.final_pmf_grid.dy_rel_As * As
+        num_cfg.final_pmf_grid.dy_rel_As * As
     )
     assert final.keep_mass == 1.0
 
     final_override = replace(
-        run_cfg,
-        final_pmf_grid=replace(run_cfg.final_pmf_grid, dy_override=3e-5),
+        num_cfg,
+        final_pmf_grid=replace(num_cfg.final_pmf_grid, dy_override=3e-5),
     )
     assert _resolve_final_com_pmf_config(
         reference_cfg.pmf, As, final_override
@@ -115,36 +150,24 @@ def test_178a_grid_control_rejects_unknown_rule():
         COMPMFGridControl(rule="other")
 
 
-def test_178a_legacy_shared_run_dy_override_remains_compatible(reference_cfg):
+def test_178a_canonical_adc_grid_is_the_only_runtime_grid_owner(reference_cfg):
     As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
-    legacy_override = COMRunConfig(pmf_dy_override=2e-5)
-    assert _resolve_adc_input_pmf_config(
-        reference_cfg.pmf, As, legacy_override
-    ).dy == pytest.approx(2e-5)
-    assert _resolve_final_com_pmf_config(
-        reference_cfg.pmf, As, legacy_override
-    ).dy == pytest.approx(2e-5)
-
-
-def test_178a_canonical_adc_grid_takes_precedence_over_legacy_shared_override(reference_cfg):
-    As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
-    mixed = replace(
-        reference_cfg.execution.search_sweep,
-        pmf_dy_override=2e-5,
+    num_cfg = replace(
+        reference_cfg.num,
         adc_input_pmf_grid=replace(
-            reference_cfg.execution.search_sweep.adc_input_pmf_grid,
+            reference_cfg.num.adc_input_pmf_grid,
             dy_override=3e-5,
         ),
     )
     assert _resolve_adc_input_pmf_config(
-        reference_cfg.pmf, As, mixed
+        reference_cfg.pmf, As, num_cfg
     ).dy == pytest.approx(3e-5)
 
 
 @pytest.mark.parametrize("invalid", [0.0, -1e-5, np.nan, np.inf])
-def test_178a_run_dy_override_rejects_nonpositive_or_nonfinite(invalid):
-    with pytest.raises(ValueError, match="pmf_dy_override"):
-        COMRunConfig(pmf_dy_override=invalid)
+def test_178a_num_keep_mass_rejects_nonpositive_or_nonfinite(invalid):
+    with pytest.raises(ValueError, match="pmf_keep_mass"):
+        COMNumericalControlConfig(pmf_keep_mass=invalid)
 
 
 def test_178a_out_of_measured_rejects_unknown_method(reference_cfg):
@@ -153,7 +176,7 @@ def test_178a_out_of_measured_rejects_unknown_method(reference_cfg):
 
 
 def test_178a_ctle_pulse_realization_defaults_and_rejects_unknown_method(reference_cfg):
-    fields = COMPolicyConfig.__dataclass_fields__
+    fields = COMAlgorithmPolicyConfig.__dataclass_fields__
     assert fields["ctle_pulse_realization"].default == "continuous_tf"
     assert fields["rxffe_record_realization"].default == "linear_fixed_grid"
     with pytest.raises(ValueError, match="ctle_pulse_realization"):
@@ -163,26 +186,27 @@ def test_178a_ctle_pulse_realization_defaults_and_rejects_unknown_method(referen
 
 
 def test_178a_eq_ch_imp_length_contract_and_reference_profile(reference_cfg):
-    assert reference_cfg.policy.eq_ch_imp_len == "truncated"
-    assert reference_cfg.policy.num_trunc_ui == 4096
+    assert reference_cfg.num.eq_ch_imp_len == "truncated"
+    assert reference_cfg.num.num_trunc_ui == 4096
     model = COM(reference_cfg)
     assert model._eq_ch_imp_record_cfg.sampled_nfft == 4096
     assert model._eq_ch_imp_record_cfg is not reference_cfg.link
-    assert COM(replace(reference_cfg, policy=COMPolicyConfig()))._eq_ch_imp_record_cfg is reference_cfg.link
+    assert COM(replace(reference_cfg, num=COMNumericalControlConfig()))._eq_ch_imp_record_cfg is reference_cfg.link
     with pytest.raises(ValueError, match="even num_trunc_ui"):
-        COMPolicyConfig(eq_ch_imp_len="truncated", num_trunc_ui=4095)
+        COMNumericalControlConfig(eq_ch_imp_len="truncated", num_trunc_ui=4095)
     with pytest.raises(ValueError, match="num_trunc_ui=None"):
-        COMPolicyConfig(eq_ch_imp_len="full", num_trunc_ui=4096)
+        COMNumericalControlConfig(eq_ch_imp_len="full", num_trunc_ui=4096)
 
 
 def test_178a_rxffe_record_realization_resolves_stage5_grid(reference_cfg):
-    fixed_cfg = replace(reference_cfg, policy=COMPolicyConfig())
+    fixed_cfg = replace(reference_cfg, alg=COMAlgorithmPolicyConfig())
     fixed_model = COM(fixed_cfg)
     assert fixed_model._resolve_post_ffe_response_cfg() is fixed_cfg.link
 
     expanded_cfg = replace(
         reference_cfg,
-        policy=COMPolicyConfig(rxffe_record_realization="linear_expanded_grid"),
+        alg=COMAlgorithmPolicyConfig(rxffe_record_realization="linear_expanded_grid"),
+        num=COMNumericalControlConfig(),
     )
     expanded_model = COM(expanded_cfg)
     expanded = expanded_model._resolve_post_ffe_response_cfg()
@@ -204,7 +228,7 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
     response = np.arange(5000, dtype=float)
     original = response.copy()
 
-    full_model = COM(replace(reference_cfg, policy=COMPolicyConfig()))
+    full_model = COM(replace(reference_cfg, num=COMNumericalControlConfig()))
     full_record = full_model._realize_eq_ch_imp_record(
         response, source_name="test response"
     )
@@ -229,7 +253,7 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
 def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     reference_cfg,
 ):
-    assert reference_cfg.policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
+    assert reference_cfg.alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
     project_cfg = _with_methods(reference_cfg, pre_dte_adc_clipping_convention="full_jitter_half_tail")
     paths = COM(reference_cfg).build_all_paths()
     victim, xtalks = paths[0], paths[1:]
@@ -238,16 +262,21 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     common, h_xt_dsamp = model.prepare_sampling_phase_common(
         common, [path.pulse.ir for path in xtalks]
     )
-    run_cfg = replace(
-        reference_cfg.execution.single_run,
-        pmf_dy_override=1e-5,
+    num_cfg = replace(
+        reference_cfg.num,
+        adc_input_pmf_grid=replace(
+            reference_cfg.num.adc_input_pmf_grid,
+            dy_override=1e-5,
+        ),
         pmf_keep_mass=1.0,
     )
-    reference_eq, reference = model.calculate_pre_dte_imp_at_pos(
-        victim, 23, common, h_xt_dsamp, run_cfg
+    reference_model = COM(replace(reference_cfg, num=num_cfg))
+    reference_eq, reference = reference_model.calculate_pre_dte_imp_at_pos(
+        victim, 23, common, h_xt_dsamp
     )
-    project_eq, project = COM(project_cfg).calculate_pre_dte_imp_at_pos(
-        victim, 23, common, h_xt_dsamp, run_cfg
+    project_model = COM(replace(project_cfg, num=num_cfg))
+    project_eq, project = project_model.calculate_pre_dte_imp_at_pos(
+        victim, 23, common, h_xt_dsamp
     )
 
     ref_psd = reference.pre_dte.psd
@@ -276,7 +305,7 @@ def test_178a_pre_dte_adc_clipping_policy_rejects_unknown_method(reference_cfg):
 
 
 def test_178a_final_com_vqc_policy_rejects_unknown_method(reference_cfg):
-    assert reference_cfg.policy.final_com_vqc_convention == "sicopr_final_reconstruction"
+    assert reference_cfg.alg.final_com_vqc_convention == "sicopr_final_reconstruction"
     with pytest.raises(ValueError, match="final_com_vqc_convention"):
         _with_methods(reference_cfg, final_com_vqc_convention="unknown")
 
@@ -318,101 +347,93 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         ])
     book.save(workbook_path)
 
-    aligned = excel_to_config_178A(str(workbook_path))
-    policy = aligned.policy
-    assert aligned.policy.applied_config_profile == "sicopr_reference_v1"
-    assert aligned.channel.missing_dc_policy == "mag_phase_trend_to_dc"
-    assert policy.out_of_measured == "zero_padding"
-    assert not hasattr(policy, "channel_renormalization_order")
-    assert policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
-    assert policy.final_com_vqc_convention == "sicopr_final_reconstruction"
-    assert policy.ctle_pulse_realization == "bilinear_iir"
-    assert policy.rxffe_record_realization == "finite_record_circshift"
-    assert policy.eq_ch_imp_len == "truncated"
-    assert policy.num_trunc_ui == 4096
-    assert policy.pmf_projection_method == "nearest"
-    assert not hasattr(policy, "interference_pmf_method")
-    assert policy.pdf_to_pmf_method == "pmf_sample"
-    assert policy.pmf_scaling_method == "interpolate_ordinates"
-    assert policy.added_noise_pdf == "scaled_total_pdf"
-    assert policy.mlsd_quantization_psd == "main_tap_white"
-    assert policy.sequence_termination == "matlab_relative_tail"
-    assert policy.reported_der == "baseline_pdf_re_evaluation"
-    assert policy.final_pmf_grid == "relative_As"
-    assert policy.final_adc_pmf_projection == "reference_support"
-    assert aligned.execution.single_run.target == "all_enabled"
-    assert aligned.execution.search_sweep.target == "mse"
-    assert aligned.execution.search_final.target == "all_enabled"
-    effective = COM(aligned)._effective_run_cfg(aligned.execution.search_sweep)
-    assert effective.pmf_grid_quality == "fine"
-    assert effective.pmf_keep_mass == 1.0
-    assert effective.pmf_dy_override is None
-    assert effective.adc_input_pmf_grid.rule == "relative_As_with_cap"
-    assert effective.adc_input_pmf_grid.dy_override == pytest.approx(10e-6)
-    assert effective.final_pmf_grid.rule == "relative_As"
-    assert effective.final_pmf_grid.dy_override is None
+    aligned = excel_to_config_178A(str(workbook_path), run_mode="single_run")
+    sweep = excel_to_config_178A(str(workbook_path), run_mode="search_sweep")
+    final = excel_to_config_178A(str(workbook_path), run_mode="search_final")
+    alg = aligned.alg
+    assert not hasattr(aligned.alg, "applied_config_profile")
+    assert not hasattr(aligned.alg, "config_profile_overrides")
+    assert aligned.alg.missing_dc_policy == "mag_phase_trend_to_dc"
+    assert alg.out_of_measured == "zero_padding"
+    assert not hasattr(alg, "channel_renormalization_order")
+    assert alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
+    assert alg.final_com_vqc_convention == "sicopr_final_reconstruction"
+    assert alg.ctle_pulse_realization == "bilinear_iir"
+    assert alg.rxffe_record_realization == "finite_record_circshift"
+    assert aligned.num.eq_ch_imp_len == "truncated"
+    assert aligned.num.num_trunc_ui == 4096
+    assert alg.pmf_projection_method == "nearest"
+    assert not hasattr(alg, "interference_pmf_method")
+    assert alg.pdf_to_pmf_method == "pmf_sample"
+    assert alg.pmf_scaling_method == "interpolate_ordinates"
+    assert alg.added_noise_pdf == "scaled_total_pdf"
+    assert alg.mlsd_quantization_psd == "main_tap_white"
+    assert alg.sequence_termination == "matlab_relative_tail"
+    assert alg.reported_der == "baseline_pdf_re_evaluation"
+    assert alg.final_adc_pmf_projection == "reference_support"
+    assert aligned.exe.target == "all_enabled"
+    assert sweep.exe.target == "mse"
+    assert final.exe.target == "all_enabled"
+    assert sweep.num.pmf_grid_quality == "fine"
+    assert sweep.num.pmf_keep_mass == 1.0
+    assert sweep.num.adc_input_pmf_grid.rule == "relative_As_with_cap"
+    assert sweep.num.adc_input_pmf_grid.dy_override == pytest.approx(10e-6)
+    assert sweep.num.final_pmf_grid.rule == "relative_As"
+    assert sweep.num.final_pmf_grid.dy_override is None
     final_grid = _resolve_final_com_pmf_config(
-        aligned.pmf, aligned.imp.R_LM / (aligned.L - 1), effective,
-        final_pmf_grid=policy.final_pmf_grid,
+        aligned.pmf, aligned.imp.R_LM / (aligned.L - 1), aligned.num,
     )
     assert final_grid.dy == pytest.approx(aligned.pmf.dy_rel_As * aligned.imp.R_LM / (aligned.L - 1))
     assert final_grid.gaussian_n_sigma == pytest.approx(8.0)
-    exported = aligned.to_export_dict()["derived"]
-    assert exported["policy"]["pmf_projection_method"] == "nearest"
-    assert "interference_pmf_method" not in exported["policy"]
-    assert exported["policy"]["applied_config_profile"] == "sicopr_reference_v1"
-    overrides = exported["policy"]["config_profile_overrides"]
-    assert overrides["channel.missing_dc_policy"] == {
+    exported = aligned.to_export_dict()
+    assert exported["derived"]["alg"]["pmf_projection_method"] == "nearest"
+    assert "interference_pmf_method" not in exported["derived"]["alg"]
+    resolution = exported["adapter_resolution"]
+    assert resolution["applied_config_profile"] == "sicopr_reference_v1"
+    overrides = resolution["config_profile_overrides"]
+    assert overrides["alg.missing_dc_policy"] == {
         "raw": "skrf",
         "effective": "mag_phase_trend_to_dc",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.out_of_measured"] == {
+    assert overrides["alg.out_of_measured"] == {
         "raw": "cosine_decay",
         "effective": "zero_padding",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.ctle_pulse_realization"] == {
+    assert overrides["alg.ctle_pulse_realization"] == {
         "raw": "continuous_tf",
         "effective": "bilinear_iir",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.rxffe_record_realization"] == {
+    assert overrides["alg.rxffe_record_realization"] == {
         "raw": "linear_fixed_grid",
         "effective": "finite_record_circshift",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.pdf_to_pmf_method"] == {
+    assert overrides["alg.pdf_to_pmf_method"] == {
         "raw": "bin_integral",
         "effective": "pmf_sample",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["policy.mlsd_quantization_psd"] == {
+    assert overrides["alg.mlsd_quantization_psd"] == {
         "raw": "pre_dte_filtered",
         "effective": "main_tap_white",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["numerical_control.adc_input_pmf_grid.dy_override"] == {
+    assert overrides["num.adc_input_pmf_grid.dy_override"] == {
         "raw": None,
         "effective": 1e-5,
         "overridden_by_profile": "sicopr_reference_v1",
     }
 
-    direct = replace(
-        reference_cfg,
-        policy=replace(
-            policy,
-            applied_config_profile=None,
-            config_profile_overrides={},
-        ),
-        execution=aligned.execution,
-    )
-    assert direct.policy == replace(
-        aligned.policy,
-        applied_config_profile=None,
-        config_profile_overrides={},
-    )
-    assert direct.execution == aligned.execution
+    direct = replace(reference_cfg, alg=alg, exe=aligned.exe)
+    assert direct.alg == aligned.alg
+    assert direct.exe == aligned.exe
+    assert "adapter_resolution" not in direct.to_export_dict()
+
+    resolved_copy = aligned._resolved_copy(exe=aligned.exe)
+    assert resolved_copy.to_export_dict()["adapter_resolution"] == resolution
 
 
 @pytest.mark.parametrize("profile", ["single_run", "search_sweep", "search_final"])
@@ -433,9 +454,9 @@ def test_178a_legacy_exact_pre_dte_pmf_method_is_accepted(profile, tmp_path):
     ])
     book.save(workbook_path)
 
-    cfg = excel_to_config_178A(str(workbook_path))
+    cfg = excel_to_config_178A(str(workbook_path), run_mode=profile)
 
-    assert not hasattr(getattr(cfg.execution, profile), "pre_dte_pmf_method")
+    assert not hasattr(cfg.exe, "pre_dte_pmf_method")
 
 
 def test_178a_legacy_gaussian_pre_dte_pmf_method_is_rejected(tmp_path):
@@ -532,5 +553,5 @@ def test_178a_legacy_align_to_ref_remains_a_compatible_alias(tmp_path):
     book.save(workbook_path)
 
     cfg = excel_to_config_178A(str(workbook_path))
-    assert cfg.policy.applied_config_profile == "sicopr_reference_v1"
-    assert cfg.policy.mlsd_quantization_psd == "main_tap_white"
+    assert cfg.to_export_dict()["adapter_resolution"]["applied_config_profile"] == "sicopr_reference_v1"
+    assert cfg.alg.mlsd_quantization_psd == "main_tap_white"

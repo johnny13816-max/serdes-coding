@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from ..io.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
+from ..io.com_excel_io import excel_to_config_178A
 from .com_search_178A import (
     SearchArtifacts,
     create_search_plan,
@@ -53,8 +53,8 @@ class COMSearchGui178A:
         self.root.minsize(760, 520)
 
         self._events: Queue[tuple[str, str]] = Queue()
-        self._cfg: Any = None
-        self._search: Any = None
+        self._sweep_cfg: Any = None
+        self._final_cfg: Any = None
         self._buttons: list[ttk.Button] = []
 
         self.case_path = tk.StringVar(value="" if initial_case is None else str(initial_case))
@@ -105,11 +105,15 @@ class COMSearchGui178A:
     def _load_case(self) -> None:
         try:
             case_dir = self._case_dir()
-            workbook = case_dir / "config" / "config_178A.xlsx"
+            workbook = case_dir / "178A" / "config.xlsx"
             if not workbook.exists():
                 raise FileNotFoundError(f"Missing 178A workbook: {workbook}")
-            self._cfg = excel_to_config_178A(str(workbook))
-            self._search = excel_to_search_config_178A(str(workbook))
+            self._sweep_cfg = excel_to_config_178A(
+                str(workbook), run_mode="search_sweep"
+            )
+            self._final_cfg = excel_to_config_178A(
+                str(workbook), run_mode="search_final"
+            )
             artifacts = self._artifacts()
             self.status_text.set(
                 f"Loaded {case_dir.name}; report: {artifacts.root}"
@@ -140,14 +144,14 @@ class COMSearchGui178A:
         self._run_background("Run full search", self._run_full_action)
 
     def _create_manifest_action(self) -> str:
-        cfg, search, artifacts = self._require_case()
-        create_search_plan(cfg, search, artifacts.root)
+        sweep_cfg, _, artifacts = self._require_case()
+        create_search_plan(sweep_cfg, artifacts.root)
         return f"Manifest and group plan written to: {artifacts.root}"
 
     def _run_group_action(self) -> str:
-        cfg, search, artifacts = self._require_case()
+        sweep_cfg, _, artifacts = self._require_case()
         group_id = int(self.group_id.get())
-        output = run_partial_group(cfg, search, artifacts.root, group_id)
+        output = run_partial_group(sweep_cfg, artifacts.root, group_id)
         return f"Partial result written: {output}"
 
     def _merge_action(self) -> str:
@@ -156,13 +160,18 @@ class COMSearchGui178A:
         return f"Merged {len(rows)} candidates: {artifacts.merged_results_path}"
 
     def _finalize_action(self) -> str:
-        cfg, search, artifacts = self._require_case()
-        status = finalize_search(cfg, search, artifacts.root, include_plots=True)
+        _, final_cfg, artifacts = self._require_case()
+        status = finalize_search(final_cfg, artifacts.root, include_plots=True)
         return f"Finalized best index={status.best_row.idx}, MSE={status.best_row.mse:.6e} V^2, COM={status.COM}"
 
     def _run_full_action(self) -> str:
-        cfg, search, artifacts = self._require_case()
-        status = run_full_search(cfg, search, artifacts.root, include_plots=True)
+        sweep_cfg, final_cfg, artifacts = self._require_case()
+        status = run_full_search(
+            sweep_cfg,
+            final_cfg,
+            artifacts.root,
+            include_plots=True,
+        )
         return f"Full search complete: best index={status.best_row.idx}, COM={status.COM}"
 
     def _run_background(self, label: str, action: Callable[[], str]) -> None:
@@ -208,9 +217,9 @@ class COMSearchGui178A:
         self.status_text.set(text)
 
     def _require_case(self) -> tuple[Any, Any, SearchArtifacts]:
-        if self._cfg is None or self._search is None:
+        if self._sweep_cfg is None or self._final_cfg is None:
             raise RuntimeError("Load a valid case before running a search action.")
-        return self._cfg, self._search, self._artifacts()
+        return self._sweep_cfg, self._final_cfg, self._artifacts()
 
     def _case_dir(self) -> Path:
         path = Path(self.case_path.get()).expanduser()
@@ -219,7 +228,7 @@ class COMSearchGui178A:
         return path.resolve()
 
     def _artifacts(self) -> SearchArtifacts:
-        return SearchArtifacts(self._case_dir() / "report" / "178A" / "search_run")
+        return SearchArtifacts(self._case_dir() / "178A" / "results" / "search_run")
 
     def _log(self, message: str) -> None:
         self.log.configure(state="normal")

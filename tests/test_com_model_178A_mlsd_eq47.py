@@ -18,11 +18,11 @@ from serdes_coding.models.com_model_178A import (
     COMPostFFEEqChannelStatus,
     COMPreDTEEqChannelStatus,
     COMMLSDConfig,
-    COMPolicyConfig,
+    COMAlgorithmPolicyConfig,
     COMMLSDNoiseStatus,
     COMPMFStatus,
     COMPSDStatus,
-    COMRunConfig,
+    COMNumericalControlConfig,
     COMStatus,
 )
 from serdes_coding.utilities.pmf import Pmf1D
@@ -75,9 +75,8 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                     mlsd=COMMLSDConfig(enable=True, trunc_len=1, delta_com_an=0.0),
                     dte=SimpleNamespace(N_b=1),
                     pmf=SimpleNamespace(),
-                    execution=SimpleNamespace(single_run=COMRunConfig()),
-                    resolve_run_cfg=lambda run_cfg: run_cfg,
-                    policy=COMPolicyConfig(),
+                    num=COMNumericalControlConfig(),
+                    alg=COMAlgorithmPolicyConfig(),
                     DER_0=1e-6,
                     L=4,
                 )
@@ -114,6 +113,7 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                     b_lim_1=0.5,
                     trunc_len=1,
                     pmf_scaling_method="mass_deposit",
+                    pmf_projection_method="linear",
                     sequence_termination="fixed_length_sum",
                 )
 

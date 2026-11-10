@@ -19,6 +19,7 @@ from serdes_coding.models.com_model_178A import (
     COMPMFStatus,
     COMPath,
     COMSharedPath,
+    COMSourceConfig,
     COMStatus,
 )
 from serdes_coding.search.com_search_178A import COMSearchCandidate, COMSearchConfig
@@ -89,24 +90,63 @@ def test_178a_modules_import_cleanly_in_fresh_processes() -> None:
         assert completed.returncode == 0, completed.stderr
 
 
-def test_178a_migrated_leaf_field_contracts_match_the_previous_boundary() -> None:
+def test_178a_migrated_leaf_contracts_preserve_only_shared_version_neutral_fields() -> None:
     for owned, previous in (
-        (COMChannelConfig, com_93A.COMChannelConfig),
-        (COMPMFConfig, com_93A.COMPMFConfig),
         (COMPMFRuntimeConfig, com_93A.COMPMFRuntimeConfig),
         (COMSearchCandidate, com_93A.COMSearchCandidate),
-        (COMSearchConfig, com_93A.COMSearchConfig),
     ):
         assert [(item.name, item.default, item.default_factory) for item in fields(owned)] == [
             (item.name, item.default, item.default_factory) for item in fields(previous)
         ]
 
-    path_fields = fields(COMPath)
-    previous_path_fields = fields(com_93A.COMPath)
-    assert [item.name for item in path_fields[:-1]] == [
-        item.name for item in previous_path_fields
+    assert [item.name for item in fields(COMChannelConfig)] == [
+        "R0",
+        "R_d_tx",
+        "R_d_rx",
+        "gamma_src",
+        "gamma_load",
+        "sparam_frequency_limit_Hz",
     ]
-    assert path_fields[-1].name == "pulse_no_txffe"
+    assert [item.name for item in fields(COMSourceConfig)] == ["channel"]
+    assert [item.name for item in fields(COMSourceConfig.Channel)] == [
+        "victim",
+        "next",
+        "fext",
+    ]
+    assert [item.name for item in fields(COMPMFConfig)] == [
+        item.name for item in fields(com_93A.COMPMFConfig)
+        if item.name != "gaussian_n_sigma"
+    ]
+    assert [item.name for item in fields(COMSearchConfig)] == [
+        "c_m2_values",
+        "c_m1_values",
+        "c_1_values",
+        "g_DC_values",
+        "g_DC2_values",
+        "pos_sweep_method",
+        "pos_coarse_stride",
+        "keep_top_n",
+        "keep_all_rows",
+        "continue_on_error",
+        "group_size",
+        "final_top_k",
+    ]
+
+    path_fields = fields(COMPath)
+    assert [item.name for item in path_fields] == [
+        "kind",
+        "shared",
+        "S_tx",
+        "S_ch",
+        "S_all",
+        "H_21_measured_freqs",
+        "H_21_measured_tf",
+        "H_21",
+        "H_all",
+        "X",
+        "pulse",
+        "pulse_no_txffe",
+    ]
     assert path_fields[-1].default is None
 
     assert [item.name for item in fields(COMSharedPath)] == [

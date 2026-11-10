@@ -9,12 +9,21 @@ from serdes_coding.io.conversion.draft import ConversionDraft, MappingStatus, Pr
 from serdes_coding.io.conversion.paths import case_config_path, validate_case_id
 from serdes_coding.io.conversion.adhoc_to_project import _read_project_schema
 from serdes_coding.io.conversion.adhoc_to_project import build_project_config_draft
+from serdes_coding.io.conversion.mapping_rules import area_for
+from serdes_coding.io.com_excel_io_178A import (
+    excel_to_config_178A,
+    excel_to_search_config_178A,
+)
 from serdes_coding.io.conversion.existing_project import (
     load_existing_project,
     save_existing_project,
     validate_existing_project,
 )
-from serdes_coding.interfaces.com_config_conversion_gui import _validated_source_path, COM_ADHOC_ROOT
+from serdes_coding.interfaces.com_config_conversion_gui import (
+    _domain_sort_key,
+    _validated_source_path,
+    COM_ADHOC_ROOT,
+)
 
 
 class TestConversionStatusView(unittest.TestCase):
@@ -36,7 +45,7 @@ class TestConversionStatusView(unittest.TestCase):
 
     def test_override_keeps_the_previous_mapping_status(self):
         field = ProjectFieldDraft(
-            sheet="fixed_config", row=4, value_column=3, group="link",
+            sheet="fixed_config", row=4, value_column=3, domain="link",
             parameter="fb", parameter_class="intrinsic", value=1.0, unit="Hz",
             description="baud rate", base_value=1.0,
             status=MappingStatus.CONVERTED,
@@ -75,6 +84,71 @@ class TestConversionStatusView(unittest.TestCase):
             fields = _read_project_schema(project_root / "cases" / "_templates" / version / "config.xlsx")
             self.assertIn(("fixed_config", "case_id"), {field.identity for field in fields})
             self.assertTrue(any(field.sheet == "channels" for field in fields))
+
+    def test_all_tracked_178a_workbooks_use_canonical_project_domains(self):
+        project_root = Path(__file__).resolve().parents[1]
+        allowed = {
+            "case", "intrinsic", "block_source", "algorithm_policy",
+            "numerical_control", "search", "execution",
+        }
+        paths = sorted((project_root / "cases").glob("*/178A/config.xlsx"))
+        self.assertGreater(len(paths), 1)
+        for path in paths:
+            fields = _read_project_schema(path)
+            self.assertTrue(fields, path)
+            self.assertLessEqual({field.domain for field in fields}, allowed, path)
+            self.assertEqual(
+                {field.domain for field in fields if field.sheet == "channels"},
+                {"block_source"},
+                path,
+            )
+            self.assertEqual(
+                {field.domain for field in fields if field.sheet == "search_config"},
+                {"search"},
+                path,
+            )
+
+    def test_run_config_rows_are_classified_by_effect_not_profile_container(self):
+        project_root = Path(__file__).resolve().parents[1]
+        fields = _read_project_schema(
+            project_root / "cases" / "_templates" / "178A" / "config.xlsx"
+        )
+        domains = {
+            field.parameter: field.domain
+            for field in fields
+            if field.sheet == "run_config"
+        }
+        self.assertEqual(domains["single_run.target"], "execution")
+        self.assertEqual(domains["single_run.pmf_keep_mass"], "numerical_control")
+        self.assertEqual(domains["single_run.floating_mode"], "algorithm_policy")
+        self.assertEqual(domains["single_run.pos_sweep_method"], "search")
+        self.assertEqual(domains["search.group_size"], "search")
+
+    def test_all_populated_tracked_178a_cases_construct_runtime_configs(self):
+        project_root = Path(__file__).resolve().parents[1]
+        paths = sorted((project_root / "cases").glob("*/178A/config.xlsx"))
+        populated = [path for path in paths if "_templates" not in path.parts]
+        self.assertEqual(len(populated), 8)
+        for path in populated:
+            cfg = excel_to_config_178A(str(path))
+            search = excel_to_search_config_178A(str(path))
+            self.assertIsNotNone(cfg.src.channel.victim, path)
+            self.assertGreaterEqual(search.candidate_count(cfg.filter), 1, path)
+
+    def test_gui_domain_sort_does_not_replace_mapping_area(self):
+        alg = ProjectFieldDraft(
+            sheet="fixed_config", row=4, value_column=4, domain="algorithm_policy",
+            parameter="missing_dc_policy", parameter_class="policy", value="skrf",
+            unit="enum", description="", base_value="skrf", status=MappingStatus.FALLBACK,
+        )
+        intrinsic = ProjectFieldDraft(
+            sheet="fixed_config", row=5, value_column=4, domain="intrinsic",
+            parameter="fb", parameter_class="intrinsic", value=106.25e9,
+            unit="Hz", description="", base_value=106.25e9, status=MappingStatus.EXACT,
+        )
+        self.assertEqual([item.domain for item in sorted([alg, intrinsic], key=_domain_sort_key)], ["intrinsic", "algorithm_policy"])
+        self.assertEqual(area_for(intrinsic, "178A"), "mapping")
+        self.assertEqual(area_for(alg, "178A"), "policy")
 
     def test_178a_template_contains_independent_pmf_grid_defaults(self):
         project_root = Path(__file__).resolve().parents[1]

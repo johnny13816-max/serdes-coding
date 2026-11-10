@@ -15,8 +15,9 @@ from serdes_coding.models.com_model_178A import (
     COMPreDTEEqChannelStatus,
     COMImpairmentStatus,
     COMImpStageStatus,
+    COMNumericalControlConfig,
     COMPSDStatus,
-    COMPolicyConfig,
+    COMAlgorithmPolicyConfig,
 )
 from serdes_coding.utilities.link import LinkConfig, SampledResponse
 from serdes_coding.utilities.pmf import Pmf1D
@@ -60,7 +61,8 @@ class TestMLSDNoise178A(unittest.TestCase):
         )
         self.model = COM.__new__(COM)
         self.model.cfg = SimpleNamespace(
-            policy=COMPolicyConfig(),
+            alg=COMAlgorithmPolicyConfig(),
+            num=COMNumericalControlConfig(),
             dte=SimpleNamespace(d_w=0),
         )
         self.model._eq_ch_imp_record_cfg = self.grid
@@ -91,7 +93,7 @@ class TestMLSDNoise178A(unittest.TestCase):
         np.testing.assert_allclose(result.R_ni, result.S_ni.to_autocorrelation(), rtol=1e-12, atol=1e-15)
 
     def test_reference_quantization_stays_white_with_main_tap_gain(self) -> None:
-        self.model.cfg.policy = COMPolicyConfig(
+        self.model.cfg.alg = COMAlgorithmPolicyConfig(
             mlsd_quantization_psd="main_tap_white"
         )
         result = self.model.build_mlsd_noise(

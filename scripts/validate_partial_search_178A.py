@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from serdes_coding.io.com_excel_io import excel_to_config_178A, excel_to_search_config_178A
+from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import COM
 from serdes_coding.search.com_search_178A import (
     COMSearchConfig,
@@ -52,18 +52,15 @@ def _smoke_search(search: COMSearchConfig) -> COMSearchConfig:
 
 
 def validate(case_root: Path, mode: str, output_root: Path) -> None:
-    config_path = case_root / "config" / "config_178A.xlsx"
+    config_path = case_root / "config.xlsx"
     if not config_path.exists():
         raise FileNotFoundError(config_path)
 
-    cfg = excel_to_config_178A(str(config_path))
-    search = excel_to_search_config_178A(str(config_path))
+    cfg = excel_to_config_178A(str(config_path), run_mode="search_sweep")
+    search = cfg.srch
     if mode == "smoke":
         search = _smoke_search(search)
-        cfg = replace(
-            cfg,
-            execution=replace(cfg.execution, search_group_size=1, search_top_k=2),
-        )
+        search = replace(search, group_size=1, final_top_k=2)
     elif mode != "full":
         raise ValueError("mode must be 'smoke' or 'full'.")
 
@@ -73,11 +70,12 @@ def validate(case_root: Path, mode: str, output_root: Path) -> None:
         )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    artifacts = create_search_plan(cfg, search, output_root)
+    cfg = cfg._resolved_copy(srch=search)
+    artifacts = create_search_plan(cfg, output_root)
     for group in _read_csv(artifacts.group_plan_path, ("group_id",)):
-        run_partial_group(cfg, search, artifacts.root, int(group["group_id"]))
+        run_partial_group(cfg, artifacts.root, int(group["group_id"]))
     rows = merge_partial_results(output_root)
-    candidates = search.candidates(cfg.filter)
+    candidates = cfg.srch.candidates(cfg.filter)
     if len(rows) != len(candidates):
         raise AssertionError(f"row count mismatch: {len(rows)} != {len(candidates)}")
 
@@ -90,7 +88,7 @@ def validate(case_root: Path, mode: str, output_root: Path) -> None:
     baseline_mse: dict[int, float] = {}
     for index, candidate in enumerate(candidates):
         candidate_cfg = _config_with_candidate(cfg, candidate)
-        direct = COM(candidate_cfg)._run_once(run_cfg=cfg.execution.search_sweep)
+        direct = COM(candidate_cfg).run()
         if direct.dte is not None:
             baseline_mse[index] = float(direct.dte.mse)
 

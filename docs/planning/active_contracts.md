@@ -9,8 +9,9 @@ v1.0 release 狀態見
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
 branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
-規則維護 RC-20261106-002 已結案；CP-BR 已完成 ALG-009 retirement 並前進至 NUM-006。RC-004 仍為 Proposed，
-僅由規則專用對話評估。
+規則維護 RC-20261106-002 已結案。CFG-178A A--F 已完成並整合；CP-BR 已完成
+ALG-009 retirement，下一個待恢復項目為 NUM-006。RC-004 仍為 Proposed，僅由
+規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
 SiCoPR case。已完成／未完成事實、分離後的目標與恢復條件見
@@ -22,7 +23,8 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CP-BR — 178A stage-by-stage selectable-control review | **ALG-009 retired；Stage 3 next is NUM-006** | `_build_psd_adc_qn()` 固定執行 exact PMF；`pre_dte_pmf_method` 已從 config/workbook/runtime 移除。Legacy `pmf_exact` row 可讀，`gaussian_approx` 明確拒絕。固定案例顯示 approximation 只省約 1.5–2% candidate time，卻改變 `V_qc`、MSE 與 selected phase。 | 下一個討論項目是 `NUM-006 pmf_keep_mass`：確認 retained-mass cost/accuracy boundary 與 owner。 |
+| CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
+| CP-BR — 178A stage-by-stage selectable-control review | **Paused before NUM-006** | `_build_psd_adc_qn()` 固定執行 exact PMF；NUM-006 的 ADC-only／global-PMF owner 提案均未定案 | 完成 CFG-178A migration 與 owner contract 後，重新從 production consumers 定義 NUM-006 boundary |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |

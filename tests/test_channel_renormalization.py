@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 ORDER = (0, 2, 1, 3)
 
 
+def source_config(victim, *, next_paths=(), fext_paths=(), port_order=ORDER):
+    binding = m178.COMSourceConfig.ChannelBinding
+    return m178.COMSourceConfig(
+        channel=m178.COMSourceConfig.Channel(
+            victim=binding(path=str(victim), port_order=port_order),
+            next=tuple(binding(path=str(path), port_order=port_order) for path in next_paths),
+            fext=tuple(binding(path=str(path), port_order=port_order) for path in fext_paths),
+        )
+    )
+
+
 def measurement():
     rng = np.random.default_rng(178)
     s = (rng.normal(size=(3, 4, 4)) + 1j * rng.normal(size=(3, 4, 4))) * 0.08
@@ -114,27 +125,23 @@ def test_93a_channel_builder_keeps_differential_domain_equation(tmp_path):
 def test_178a_s4p_input_uses_d3p2_single_ended_first_order(tmp_path):
     source = measurement()
     source.write_touchstone(str(tmp_path / "victim"))
-    cfg = m178.COMChannelConfig(
-        victim_s4p_path=str(tmp_path / "victim.s4p"), port_order=ORDER,
-        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
-    )
+    cfg = m178.COMChannelConfig(R0=46.25, R_d_tx=46.25, R_d_rx=46.25)
+    src = source_config(tmp_path / "victim.s4p")
     expected = (
         SparamModel.from_network(source, representation="s4p")
         .renormalized(46.25)
         .s4p_to_s2p(ORDER)
     )
-    actual = m178._build_channel_under_test(cfg)[0]
+    actual = m178._build_channel_under_test(src, cfg)[0]
     np.testing.assert_allclose(actual.sdd, expected.sdd, atol=1e-12, rtol=0)
 
 
 def test_178a_native_s2p_input_renormalizes_in_differential_domain(tmp_path):
     source = SparamModel.from_network(measurement(), port_order=ORDER).s4p_to_s2p()
     source.network.write_touchstone(str(tmp_path / "victim"))
-    cfg = m178.COMChannelConfig(
-        victim_s4p_path=str(tmp_path / "victim.s2p"), port_order=ORDER,
-        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
-    )
-    actual = m178._build_channel_under_test(cfg)[0]
+    cfg = m178.COMChannelConfig(R0=46.25, R_d_tx=46.25, R_d_rx=46.25)
+    src = source_config(tmp_path / "victim.s2p")
+    actual = m178._build_channel_under_test(src, cfg)[0]
     expected = SparamModel.from_network(source.network).renormalized(92.5)
     np.testing.assert_allclose(actual.sdd, expected.sdd, atol=1e-12, rtol=0)
     assert [operation.name for operation in actual.history] == [
@@ -147,12 +154,12 @@ def test_178a_dispatches_mixed_s4p_and_s2p_collection_per_file(tmp_path):
     four_port.write_touchstone(str(tmp_path / "victim"))
     two_port = SparamModel.from_network(four_port, port_order=ORDER).s4p_to_s2p()
     two_port.network.write_touchstone(str(tmp_path / "next"))
-    cfg = m178.COMChannelConfig(
-        victim_s4p_path=str(tmp_path / "victim.s4p"),
-        next_s4p_paths=(str(tmp_path / "next.s2p"),),
-        port_order=ORDER, R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
+    cfg = m178.COMChannelConfig(R0=46.25, R_d_tx=46.25, R_d_rx=46.25)
+    src = source_config(
+        tmp_path / "victim.s4p",
+        next_paths=(tmp_path / "next.s2p",),
     )
-    victim, next_channel = m178._build_channel_under_test(cfg)
+    victim, next_channel = m178._build_channel_under_test(src, cfg)
     expected_victim = (
         SparamModel.from_network(four_port).renormalized(46.25).s4p_to_s2p(ORDER)
     )
@@ -166,22 +173,20 @@ def test_178a_rejects_unsupported_touchstone_without_fallback(tmp_path):
         f=[0, 1e9, 2e9], s=np.zeros((3, 3, 3), dtype=complex), z0=50.0,
     )
     source.write_touchstone(str(tmp_path / "victim"))
-    cfg = m178.COMChannelConfig(
-        victim_s4p_path=str(tmp_path / "victim.s3p"),
-        R0=46.25, R_d_tx=46.25, R_d_rx=46.25,
-    )
+    cfg = m178.COMChannelConfig(R0=46.25, R_d_tx=46.25, R_d_rx=46.25)
+    src = source_config(tmp_path / "victim.s3p")
     with pytest.raises(ValueError, match="Only differential two-port and single-ended four-port"):
-        m178._build_channel_under_test(cfg)
+        m178._build_channel_under_test(src, cfg)
 
 
 def test_fixed_sicopr_case_d3p2_order_closes_all_channel_matrices():
     cfg = excel_to_config_178A(str(ROOT / "cases/sicopr_akinwale_vendorx_22db/178A/config.xlsx"))
-    channels = m178._build_channel_under_test(cfg.channel)
-    paths = [cfg.channel.victim_s4p_path, *cfg.channel.next_s4p_paths, *cfg.channel.fext_s4p_paths]
-    for path, channel in zip(paths, channels):
+    channels = m178._build_channel_under_test(cfg.src, cfg.channel)
+    bindings = cfg.src.channel.ordered()
+    for binding, channel in zip(bindings, channels):
         expected = (
             SparamModel.from_touchstone(
-                path, representation="s4p", port_order=cfg.channel.port_order,
+                binding.path, representation="s4p", port_order=binding.port_order,
             )
             .renormalized(cfg.channel.R0)
             .limited_to_frequency(cfg.channel.sparam_frequency_limit_Hz)

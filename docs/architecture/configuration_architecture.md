@@ -32,26 +32,51 @@ The project workbook format is stable within each COM version. Similar presentat
 
 ## Configuration domains and classes
 
-`domain` describes the user's intent for a setting; workbook `Parameter Class`
+Workbook `Domain` describes the user's intent for a setting; workbook `Parameter Class`
 describes its source/runtime treatment. These are independent axes and must not
 be substituted for one another. For example, `algorithm_policy` may use the
-existing `policy` class; `physical_input` may be `intrinsic`; a read-only
-resolved value may have domain `derived` while its schema treatment follows
-the version contract.
+existing `policy` class, while a construction-derived physical value uses
+`Domain=intrinsic` and `Parameter Class=derived`.
 
 Every user-configurable field has exactly one primary domain, plus a separate
 exposure level:
 
 | Domain | Meaning |
 |---|---|
-| `physical_input` | System, specification, and physical conditions being modeled. |
+| `case` | Case identity and source note; adapter/report metadata, not `COMConfig`. |
+| `intrinsic` | System, specification, and physical conditions; maps directly to physical runtime fields without a `cfg.intrinsic` wrapper. |
 | `block_source` | Data/design variant selected for a named block, including its identity and provenance. |
 | `search` | Search objective, variables, and candidate ranges. |
 | `algorithm_policy` | Choice of mathematical or numerical method. |
 | `numerical_control` | Resolution, convergence, truncation, precision, and computational-cost controls. |
 | `execution` | Scheduling and run-flow controls that do not change mathematical results. |
-| `provenance` | Case, source, selected preset, override, and effective-setting record. |
-| `derived` | Runtime-resolved values that are not directly user-settable. |
+
+For 178A, these domain names and registry prefixes have one canonical mapping:
+
+| Prefix | Project/domain name | Approved runtime field |
+|---|---|---|
+| `PHY` | workbook `intrinsic` / registry `physical_input` | physical root fields; no `cfg.phy` or `cfg.intrinsic` wrapper |
+| `SRC` | `block_source` | `cfg.src` |
+| `ALG` | `algorithm_policy` | `cfg.alg` |
+| `NUM` | `numerical_control` | `cfg.num` |
+| `SRCH` | `search` | `cfg.srch` |
+| `EXE` | `execution` | `cfg.exe` |
+
+The abbreviation is a runtime access path, not a second taxonomy.  Public
+dataclass names remain descriptive (`COMSourceConfig`,
+`COMAlgorithmPolicyConfig`, `COMNumericalControlConfig`, `COMSearchConfig`, and
+`COMExecutionConfig`). Project Config uses `intrinsic` for the user-facing
+physical family accepted by the user; the branch registry retains the
+`PHY / physical_input` class name. These are an explicit parent/child mapping,
+not two runtime config trees.
+
+`intrinsic`, `policy`, and `derived` in the workbook's `Parameter Class` column
+describe schema/source treatment; they do not replace the domains above.
+Intrinsic values map directly to their physical runtime objects.  Runtime
+derived values stay in the dataclass that derives them, owner-local state, or
+status.  Provenance stays in adapter/report metadata.  Do not create
+`cfg.intrinsic`, `cfg.derived`, or `cfg.provenance` merely to mirror workbook
+classification or reporting metadata.
 
 Each field also has exposure `frequent`, `advanced`, or `internal_readonly`.
 Exposure describes who normally edits or views the value; it does not change
@@ -197,7 +222,8 @@ For 178A, keep `mlsd_trunc_len`, `delta_com_an`, and `minimum_com_limit` indepen
 
 93A and 178A use the same presentation conventions and columns, including `Parameter Class` in fixed config. Each template contains all project inputs required by its version, including approved derived rows, and only that version's supported parameters. Shared visual format does not authorize adding 178A-only fields such as `N_qb`, `P_qc`, or MLSD to 93A.
 
-The current templates/adapters are not fully aligned with this contract. Version trees identify observed gaps, including the missing 93A class column, class labels needing correction, and the 93A legacy Ad Hoc path. These are implementation discrepancies; this documentation update does not change code or workbook files.
+The 178A templates and tracked cases implement this presentation. 93A remains
+outside CFG-178A-E and retains its existing version-specific workbook contract.
 
 ## Related documents
 

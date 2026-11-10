@@ -63,4 +63,6 @@ Final artifacts include `resolved_config.json`, the Git revision and dirty-state
 
 For a simple interactive search, the versioned model's manual `search_run` entry may be used. For reproducible split execution, use the command-line lifecycle above so partial results can be merged and verified using the same boundaries as GitHub Actions.
 
-The legacy 178A split-search GUI still resolves the older case layout. Until it is migrated, it is a compatibility tool and is not the canonical entry for new cases.
+The 178A split-search GUI accepts `cases/<case_id>` and resolves the canonical
+`178A/config.xlsx` workbook. Its generated artifacts remain below
+`178A/results/search_run/`.

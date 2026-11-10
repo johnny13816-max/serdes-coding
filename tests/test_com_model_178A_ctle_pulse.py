@@ -231,16 +231,16 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
     cfg = excel_to_config_178A(
         str(root / "cases" / "sicopr_akinwale_vendorx_22db" / "178A" / "config.xlsx")
     )
-    channels = _build_channel_under_test(cfg.channel)
+    channels = _build_channel_under_test(cfg.src, cfg.channel)
     continuous_cfg = replace(
-        cfg, policy=replace(cfg.policy, ctle_pulse_realization="continuous_tf")
+        cfg, alg=replace(cfg.alg, ctle_pulse_realization="continuous_tf")
     )
     bilinear_cfg = replace(
-        cfg, policy=replace(cfg.policy, ctle_pulse_realization="bilinear_iir")
+        cfg, alg=replace(cfg.alg, ctle_pulse_realization="bilinear_iir")
     )
     bilinear_cosine_cfg = replace(
         bilinear_cfg,
-        policy=replace(bilinear_cfg.policy, out_of_measured="cosine_decay"),
+        alg=replace(bilinear_cfg.alg, out_of_measured="cosine_decay"),
     )
     continuous_shared = _build_shared_path(continuous_cfg, channels[0].freqs)
     bilinear_shared = _build_shared_path(bilinear_cfg, channels[0].freqs)

@@ -262,7 +262,7 @@ def _write_edit_audit(draft: ExistingProjectDraft, target: Path) -> None:
         return
     audit_path = target.with_suffix(".mapping.csv")
     columns = (
-        "sheet", "group", "parameter", "parameter_class", "status", "original_status", "value", "unit",
+        "sheet", "domain", "parameter", "parameter_class", "status", "original_status", "value", "unit",
         "source_key", "source_block", "source_cell", "source_value", "base_value", "note",
         "source_unit", "converted_value", "method", "condition_key", "condition_cell",
         "condition_value",
@@ -276,7 +276,7 @@ def _write_edit_audit(draft: ExistingProjectDraft, target: Path) -> None:
         rows[item.identity] = {
             **previous,
             "sheet": item.sheet,
-            "group": item.group,
+            "domain": item.domain,
             "parameter": item.parameter,
             "parameter_class": item.parameter_class,
             "status": "override",
@@ -301,7 +301,7 @@ def _write_edit_audit(draft: ExistingProjectDraft, target: Path) -> None:
             "condition_value": str(item.condition_value) if item.condition_value is not None else "",
         }
     with audit_path.open("w", newline="", encoding="utf-8-sig") as stream:
-        writer = csv.DictWriter(stream, fieldnames=columns)
+        writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows[key] for key in sorted(rows))
     draft.audit_rows=rows

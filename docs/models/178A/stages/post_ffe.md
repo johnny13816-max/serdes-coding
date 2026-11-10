@@ -22,7 +22,7 @@ It does not change the selected DTE MSE and does not build the final interferenc
 ## Entry and output
 
 ```text
-calculate_post_ffe_imp(dte_status, eq_ch, imp_pre, victim_pulse, run_cfg)
+calculate_post_ffe_imp(dte_status, eq_ch, imp_pre, victim_pulse)
     -> (COMPostFFEEqChannelStatus, COMImpairmentStatus)
 ```
 
@@ -39,11 +39,11 @@ The commit validates the selected phase and adds only `eq_ch.post_ffe` and
 | `imp_pre` | `sigma_X`, pre-DTE `S_rn`, `S_tn`, and selected impairment data | physical pre-DTE inputs |
 | `h` | oversampled victim pulse | post-FFE jitter sensitivity from adjacent phases |
 | `COMConfig.link` | run-level sampled grid and symbol timing | pre-FFE input grid and fixed/circular output grid |
-| `COMConfig.policy.rxffe_record_realization` | `linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | victim、all XT 與 DDJ 的共同 FFE record realization |
-| `COMConfig.policy.eq_ch_imp_len`／`num_trunc_ui` | `full`／`truncated` | independent NUM-003 PSD/correlation record length |
+| `COMConfig.alg.rxffe_record_realization` | `linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | victim、all XT 與 DDJ 的共同 FFE record realization |
+| `COMConfig.num.eq_ch_imp_len`／`num_trunc_ui` | `full`／`truncated` | independent NUM-003 PSD/correlation record length |
 | `COMConfig.imp` | `R_LM`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc` | signal amplitude, jitter, and quantization controls |
 | `COMConfig.L` | PAM order | signal amplitude and PMF input |
-| `COMConfig.pmf` plus `run_cfg` | ADC-input PMF grid/retention policy | exact selected-phase ADC clipping material |
+| `COMConfig.pmf` plus `COMConfig.num` | ADC-input PMF grid/retention policy | exact selected-phase ADC clipping material |
 
 `w_lim` must be the full zero-filled vector with shape `(N_max,)`, as guaranteed by the DTE stage contract.
 
@@ -204,7 +204,9 @@ The stage uses the supplied run's effective `adc_input_pmf_grid` and
 the final-PMF family. Enabled pre-DTE and post-FFE ADC-input material are both
 built through their fixed exact paths; neither stage exposes a PMF-method selector.
 
-The stage does not read `cfg.execution.single_run` implicitly; the caller passes the active single-run, search-sweep, or search-final profile.
+The stage reads the already resolved `cfg.alg` and `cfg.num` owned by this
+single simulator instance. Run-mode selection occurs in the workbook adapter
+before `COM` construction; Stage 5 does not receive or interpret a profile.
 
 ## Failure conditions
 

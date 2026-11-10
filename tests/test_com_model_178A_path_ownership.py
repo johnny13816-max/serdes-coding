@@ -46,7 +46,7 @@ def test_legacy_93a_named_methods_are_thin_178a_compatibility_wrappers() -> None
 
 def test_channel_ingestion_d3p2_order_keeps_all_sdd_elements() -> None:
     cfg = excel_to_config_178A(str(CONFIG))
-    channels = _build_channel_under_test(cfg.channel)
+    channels = _build_channel_under_test(cfg.src, cfg.channel)
     assert len(channels) == 6
     assert all(channel.sdd.shape[1:] == (2, 2) for channel in channels)
     assert _digest([channel.sdd for channel in channels]) == (

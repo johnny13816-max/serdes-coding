@@ -25,10 +25,12 @@ def test_fingerprint_supports_external_case_root(tmp_path: Path) -> None:
     victim.parent.mkdir()
     victim.write_bytes(b"touchstone")
     cfg = SimpleNamespace(
-        channel=SimpleNamespace(
-            victim_s4p_path=str(victim),
-            next_s4p_paths=[],
-            fext_s4p_paths=[],
+        src=SimpleNamespace(
+            channel=SimpleNamespace(
+                victim=SimpleNamespace(path=str(victim)),
+                next=[],
+                fext=[],
+            ),
         )
     )
 

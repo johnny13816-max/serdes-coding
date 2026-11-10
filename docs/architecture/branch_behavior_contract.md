@@ -27,32 +27,41 @@ selecting between project methods unless it actually does so.
 
 ## Configuration classes
 
-```text
-COMConfig
-├── specification / case configuration
-│   └── physical parameters, topology, supplied files, and case data bounds
-├── branch behavior configuration
-│   ├── selector: chooses a named realization
-│   └── branch parameter: only meaningful for a particular selector
-├── execution configuration
-│   └── run extent, search coverage, accuracy, convergence, and scheduling
-└── provenance
-    └── profile name, raw/effective overrides, and source history
-```
+The canonical classification is shared by branch review, Project Config, and
+runtime-config migration.  Project Config uses the full names; the 178A
+runtime target uses the registered lower-case abbreviations for grouped fields.
+`physical_input` remains in the physical object tree instead of gaining a
+`cfg.phy` wrapper.
+
+| Prefix | Canonical class | 178A runtime target | Boundary |
+|---|---|---|---|
+| `PHY` | `physical_input` | root fields such as `cfg.link` and `cfg.channel` | System, specification, topology, physical conditions, and case data bounds. |
+| `SRC` | `block_source` | `cfg.src` | Selected data/design artifact, its identity, format, units, interface, and interpretation metadata. |
+| `ALG` | `algorithm_policy` | `cfg.alg` | Named mathematical or numerical realization of one semantic operation. |
+| `NUM` | `numerical_control` | `cfg.num` | Resolution, convergence, truncation, precision, and computational cost. |
+| `SRCH` | `search` | `cfg.srch` | Search variables, candidate coverage, search strategy, and result-retention controls. |
+| `EXE` | `execution` | `cfg.exe` | Run extent, scheduling, and stage gates that do not change formulas in an executed stage. |
+
+`intrinsic` is a Project Config parameter class, not a runtime wrapper.  A
+derived value remains with its physical dataclass (`init=False`/`__post_init__`),
+its runtime owner, or status.  Profile/source history is adapter or report
+metadata.  Neither `derived` nor `provenance` is a top-level runtime control
+group, and neither may select numerical flow.
 
 | Class | Definition | Examples | Is it a branch behavior? |
 |---|---|---|---|
 | Specification / case configuration | Defines the modeled physical case or an externally supplied input. | package values, S-parameter paths, explicit measured-band limit | No |
 | Branch selector | Chooses a documented alternative realization of one semantic operation. | CTLE realization, renormalization order | Yes |
 | Branch parameter | Supplies a parameter required by one selected branch; it has no independent algorithm identity. | `num_trunc_ui` for `eq_ch_imp_len="truncated"`, Gaussian support value for an override method | Part of its parent branch only |
-| Execution configuration | Controls whether, how far, or how accurately work is performed without defining a model method. | target, sweep coverage, grid-quality setting | Normally no; see review rule below |
+| Execution configuration | Controls whether or how far one resolved run executes, without changing formulas in a stage that executes. | target, stage gate | No; if a value changes method, accuracy, convergence, search coverage, or candidate selection, classify it under `ALG`, `NUM`, or `SRCH` instead. |
+| Search configuration | Controls variables, candidate coverage, search strategy, or result retention. | TX FFE/CTLE candidate axes, sampling-phase search, top-K retention | No, unless a choice independently satisfies the branch-behavior definition. |
 | Input/boundary handling | Handles absent, malformed, or bounded data. | missing-DC completion, file-read errors | No |
 | Fixed implementation behavior | Has one supported behavior and no selectable alternate. | a fixed utility contract | No |
 | Provenance | Explains how effective settings were obtained, but must not decide model flow. | profile name and override record | No |
 
-An execution control becomes a branch-behavior candidate only if its choices
-select materially different algorithms or numerical formulations, rather than
-only work coverage, tolerance, or scheduling.
+An execution or search control becomes a branch-behavior candidate only if its
+choices select materially different algorithms or numerical formulations,
+rather than only run extent, coverage, tolerance, retention, or scheduling.
 
 ## Required structure and ownership
 

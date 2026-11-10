@@ -26,20 +26,19 @@ consumers rather than inherited model methods.
 ```text
 RUN_MODE
 ├── single_run
-│   └── execution.single_run
+│   └── adapter profile single_run → cfg.alg/num/srch/exe
 └── search_run
-    ├── execution.search_sweep
-    └── execution.search_final
+    ├── adapter profile search_sweep → sweep_cfg
+    └── adapter profile search_final → final_cfg
 ```
 
 `RUN_MODE` chooses the user-visible operation. The two search profiles are internal steps of one `search_run`; they are not additional run modes. Search ranges come from the workbook `search_config` sheet. The manual `EXEC_POLICY` dictionary may replace fields of the three existing execution profiles, but it does not replace fixed config or search ranges.
 
 178A `run_config.control.execution_profile` 是 workbook facade selector。
-`excel_to_config_178A()` 在建立 `COMConfig` 前把它展開為具名算法和三組
-有效 execution profile。`COM._effective_run_cfg()` 只回傳已解析的 profile；
-model 不判斷 selector。有效方法、profile 名稱及 raw/effective override
-隨 config snapshot 輸出。
-`COM.__init__()` 另依 `COMPolicyConfig.eq_ch_imp_len` 建立共享 NUM-003
+`excel_to_config_178A(..., run_mode=...)` 在建立 `COMConfig` 前選定一組
+profile，並展開為 `cfg.alg/num/srch/exe`；model 不判斷 selector。
+有效方法、profile 名稱及 raw/effective override 隨 config snapshot 輸出。
+`COM.__init__()` 另依 `cfg.num.eq_ch_imp_len` 建立共享 NUM-003
 impairment-record context；它不改動 channel／pulse 使用的 `COMConfig.link`。
 
 ## Manual file entry
@@ -58,7 +57,7 @@ __main__
 └── branch by RUN_MODE
     ├── single_run
     │   ├── COM(cfg).run(progress=True)
-    │   │   └── COM._run_once(run_cfg=execution.single_run)
+    │   │   └── validate scalar cfg.srch → COM._run_once()
     │   └── COMReport178A(cfg, status).export_single_run(report_path)
     │       └── COMReportBase.plot_single_run()
     │           ├── plot_overview()
@@ -68,26 +67,32 @@ __main__
     │           ├── plot_pmf()
     │           └── plot_mlsd()
     └── search_run
-        ├── excel_to_search_config_178A(config.xlsx)
-        └── COM(cfg).run(search=search_cfg, report_dir=report_path)
-            └── run_full_search(cfg, search_cfg, report_path)
+        ├── load sweep_cfg and final_cfg, each carrying cfg.srch
+        └── run_full_search(sweep_cfg, final_cfg, report_path)
 ```
 
 The model returns status. Reporting receives the completed config and status and remains a downstream consumer.
 
 ## One-candidate model pipeline
 
-`COM.run(search=None)` selects `execution.single_run` and delegates to `_run_once()`. Search code calls `_run_once()` directly with its own profile.
+`COM.run()` requires scalar candidate axes in `cfg.srch` and delegates to
+`_run_once()`. Outer search resolves every vector candidate into a copied
+scalar config before calling the same public method.
 
 ```text
-COM._run_once(run_cfg)
+COM._run_once()
 ├── initialize COMStatus and target checks
 ├── build_all_paths()
 │   └── com_178a.path_stage
-│       ├── _build_channel_under_test(channel config)
+│       ├── _build_channel_under_test(cfg.src, cfg.channel)
+│       │   ├── each source binding loads and validates its artifact
+│       │   ├── S4P: physical R0 renormalization → binding port-order Sdd
+│       │   ├── native S2P: differential-domain 2*R0 renormalization
+│       │   └── physical measured-frequency limit → common measured grid
 │       ├── _build_shared_path(config, frequency grid)
 │       └── _build_paths(config, shared blocks, channels)
 │           └── _build_path(...) for victim, NEXT, and FEXT paths
+│               ├── cfg.alg.missing_dc_policy → one terminated-H21 completion
 │               ├── _realize_ctle_pulse(...) -> path.pulse
 │               │   ├── continuous_tf: frequency-domain CTF + unit pulse
 │               │   └── bilinear_iir: measured TF -> finite record -> IIR + unit pulse
@@ -113,7 +118,7 @@ COM._run_once(run_cfg)
 │   ├── optionally choose and evaluate fine phase indices
 │   ├── retain the current minimum-MSE complete candidate bundle
 │   └── _assign_selected_phase(eq_ch, imp, dte) once
-└── branch by run_cfg.target
+└── branch by cfg.exe.target
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
@@ -181,26 +186,32 @@ calculate_COM_MLSD()
 
 ## Local file-backed search
 
-`run_full_search()` is the sequential convenience entry used by the manual search path.
+`run_configured(single_cfg, sweep_cfg, final_cfg, report_dir)` is the SRCH
+dispatch boundary. A Cartesian product of one resolves its candidate into
+`single_cfg` and calls `COM.run()` directly. A larger product delegates to
+`run_full_search()`; vectors never reach `COM.run()`.
+
+`run_full_search()` is the sequential multi-candidate entry used by the manual
+search path.
 
 ```text
-run_full_search(cfg, search, report_dir)
+run_full_search(sweep_cfg, final_cfg, report_dir)
 ├── create_search_plan(...)
-│   ├── search.candidates(cfg.filter)
+│   ├── sweep_cfg.srch.candidates(sweep_cfg.filter)
 │   ├── write candidate_manifest.csv
 │   └── write group_plan.csv
 ├── for every planned group
 │   └── run_partial_group(...)
 │       ├── reconstruct candidate
-│       ├── apply candidate to a copied config
-│       ├── COM(candidate_cfg)._run_once(execution.search_sweep)
+│       ├── apply candidate to copied filter + scalar cfg.srch
+│       ├── COM(candidate_cfg).run()
 │       └── write group_NNN.csv
 └── finalize_search(...)
     ├── merge_partial_results(...)
     ├── rank successful rows by MSE
-    ├── rank rows and seek execution.search_top_k valid final results
+    ├── rank rows and seek cfg.srch.final_top_k valid final results
     ├── for each attempted row, backfilling after grid overflow
-    │   ├── COM(candidate_cfg)._run_once(execution.search_final)
+    │   ├── COM(candidate_cfg).run()
     │   ├── COMStatus.export(...)
     │   └── if include_plots: COMReport178A(candidate_cfg, status).export_single_run(...)
     ├── write full_search_results.csv
@@ -219,7 +230,7 @@ The workflow splits the same file-backed search functions across jobs; it does n
 workflow_dispatch(selected Git ref, case_id input)
 ├── prepare job
 │   └── run_full_search_178A.py prepare
-│       ├── load workbook config and search config
+│       ├── load mode-resolved configs carrying cfg.srch
 │       ├── fingerprint workbook and referenced channel files
 │       ├── create_search_plan(...)
 │       └── write execution_plan.json and worker matrix

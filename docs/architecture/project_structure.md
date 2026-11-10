@@ -98,7 +98,13 @@ Each active case uses `cases/<case_id>/<model>/config.xlsx`; generated output st
 
 178A workbooks contain `fixed_config`, `search_config`, `channels`, and `run_config`. Channel paths are defined exclusively in `config.xlsx`'s `channels` sheet and resolved relative to the workbook. S4P inputs remain in `reference_data/COM_channel_data/`; do not duplicate them under cases. Manifests record provenance; they do not override channel definitions. Legacy `config/config_178A.xlsx` and shared channel manifests are not templates for new runs.
 
-`fixed_config` uses the existing Domain, Parameter, Parameter Class, Value, Unit and Description schema. Preserve model-defined PMF settings. Reference parameters, including MLSD_en, are intrinsic; project model-processing methods are fixed-config policy. Execution policy contains per-stage calculation/acceleration choices and may affect results. Validate reference-to-project and project-to-runtime mappings at their boundaries.
+Every 178A sheet carries a canonical `Domain`: `fixed_config` separates
+`case/intrinsic/algorithm_policy/numerical_control`, `channels` is
+`block_source`, `search_config` is `search`, and each `run_config` row is
+classified by its actual effect (`algorithm_policy`, `numerical_control`,
+`search`, or `execution`). `Parameter Class` remains the independent
+source/schema-treatment axis on `fixed_config`. Validate reference-to-project
+and project-to-runtime mappings at their boundaries.
 
 Excel I/O is versioned under `src/serdes_coding/io/`: `com_excel_common.py` owns model-neutral workbook parsing, `com_excel_io_93A.py` and `com_excel_io_178A.py` own their respective field-to-runtime mappings, and `com_excel_io.py` is the compatibility facade. Version-specific mapping must not be added to the common parser.
 

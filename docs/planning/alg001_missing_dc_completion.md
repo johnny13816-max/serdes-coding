@@ -7,7 +7,11 @@ Historical / non-authoritative closure evidence. Current behavior is owned by
 
 Status: Closed 2026-11-05
 Classification: `algorithm_policy`
-Control: `channel.missing_dc_policy`
+Control: `alg.missing_dc_policy`
+
+CFG-178A-D later moved this already-closed selector from the mixed channel
+object to the canonical ALG domain; its values, numerical owner, and effective
+profile behavior did not change.
 
 ## Goal and boundary
 

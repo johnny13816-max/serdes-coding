@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal, Optional, Sequence
@@ -10,6 +11,7 @@ import numpy as np
 
 from ...utilities.link import LinkConfig
 from ...utilities.sparam import SparamModel
+from ...search.com_search_178A import COMSearchConfig
 from ..com_dataclass_text import COMDataclassText, TextField, TextSection
 from .errors import COMLengthMismatchError, COMTxfirMainCursorError
 
@@ -46,38 +48,20 @@ GAUSSIAN_SUPPORT_N_SIGMA = 8.0
 
 @dataclass(repr=False)
 class COMChannelConfig(_LeafConfigText):
-    """
-    Victim and crosstalk channel configuration using internal formula units.
-
-    Touchstone representation is detected when the channel is loaded.  The
-    ``*_s4p_path`` field names are retained as legacy-compatible path names;
-    they may point to a native differential S2P or a measured single-ended S4P.
-    """
+    """Physical channel conditions and measured-record boundary."""
     _FIELD_UNITS = {
         "R0": "ohm",
         "R_d_tx": "ohm",
         "R_d_rx": "ohm",
-        "victim_s4p_path": "filesystem path",
-        "next_s4p_paths": "filesystem paths",
-        "fext_s4p_paths": "filesystem paths",
-        "port_order": "zero-based port indices",
         "gamma_src": "dimensionless",
         "gamma_load": "dimensionless",
-        "missing_dc_policy": "policy",
         "sparam_frequency_limit_Hz": "Hz",
     }
     R0: float                                               # unit: ohm, single-ended reference resistance
     R_d_tx: float                                           # unit: ohm, TX die termination resistance
     R_d_rx: float                                           # unit: ohm, RX die termination resistance
-    victim_s4p_path: Optional[str] = None                   # unit: filesystem path
-    next_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
-    fext_s4p_paths: Sequence[str] = ()                      # unit: filesystem paths
-    port_order: tuple[int, int, int, int] = (0, 1, 2, 3)    # unit: zero-based S4P port order
     gamma_src: complex = field(init=False)                  # unit: dimensionless, derived from R_d_tx and R0
     gamma_load: complex = field(init=False)                 # unit: dimensionless, derived from R_d_rx and R0
-    missing_dc_policy: Literal[
-        "error", "hold", "skrf", "mag_phase_trend_to_dc"
-    ] = "error"
     sparam_frequency_limit_Hz: Optional[float] = None       # unit: Hz; measured-record boundary
 
     def __post_init__(self) -> None:
@@ -89,13 +73,6 @@ class COMChannelConfig(_LeafConfigText):
 
         self.gamma_src = complex((self.R_d_tx - self.R0) / (self.R_d_tx + self.R0))
         self.gamma_load = complex((self.R_d_rx - self.R0) / (self.R_d_rx + self.R0))
-        if self.missing_dc_policy not in {
-            "error", "hold", "skrf", "mag_phase_trend_to_dc"
-        }:
-            raise ValueError(
-                "missing_dc_policy must be error, hold, skrf, or "
-                "mag_phase_trend_to_dc."
-            )
         if self.sparam_frequency_limit_Hz is not None:
             value = float(self.sparam_frequency_limit_Hz)
             if not np.isfinite(value) or value <= 0.0:
@@ -134,133 +111,205 @@ class COMChannelConfig(_LeafConfigText):
 
         return f_min + np.arange(n) * df
 
-    def measured_grid_summary(self) -> list[dict[str, object]]:
-        """
-        Return measured frequency-grid summaries for configured channel files.
 
-        The summary is for configuration/debug visibility only. It reads each
-        Touchstone file and reports the raw measured f_min, f_max, and delta_f.
-        """
-        rows: list[tuple[str, Optional[str]]] = [
-            ("victim", self.victim_s4p_path),
-            *[("next", path) for path in self.next_s4p_paths],
-            *[("fext", path) for path in self.fext_s4p_paths],
-        ]
 
-        summary: list[dict[str, object]] = []
-        for kind, path in rows:
-            if path is None:
-                summary.append({"kind": kind, "path": None, "status": "missing path"})
-                continue
+@dataclass(repr=False)
+class COMSourceConfig(COMDataclassText):
+    """Block-source bindings; future source families may sit beside channel."""
 
-            try:
-                channel = SparamModel.from_touchstone(path, representation="auto")
-                raw_f_max = float(channel.freqs[-1])
-                channel = (
-                    channel
-                    if self.sparam_frequency_limit_Hz is None
-                    else channel.limited_to_frequency(self.sparam_frequency_limit_Hz)
+    @dataclass(frozen=True, repr=False)
+    class ChannelBinding(_LeafConfigText):
+        """One Touchstone artifact and the metadata required to interpret it."""
+
+        _FIELD_UNITS = {
+            "path": "filesystem path",
+            "representation": "input representation",
+            "port_order": "zero-based port indices",
+        }
+        path: str
+        representation: Literal["auto", "s2p", "s4p"] = "auto"
+        port_order: tuple[int, int, int, int] = (0, 1, 2, 3)
+
+        def _text_sections(self) -> tuple[TextSection, ...]:
+            return (
+                TextSection("Channel artifact", (
+                    self._field("path", "path", stored_unit="filesystem path"),
+                    self._field(
+                        "representation", "representation",
+                        stored_unit="input representation",
+                    ),
+                    self._field(
+                        "port_order", "port order",
+                        stored_unit="zero-based port indices",
+                    ),
+                )),
+            )
+
+        def _repr_fields(self) -> tuple[TextField, ...]:
+            return (
+                self._field("path", "path", stored_unit="filesystem path"),
+                self._field(
+                    "representation", "representation",
+                    stored_unit="input representation",
+                ),
+            )
+
+        def __post_init__(self) -> None:
+            path = str(self.path).strip()
+            if not path:
+                raise ValueError("COMSourceConfig.ChannelBinding.path must not be blank.")
+            object.__setattr__(self, "path", path)
+            if self.representation not in {"auto", "s2p", "s4p"}:
+                raise ValueError(
+                    "COMSourceConfig.ChannelBinding.representation must be "
+                    "'auto', 's2p', or 's4p'."
                 )
-                freqs = channel.freqs
-                delta_f = float(freqs[1] - freqs[0]) if len(freqs) > 1 else float("nan")
-                summary.append({
-                    "kind": kind,
-                    "path": str(path),
+            port_order = tuple(int(value) for value in self.port_order)
+            if len(port_order) != 4 or set(port_order) != {0, 1, 2, 3}:
+                raise ValueError(
+                    "COMSourceConfig.ChannelBinding.port_order must be a "
+                    "permutation of (0, 1, 2, 3)."
+                )
+            object.__setattr__(self, "port_order", port_order)
+
+        def load(self) -> SparamModel:
+            """Load and validate one supported differential or single-ended artifact."""
+            measured = SparamModel.from_touchstone(
+                self.path,
+                representation=self.representation,
+            )
+            if measured.representation not in {"s2p", "s4p"}:
+                raise ValueError(
+                    f"Unsupported channel representation for {self.path!r}: "
+                    f"{measured.representation!r}."
+                )
+            return measured
+
+    @dataclass(frozen=True, repr=False)
+    class Channel(COMDataclassText):
+        """Victim/NEXT/FEXT source bindings in COM path order."""
+
+        victim: "COMSourceConfig.ChannelBinding"
+        next: Sequence["COMSourceConfig.ChannelBinding"] = ()
+        fext: Sequence["COMSourceConfig.ChannelBinding"] = ()
+
+        def __post_init__(self) -> None:
+            if not isinstance(self.victim, COMSourceConfig.ChannelBinding):
+                raise TypeError("COMSourceConfig.Channel.victim must be a ChannelBinding.")
+            next_bindings = tuple(self.next)
+            fext_bindings = tuple(self.fext)
+            for name, bindings in (("next", next_bindings), ("fext", fext_bindings)):
+                if not all(
+                    isinstance(binding, COMSourceConfig.ChannelBinding)
+                    for binding in bindings
+                ):
+                    raise TypeError(
+                        f"COMSourceConfig.Channel.{name} must contain only ChannelBinding values."
+                    )
+            object.__setattr__(self, "next", next_bindings)
+            object.__setattr__(self, "fext", fext_bindings)
+
+        def _text_sections(self) -> tuple[TextSection, ...]:
+            return (
+                TextSection("Channel artifacts", (
+                    self._field("victim", "victim", stored_unit="source binding"),
+                    self._field("next", "NEXT", stored_unit="source bindings"),
+                    self._field("fext", "FEXT", stored_unit="source bindings"),
+                )),
+            )
+
+        def _repr_fields(self) -> tuple[TextField, ...]:
+            return (
+                self._field("victim", "victim", stored_unit="source binding"),
+                self._field("next", "NEXT", stored_unit="source bindings", summary="shape"),
+                self._field("fext", "FEXT", stored_unit="source bindings", summary="shape"),
+            )
+
+        def ordered(self) -> tuple["COMSourceConfig.ChannelBinding", ...]:
+            return (self.victim, *self.next, *self.fext)
+
+        def measured_grid_summary(
+            self,
+            frequency_limit_Hz: Optional[float],
+        ) -> list[dict[str, object]]:
+            rows = (
+                (("victim", self.victim),)
+                + tuple(("next", binding) for binding in self.next)
+                + tuple(("fext", binding) for binding in self.fext)
+            )
+            summary: list[dict[str, object]] = []
+            for kind, binding in rows:
+                try:
+                    measured = binding.load()
+                    raw_f_max = float(measured.freqs[-1])
+                    effective = (
+                        measured
+                        if frequency_limit_Hz is None
+                        else measured.limited_to_frequency(frequency_limit_Hz)
+                    )
+                    freqs = effective.freqs
+                    summary.append({
+                        "kind": kind,
+                        "path": binding.path,
+                        "representation": measured.representation,
+                        "n": len(freqs),
+                        "f_min": float(freqs[0]),
+                        "f_max": float(freqs[-1]),
+                        "raw_f_max": raw_f_max,
+                        "requested_frequency_limit_Hz": frequency_limit_Hz,
+                        "effective_f_max": float(freqs[-1]),
+                        "delta_f": (
+                            float(freqs[1] - freqs[0])
+                            if len(freqs) > 1 else float("nan")
+                        ),
+                    })
+                except Exception as exc:
+                    summary.append({
+                        "kind": kind,
+                        "path": binding.path,
+                        "status": f"unreadable: {exc}",
+                    })
+            return summary
+
+        def aligned_grid_summary(
+            self,
+            channel_cfg: COMChannelConfig,
+        ) -> dict[str, object]:
+            try:
+                channels = [binding.load() for binding in self.ordered()]
+                if channel_cfg.sparam_frequency_limit_Hz is not None:
+                    channels = [
+                        channel.limited_to_frequency(
+                            channel_cfg.sparam_frequency_limit_Hz
+                        )
+                        for channel in channels
+                    ]
+                freqs = channel_cfg.align_grid(channels)
+                return {
+                    "status": "ok",
                     "n": len(freqs),
                     "f_min": float(freqs[0]),
                     "f_max": float(freqs[-1]),
-                    "raw_f_max": raw_f_max,
-                    "requested_frequency_limit_Hz": self.sparam_frequency_limit_Hz,
-                    "effective_f_max": float(freqs[-1]),
-                    "delta_f": delta_f,
-                })
+                    "delta_f": float(freqs[1] - freqs[0]),
+                }
             except Exception as exc:
-                summary.append({
-                    "kind": kind,
-                    "path": str(path),
-                    "status": f"unreadable: {exc}",
-                })
+                return {"status": f"unavailable: {exc}"}
 
-        return summary
+    channel: Channel
 
-    def aligned_grid_summary(self) -> dict[str, object]:
-        """
-        Return the planned common measured-domain grid for channel processing.
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Block sources", (
+                self._field("channel", "channel", stored_unit="source configuration"),
+            )),
+        )
 
-        Contract:
-        - use only the overlapping measured frequency band
-        - choose the smallest measured df among all channels
-        - do not extrapolate any channel in S-parameter domain
-        """
-        try:
-            channels = [
-                SparamModel.from_touchstone(
-                    path,
-                    representation="s4p",
-                    port_order=self.port_order,
-                )
-                for path in [
-                    self.victim_s4p_path,
-                    *self.next_s4p_paths,
-                    *self.fext_s4p_paths,
-                ]
-                if path is not None
-            ]
-            if self.sparam_frequency_limit_Hz is not None:
-                channels = [
-                    channel.limited_to_frequency(self.sparam_frequency_limit_Hz)
-                    for channel in channels
-                ]
-            freqs = self.align_grid(channels)
-            return {
-                "status": "ok",
-                "n": len(freqs),
-                "f_min": float(freqs[0]),
-                "f_max": float(freqs[-1]),
-                "delta_f": float(freqs[1] - freqs[0]),
-            }
-        except Exception as exc:
-            return {"status": f"unavailable: {exc}"}
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("channel", "channel", stored_unit="source configuration"),)
 
-    def _pretty(self, indent: int = 0) -> str:
-        pad = " " * indent
-        inner_pad = " " * (indent + 2)
-        lines = [f"{pad}{type(self).__name__}("]
-        for item in fields(self):
-            value = getattr(self, item.name)
-            lines.append(f"{inner_pad}{item.name}={self._format_value(value, indent + 2, item.name)},")
-
-        lines.append(f"{inner_pad}measured_channels=[")
-        for row in self.measured_grid_summary():
-            if "f_min" in row:
-                lines.append(
-                    f"{inner_pad}  "
-                    f"{{kind={row['kind']!r}, n={row['n']}, "
-                    f"f_min={self._format_frequency(row['f_min'])}, "
-                    f"f_max={self._format_frequency(row['f_max'])}, "
-                    f"delta_f={self._format_frequency(row['delta_f'])}, "
-                    f"path={row['path']!r}}},"
-                )
-            else:
-                lines.append(
-                    f"{inner_pad}  "
-                    f"{{kind={row['kind']!r}, status={row['status']!r}, path={row['path']!r}}},"
-                )
-        lines.append(f"{inner_pad}],")
-
-        aligned = self.aligned_grid_summary()
-        if aligned.get("status") == "ok":
-            lines.append(
-                f"{inner_pad}aligned_measured_grid="
-                f"{{n={aligned['n']}, "
-                f"f_min={self._format_frequency(aligned['f_min'])}, "
-                f"f_max={self._format_frequency(aligned['f_max'])}, "
-                f"delta_f={self._format_frequency(aligned['delta_f'])}}},"
-            )
-        else:
-            lines.append(f"{inner_pad}aligned_measured_grid={aligned},")
-        lines.append(f"{pad})")
-        return "\n".join(lines)
+    def __post_init__(self) -> None:
+        if not isinstance(self.channel, COMSourceConfig.Channel):
+            raise TypeError("COMSourceConfig.channel must be a COMSourceConfig.Channel.")
 
 @dataclass(repr=False)
 class COMPMFGridControl(_LeafConfigText):
@@ -312,10 +361,14 @@ class COMPMFGridControl(_LeafConfigText):
 
 @dataclass(repr=False)
 class COMNumericalControlConfig(COMDataclassText):
-    """User-facing PMF grid controls separated by voltage domain."""
+    """Resolved 178A numerical controls for one simulator instance."""
 
     adc_input_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
     final_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
+    eq_ch_imp_len: Literal["full", "truncated"] = "full"
+    num_trunc_ui: Optional[int] = None
+    pmf_grid_quality: Literal["coarse", "fine"] = "fine"
+    pmf_keep_mass: float = float(1 - 1e-5)
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -327,6 +380,12 @@ class COMNumericalControlConfig(COMDataclassText):
                     "final_pmf_grid", "final PMF grid", stored_unit="configuration"
                 ),
             )),
+            TextSection("Record and convergence", (
+                self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
+                self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
+                self._field("pmf_grid_quality", "legacy PMF grid quality", stored_unit="policy"),
+                self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
+            )),
         )
 
     def _repr_fields(self) -> tuple[TextField, ...]:
@@ -337,7 +396,45 @@ class COMNumericalControlConfig(COMDataclassText):
             self._field(
                 "final_pmf_grid", "final PMF grid", stored_unit="configuration"
             ),
+            self._field("eq_ch_imp_len", "impairment record length", stored_unit="policy"),
         )
+
+    def __post_init__(self) -> None:
+        for name in ("adc_input_pmf_grid", "final_pmf_grid"):
+            if not isinstance(getattr(self, name), COMPMFGridControl):
+                raise TypeError(
+                    f"COMNumericalControlConfig.{name} must be a COMPMFGridControl."
+                )
+        if self.eq_ch_imp_len not in {"full", "truncated"}:
+            raise ValueError(
+                "COMNumericalControlConfig.eq_ch_imp_len must be 'full' or 'truncated'."
+            )
+        if self.eq_ch_imp_len == "full":
+            if self.num_trunc_ui is not None:
+                raise ValueError("eq_ch_imp_len='full' requires num_trunc_ui=None.")
+        else:
+            if (
+                self.num_trunc_ui is None
+                or int(self.num_trunc_ui) != self.num_trunc_ui
+                or int(self.num_trunc_ui) < 2
+            ):
+                raise ValueError(
+                    "eq_ch_imp_len='truncated' requires an integer num_trunc_ui >= 2."
+                )
+            if int(self.num_trunc_ui) % 2 != 0:
+                raise ValueError(
+                    "eq_ch_imp_len='truncated' requires even num_trunc_ui so the PSD includes Nyquist."
+                )
+            self.num_trunc_ui = int(self.num_trunc_ui)
+        if self.pmf_grid_quality not in {"coarse", "fine"}:
+            raise ValueError(
+                "COMNumericalControlConfig.pmf_grid_quality must be 'coarse' or 'fine'."
+            )
+        self.pmf_keep_mass = float(self.pmf_keep_mass)
+        if not np.isfinite(self.pmf_keep_mass) or not 0.0 < self.pmf_keep_mass <= 1.0:
+            raise ValueError(
+                "COMNumericalControlConfig.pmf_keep_mass must be finite and in (0, 1]."
+            )
 
 
 @dataclass(repr=False)
@@ -923,8 +1020,8 @@ class COMRunConfig(COMDataclassText):
             raise ValueError("COMRunConfig.pos_coarse_stride must be a positive integer.")
 
 @dataclass(repr=False)
-class COMExecutionConfig(COMDataclassText):
-    """Project-owned profiles for single run and split 178A search execution."""
+class COMRunProfiles(COMDataclassText):
+    """Adapter-only workbook profiles; never stored in runtime COMConfig."""
     single_run: COMRunConfig = field(default_factory=COMRunConfig)
     search_sweep: COMRunConfig = field(
         default_factory=lambda: COMRunConfig(target="mse", pmf_grid_quality="coarse")
@@ -954,16 +1051,39 @@ class COMExecutionConfig(COMDataclassText):
 
     def __post_init__(self) -> None:
         if self.search_sweep.target != "mse":
-            raise ValueError("COMExecutionConfig.search_sweep.target must be 'mse'.")
+            raise ValueError("COMRunProfiles.search_sweep.target must be 'mse'.")
         if self.search_final.target not in {"dfe", "all_enabled"}:
             raise ValueError(
-                "COMExecutionConfig.search_final.target must be 'dfe' or 'all_enabled'."
+                "COMRunProfiles.search_final.target must be 'dfe' or 'all_enabled'."
             )
         for name in ("search_group_size", "search_top_k"):
             value = int(getattr(self, name))
             if value <= 0:
-                raise ValueError(f"COMExecutionConfig.{name} must be positive.")
+                raise ValueError(f"COMRunProfiles.{name} must be positive.")
             setattr(self, name, value)
+
+
+@dataclass(repr=False)
+class COMExecutionConfig(COMDataclassText):
+    """Resolved run extent for one simulator instance."""
+
+    target: Literal["mse", "dfe", "mlsd", "all_enabled"] = "dfe"
+
+    def _text_sections(self) -> tuple[TextSection, ...]:
+        return (
+            TextSection("Execution", (
+                self._field("target", "terminal calculation target", stored_unit="policy"),
+            )),
+        )
+
+    def _repr_fields(self) -> tuple[TextField, ...]:
+        return (self._field("target", "terminal calculation target", stored_unit="policy"),)
+
+    def __post_init__(self) -> None:
+        if self.target not in {"mse", "dfe", "mlsd", "all_enabled"}:
+            raise ValueError(
+                "COMExecutionConfig.target must be 'mse', 'dfe', 'mlsd', or 'all_enabled'."
+            )
 
 @dataclass(repr=False)
 class COMImpairmentConfig(COMDataclassText):
@@ -1072,9 +1192,12 @@ class COMMLSDConfig(COMDataclassText):
         )
 
 @dataclass(frozen=True, repr=False)
-class COMPolicyConfig(COMDataclassText):
-    """One-level collection of 178A algorithm policy and its preset provenance."""
+class COMAlgorithmPolicyConfig(COMDataclassText):
+    """One-level collection of resolved 178A algorithm selectors."""
 
+    missing_dc_policy: Literal[
+        "error", "hold", "skrf", "mag_phase_trend_to_dc"
+    ] = "error"
     out_of_measured: Literal["cosine_decay", "zero_padding"] = "cosine_decay"
     pre_dte_adc_clipping_convention: Literal[
         "full_jitter_half_tail", "rj_only_full_tail_reference"
@@ -1086,13 +1209,11 @@ class COMPolicyConfig(COMDataclassText):
     rxffe_record_realization: Literal[
         "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
     ] = "linear_fixed_grid"
-    eq_ch_imp_len: Literal["full", "truncated"] = "full"
-    num_trunc_ui: Optional[int] = None
+    floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pmf_projection_method: Literal["linear", "nearest"] = "linear"
     xtalk_pmf_accumulation: Literal["pathwise_convolution"] = "pathwise_convolution"
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral"
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit"
-    final_pmf_grid: Literal["fine", "relative_As"] = "fine"
     final_adc_pmf_projection: Literal["annex_d3", "reference_support"] = "annex_d3"
     added_noise_pdf: Literal["gaussian_addition", "scaled_total_pdf"] = "gaussian_addition"
     mlsd_quantization_psd: Literal[
@@ -1100,12 +1221,10 @@ class COMPolicyConfig(COMDataclassText):
     ] = "pre_dte_filtered"
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum"
     reported_der: Literal["raw_sequence_sum", "baseline_pdf_re_evaluation"] = "raw_sequence_sum"
-    applied_config_profile: Optional[str] = None
-    config_profile_overrides: dict[str, object] = field(default_factory=dict)
-
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Channel and pulse", (
+                self._field("missing_dc_policy", "missing-DC completion", stored_unit="policy"),
                 self._field("out_of_measured", "out-of-measured-band behavior", stored_unit="policy"),
                 self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
                 self._field("rxffe_record_realization", "RX FFE record realization", stored_unit="policy"),
@@ -1113,16 +1232,16 @@ class COMPolicyConfig(COMDataclassText):
             TextSection("Noise and ADC", (
                 self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
                 self._field("final_com_vqc_convention", "final COM V_qc convention", stored_unit="policy"),
-                self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
-                self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("final_adc_pmf_projection", "final ADC PMF projection", stored_unit="policy"),
+            )),
+            TextSection("Receiver solver", (
+                self._field("floating_mode", "floating-tap mode", stored_unit="policy"),
             )),
             TextSection("PMF methods", (
                 self._field("pmf_projection_method", "PMF projection method", stored_unit="policy"),
                 self._field("xtalk_pmf_accumulation", "crosstalk accumulation", stored_unit="policy"),
                 self._field("pdf_to_pmf_method", "PDF-to-PMF discretization", stored_unit="policy"),
                 self._field("pmf_scaling_method", "PMF scaling", stored_unit="policy"),
-                self._field("final_pmf_grid", "final PMF grid", stored_unit="policy"),
             )),
             TextSection("MLSD methods", (
                 self._field("added_noise_pdf", "added-noise PDF", stored_unit="policy"),
@@ -1130,20 +1249,18 @@ class COMPolicyConfig(COMDataclassText):
                 self._field("sequence_termination", "sequence termination", stored_unit="policy"),
                 self._field("reported_der", "reported DER", stored_unit="policy"),
             )),
-            TextSection("Profile provenance", (
-                self._field("applied_config_profile", "applied profile", stored_unit="profile name"),
-                self._field("config_profile_overrides", "profile overrides", stored_unit="mapping"),
-            )),
         )
 
     def _repr_fields(self) -> tuple[TextField, ...]:
         return (
-            self._field("applied_config_profile", "applied profile", stored_unit="profile name"),
             self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
         )
 
     def __post_init__(self) -> None:
         allowed = {
+            "missing_dc_policy": {
+                "error", "hold", "skrf", "mag_phase_trend_to_dc"
+            },
             "out_of_measured": {"cosine_decay", "zero_padding"},
             "pre_dte_adc_clipping_convention": {"full_jitter_half_tail", "rj_only_full_tail_reference"},
             "final_com_vqc_convention": {
@@ -1153,12 +1270,11 @@ class COMPolicyConfig(COMDataclassText):
             "rxffe_record_realization": {
                 "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
             },
-            "eq_ch_imp_len": {"full", "truncated"},
+            "floating_mode": {"heuristic", "simplified", "spec-defined"},
             "pmf_projection_method": {"linear", "nearest"},
             "xtalk_pmf_accumulation": {"pathwise_convolution"},
             "pdf_to_pmf_method": {"bin_integral", "pmf_sample"},
             "pmf_scaling_method": {"mass_deposit", "interpolate_ordinates"},
-            "final_pmf_grid": {"fine", "relative_As"},
             "final_adc_pmf_projection": {"annex_d3", "reference_support"},
             "added_noise_pdf": {"gaussian_addition", "scaled_total_pdf"},
             "mlsd_quantization_psd": {"pre_dte_filtered", "main_tap_white"},
@@ -1167,24 +1283,9 @@ class COMPolicyConfig(COMDataclassText):
         }
         for name, choices in allowed.items():
             if getattr(self, name) not in choices:
-                raise ValueError(f"COMPolicyConfig.{name} must be one of {sorted(choices)}.")
-        if self.eq_ch_imp_len == "full":
-            if self.num_trunc_ui is not None:
-                raise ValueError("eq_ch_imp_len='full' requires num_trunc_ui=None.")
-        else:
-            if (
-                self.num_trunc_ui is None
-                or int(self.num_trunc_ui) != self.num_trunc_ui
-                or int(self.num_trunc_ui) < 2
-            ):
                 raise ValueError(
-                    "eq_ch_imp_len='truncated' requires an integer num_trunc_ui >= 2."
+                    f"COMAlgorithmPolicyConfig.{name} must be one of {sorted(choices)}."
                 )
-            if int(self.num_trunc_ui) % 2 != 0:
-                raise ValueError(
-                    "eq_ch_imp_len='truncated' requires even num_trunc_ui so the PSD includes Nyquist."
-                )
-            object.__setattr__(self, "num_trunc_ui", int(self.num_trunc_ui))
         if (
             self.final_adc_pmf_projection == "reference_support"
             and self.final_com_vqc_convention != "sicopr_final_reconstruction"
@@ -1193,17 +1294,13 @@ class COMPolicyConfig(COMDataclassText):
                 "final_adc_pmf_projection='reference_support' requires "
                 "final_com_vqc_convention='sicopr_final_reconstruction'."
             )
-        if self.applied_config_profile is not None:
-            object.__setattr__(self, "applied_config_profile", str(self.applied_config_profile))
-        object.__setattr__(self, "config_profile_overrides", dict(self.config_profile_overrides))
-
 @dataclass(repr=False)
 class COMConfig(COMDataclassText):
     """Top-level 178A COM configuration grouped by function."""
     L: int                            # unit: levels, PAM order
     link: LinkConfig                  # unit contract: SI grid, Hz/s
     filter: COMFilterConfig       # unit contract: SI filter frequencies and 178A CTF terms
-    channel: COMChannelConfig         # unit contract: Touchstone paths and S4P port order
+    channel: COMChannelConfig         # physical terminations and measured-record boundary
     txpkg_victim: COMPkgConfig    # unit contract: 178A victim TX package
     txpkg_fext: COMPkgConfig      # unit contract: 178A FEXT aggressor TX package
     txpkg_next: COMPkgConfig      # unit contract: 178A NEXT aggressor TX package
@@ -1211,13 +1308,13 @@ class COMConfig(COMDataclassText):
     dte: COMDTEConfig                 # unit contract: 178A receiver discrete-time equalizer search/limits
     imp: COMImpairmentConfig          # unit contract: V/UI/noise PSD units
     DER_0: float                      # unit: dimensionless, target detector error ratio
+    src: COMSourceConfig              # block-source artifact bindings and interpretation metadata
     pmf: COMPMFConfig = field(default_factory=COMPMFConfig) # unit contract: PMF amplitude grid and numerical controls
-    numerical_control: COMNumericalControlConfig = field(
-        default_factory=COMNumericalControlConfig
-    )
-    execution: COMExecutionConfig = field(default_factory=COMExecutionConfig)
     mlsd: COMMLSDConfig = field(default_factory=COMMLSDConfig)
-    policy: COMPolicyConfig = field(default_factory=COMPolicyConfig)
+    alg: COMAlgorithmPolicyConfig = field(default_factory=COMAlgorithmPolicyConfig)
+    num: COMNumericalControlConfig = field(default_factory=COMNumericalControlConfig)
+    srch: COMSearchConfig = field(default_factory=COMSearchConfig)
+    exe: COMExecutionConfig = field(default_factory=COMExecutionConfig)
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -1227,7 +1324,8 @@ class COMConfig(COMDataclassText):
                 self._field("link", "analysis grid", stored_unit="configuration"),
             )),
             TextSection("Channel and packages", (
-                self._field("channel", "measured channel", stored_unit="configuration"),
+                self._field("channel", "physical channel", stored_unit="configuration"),
+                self._field("src", "block sources", stored_unit="configuration"),
                 self._field("txpkg_victim", "victim TX package", stored_unit="configuration"),
                 self._field("txpkg_fext", "FEXT TX package", stored_unit="configuration"),
                 self._field("txpkg_next", "NEXT TX package", stored_unit="configuration"),
@@ -1238,12 +1336,13 @@ class COMConfig(COMDataclassText):
                 self._field("dte", "discrete-time equalizer", stored_unit="configuration"),
                 self._field("imp", "impairments", stored_unit="configuration"),
                 self._field("pmf", "PMF", stored_unit="configuration"),
-                self._field("numerical_control", "numerical controls", stored_unit="configuration"),
+                self._field("num", "numerical controls", stored_unit="configuration"),
+                self._field("srch", "search controls", stored_unit="configuration"),
                 self._field("mlsd", "MLSD", stored_unit="configuration"),
             )),
             TextSection("Execution", (
-                self._field("execution", "execution profiles", stored_unit="configuration"),
-                self._field("policy", "algorithm policy", stored_unit="configuration"),
+                self._field("exe", "execution", stored_unit="configuration"),
+                self._field("alg", "algorithm policy", stored_unit="configuration"),
             )),
         )
 
@@ -1251,51 +1350,46 @@ class COMConfig(COMDataclassText):
         return (
             self._field("L", "PAM order", stored_unit="level count"),
             self._field("DER_0", "target detector error ratio", stored_unit="dimensionless probability"),
-            self._field("policy", "algorithm policy", stored_unit="configuration"),
+            self._field("alg", "algorithm policy", stored_unit="configuration"),
         )
 
     def __post_init__(self) -> None:
-        if not isinstance(self.policy, COMPolicyConfig):
-            raise TypeError("policy must be a COMPolicyConfig.")
+        if not isinstance(self.src, COMSourceConfig):
+            raise TypeError("src must be a COMSourceConfig.")
+        if not isinstance(self.alg, COMAlgorithmPolicyConfig):
+            raise TypeError("alg must be a COMAlgorithmPolicyConfig.")
+        if not isinstance(self.num, COMNumericalControlConfig):
+            raise TypeError("num must be a COMNumericalControlConfig.")
+        if not isinstance(self.exe, COMExecutionConfig):
+            raise TypeError("exe must be a COMExecutionConfig.")
+        if not isinstance(self.srch, COMSearchConfig):
+            raise TypeError("srch must be a COMSearchConfig.")
         if (
-            self.policy.eq_ch_imp_len == "truncated"
-            and int(self.policy.num_trunc_ui) < int(self.dte.N_max)
+            self.num.eq_ch_imp_len == "truncated"
+            and int(self.num.num_trunc_ui) < int(self.dte.N_max)
         ):
-            raise ValueError("policy.num_trunc_ui must cover COMDTEConfig.N_max lags.")
+            raise ValueError("num.num_trunc_ui must cover COMDTEConfig.N_max lags.")
 
-    def resolve_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
-        """Fill separated grid controls for legacy direct Python callers."""
-        if run_cfg.adc_input_pmf_grid is not None and run_cfg.final_pmf_grid is not None:
-            return run_cfg
-        adc_rule = (
-            "relative_As" if run_cfg.pmf_grid_quality == "coarse"
-            else "relative_As_with_cap"
-        )
-        final_rule = (
-            "relative_As" if self.policy.final_pmf_grid == "relative_As"
-            else "relative_As_with_cap"
-        )
-        adc_grid = COMPMFGridControl(
-            rule=adc_rule,
-            dy_rel_As=self.pmf.dy_rel_As,
-            dy_abs_max=self.pmf.dy_abs_max,
-            dy_override=run_cfg.pmf_dy_override,
-        )
-        final_grid = COMPMFGridControl(
-            rule=final_rule,
-            dy_rel_As=self.pmf.dy_rel_As,
-            dy_abs_max=self.pmf.dy_abs_max,
-            dy_override=(
-                None if final_rule == "relative_As" else run_cfg.pmf_dy_override
+    def _set_adapter_resolution(
+        self,
+        *,
+        applied_profile: Optional[str],
+        profile_overrides: dict[str, object],
+    ) -> None:
+        """Attach non-runtime workbook resolution metadata for export only."""
+        self._adapter_resolution = {
+            "applied_config_profile": (
+                None if applied_profile is None else str(applied_profile)
             ),
-        )
-        return replace(
-            run_cfg,
-            adc_input_pmf_grid=(
-                run_cfg.adc_input_pmf_grid or adc_grid
-            ),
-            final_pmf_grid=(run_cfg.final_pmf_grid or final_grid),
-        )
+            "config_profile_overrides": deepcopy(profile_overrides),
+        }
+
+    def _resolved_copy(self, **changes: object) -> "COMConfig":
+        """Return a dataclass copy while preserving adapter-only export metadata."""
+        copied = replace(self, **changes)
+        if hasattr(self, "_adapter_resolution"):
+            copied._adapter_resolution = deepcopy(self._adapter_resolution)
+        return copied
 
     def to_export_dict(self) -> dict[str, object]:
         """
@@ -1304,24 +1398,32 @@ class COMConfig(COMDataclassText):
         The snapshot records only configuration and derived configuration
         metadata. It does not include COMStatus run results.
         """
-        return {
+        exported = {
             "type": type(self).__name__,
             "config": self._json_value(self),
             "derived": {
-                "policy": self._json_value(self.policy),
-                "numerical_control": self._json_value(self.numerical_control),
-                "effective_execution": {
-                    "single_run": self._json_value(self.resolve_run_cfg(self.execution.single_run)),
-                    "search_sweep": self._json_value(self.resolve_run_cfg(self.execution.search_sweep)),
-                    "search_final": self._json_value(self.resolve_run_cfg(self.execution.search_final)),
-                },
+                "alg": self._json_value(self.alg),
+                "num": self._json_value(self.num),
+                "srch": self._json_value(self.srch),
+                "exe": self._json_value(self.exe),
                 "link": self._json_value(self.link),
-                "channel_measured_grid": self._json_value(self.channel.measured_grid_summary()),
-                "channel_aligned_grid": self._json_value(self.channel.aligned_grid_summary()),
+                "channel_measured_grid": self._json_value(
+                    self.src.channel.measured_grid_summary(
+                        self.channel.sparam_frequency_limit_Hz
+                    )
+                ),
+                "channel_aligned_grid": self._json_value(
+                    self.src.channel.aligned_grid_summary(self.channel)
+                ),
                 "txfir": self._json_value(self.filter.txfir),
                 "c_0": self._json_scalar(self.filter.c_0),
             },
         }
+        if hasattr(self, "_adapter_resolution"):
+            exported["adapter_resolution"] = self._json_value(
+                self._adapter_resolution
+            )
+        return exported
 
     def export(self, save_path: str) -> dict[str, str]:
         """Export this COMConfig178A as a human-readable summary."""

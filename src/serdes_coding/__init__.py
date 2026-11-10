@@ -66,6 +66,7 @@ def __getattr__(name: str):
         "merge_partial_results_178A",
         "finalize_search_178A",
         "run_full_search_178A",
+        "run_configured_178A",
     }:
         from .search import com_search_178A
 
@@ -78,6 +79,7 @@ def __getattr__(name: str):
             "merge_partial_results_178A": "merge_partial_results",
             "finalize_search_178A": "finalize_search",
             "run_full_search_178A": "run_full_search",
+            "run_configured_178A": "run_configured",
         }[name]
         return getattr(com_search_178A, source_name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
@@ -126,4 +128,5 @@ __all__ = [
     "merge_partial_results_178A",
     "finalize_search_178A",
     "run_full_search_178A",
+    "run_configured_178A",
 ]

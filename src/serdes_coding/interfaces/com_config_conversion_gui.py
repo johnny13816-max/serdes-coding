@@ -147,14 +147,14 @@ class COMConfigConversionGui:
         self.tabs=ttk.Notebook(outer)
         self.tabs.grid(row=6,column=0,columnspan=3,sticky='nsew')
         self.trees={}
-        columns=('parameter','source','source_value','source_unit','converted','value','unit','status','method','edited')
+        columns=('domain','parameter','source','source_value','source_unit','converted','value','unit','status','method','edited')
         for area,title in [('mapping','Ad Hoc → Project mapping'),('policy','Project policy'),('baseline','Single-run baseline')]:
             frame=ttk.Frame(self.tabs);self.tabs.add(frame,text=title)
             frame.rowconfigure(0,weight=1);frame.columnconfigure(0,weight=1)
             tree=ttk.Treeview(frame,columns=columns,show='headings',selectmode='browse')
             for name in columns:
                 tree.heading(name,text=name)
-                tree.column(name,width=220 if name in {'parameter','source'} else 110)
+                tree.column(name,width=220 if name in {'parameter','source'} else 145 if name == 'domain' else 110)
             tree.grid(row=0,column=0,sticky='nsew')
             y=ttk.Scrollbar(frame,orient='vertical',command=tree.yview);y.grid(row=0,column=1,sticky='ns')
             x=ttk.Scrollbar(frame,orient='horizontal',command=tree.xview);x.grid(row=1,column=0,sticky='ew')
@@ -343,7 +343,7 @@ class COMConfigConversionGui:
             return
         selected_status = self.status_filter.get()
         counts={'success':0,'fail':0,'empty':0}
-        for field in active.fields:
+        for field in sorted(active.fields, key=_domain_sort_key):
             area=area_for(field,active.target_version)
             if area not in self.trees:continue
             display_status = self._display_status(field)
@@ -352,7 +352,7 @@ class COMConfigConversionGui:
                 continue
             tree=self.trees[area]
             item = tree.insert("", "end", values=(
-                field.parameter, field.source_key or "", _display(field.source_value),_display(field.source_unit),
+                field.domain, field.parameter, field.source_key or "", _display(field.source_value),_display(field.source_unit),
                 _display(field.converted_value),_display(field.value),_display(field.unit),
                 display_status if area=='mapping' else '',field.method,
                 'yes' if field.status.value=='override' else '',
@@ -383,6 +383,7 @@ class COMConfigConversionGui:
         else:
             mapping_detail = source_mapping.value
         detail = (
+            f"Domain: {field.domain}; Parameter class: {field.parameter_class}\n"
             f"Source: {field.source_cell or '-'}  key={field.source_key or '-'}  block={field.source_block or '-'}\n"
             f"Condition: {field.condition_cell or '-'}  key={field.condition_key or '-'}  value={_display(field.condition_value) or '-'}\n"
             f"Display status: {self._display_status(field)}; mapping detail: {mapping_detail}\n"
@@ -519,6 +520,22 @@ class COMConfigConversionGui:
 
 def _display(value: Any) -> str:
     return "" if value is None else str(value)
+
+
+_DOMAIN_ORDER = {
+    "case": 0,
+    "intrinsic": 1,
+    "block_source": 2,
+    "algorithm_policy": 3,
+    "numerical_control": 4,
+    "search": 5,
+    "execution": 6,
+}
+
+
+def _domain_sort_key(field: Any) -> tuple[int, str, str]:
+    """Keep the GUI's source-treatment tabs ordered by canonical domain."""
+    return (_DOMAIN_ORDER.get(field.domain, 99), field.domain, field.parameter)
 
 
 def _validated_source_path(value: str) -> Path:

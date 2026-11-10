@@ -19,6 +19,7 @@ from .config import (
     COMFilterConfig,
     COMPartialHostConfig,
     COMPkgConfig,
+    COMSourceConfig,
 )
 from .errors import COMLengthMismatchError
 from .status import COMPath, COMSharedPath
@@ -827,7 +828,10 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
         'finite_record_ir',
     )
 
-def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel]:
+def _build_channel_under_test(
+    source_cfg: COMSourceConfig,
+    channel_cfg: COMChannelConfig,
+) -> list[SparamModel]:
     """
     Build 178A measured-domain channel-under-test S-parameter models.
 
@@ -835,21 +839,19 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel
     - index 0: victim
     - following indices: NEXT channels, then FEXT channels
     """
-    if channel_cfg.victim_s4p_path is None:
-        raise ValueError('channel_cfg.victim_s4p_path must be provided.')
-    paths = [channel_cfg.victim_s4p_path, *channel_cfg.next_s4p_paths, *channel_cfg.fext_s4p_paths]
+    bindings = source_cfg.channel.ordered()
 
     def limited(model: SparamModel) -> SparamModel:
         limit = channel_cfg.sparam_frequency_limit_Hz
         return model if limit is None else model.limited_to_frequency(limit)
 
-    def build_one(path: str) -> SparamModel:
-        measured = SparamModel.from_touchstone(path, representation='auto')
+    def build_one(binding: COMSourceConfig.ChannelBinding) -> SparamModel:
+        measured = binding.load()
         if measured.representation == 's4p':
             # IEEE P802.3dj/D3.2 Annex 178A.1.3: transform the measured
             # single-ended S-parameters to R0 before forming mixed-mode Sdd.
             return limited(measured.renormalized(channel_cfg.R0)).s4p_to_s2p(
-                channel_cfg.port_order,
+                binding.port_order,
             )
         if measured.representation == 's2p':
             # A native differential two-port has no four-port information to
@@ -858,15 +860,27 @@ def _build_channel_under_test(channel_cfg: COMChannelConfig) -> list[SparamModel
             # alternate 178A algorithm.
             return limited(measured).renormalized(2.0 * channel_cfg.R0)
         raise ValueError(
-            f'Unsupported channel representation for {path!r}: '
+            f'Unsupported channel representation for {binding.path!r}: '
             f'{measured.representation!r}.'
         )
 
-    channels = [build_one(path) for path in paths]
+    channels = [build_one(binding) for binding in bindings]
     common_freqs = channel_cfg.align_grid(channels)
     return [channel.resampled(common_freqs) for channel in channels]
 
-def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COMFilterConfig, txpkg_cfg: COMPkgConfig, shared: COMSharedPath, kind: Literal['victim', 'next', 'fext'], S_ch: SparamModel, out_of_measured: Literal['cosine_decay', 'zero_padding']) -> COMPath:
+def _build_path(
+    link_cfg: LinkConfig,
+    channel_cfg: COMChannelConfig,
+    ft_cfg: COMFilterConfig,
+    txpkg_cfg: COMPkgConfig,
+    shared: COMSharedPath,
+    kind: Literal['victim', 'next', 'fext'],
+    S_ch: SparamModel,
+    missing_dc_policy: Literal[
+        'error', 'hold', 'skrf', 'mag_phase_trend_to_dc'
+    ],
+    out_of_measured: Literal['cosine_decay', 'zero_padding'],
+) -> COMPath:
     """
     Build one 178A COM signal path from a measured-domain channel-under-test model.
 
@@ -895,7 +909,7 @@ def _build_path(link_cfg: LinkConfig, channel_cfg: COMChannelConfig, ft_cfg: COM
     H_21_measured_freqs, H_21_measured_tf = S_all.completed_voltage_transfer_function(
         gamma_src=channel_cfg.gamma_src,
         gamma_load=channel_cfg.gamma_load,
-        dc=channel_cfg.missing_dc_policy,
+        dc=missing_dc_policy,
     )
     H_21 = LinkSegment.from_tf(
         H_21_measured_freqs,
@@ -935,7 +949,7 @@ def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
     link_cfg = cfg.link
     ft_cfg = cfg.filter
     H_ctf = _build_H_ctf(link_cfg, ft_cfg)
-    method = cfg.policy.ctle_pulse_realization
+    method = cfg.alg.ctle_pulse_realization
     ctle_iir = _prepare_ctle_pulse_realization(link_cfg, ft_cfg, method)
     return COMSharedPath(H_ffe=_build_H_ffe(link_cfg, ft_cfg), H_ffe_next=_build_H_ffe_next(link_cfg), H_t=_build_H_t(link_cfg, ft_cfg), S_rx=_build_rxpkg(freqs, cfg.rxpkg), H_r=_build_H_r(link_cfg, ft_cfg), H_ctf=H_ctf, ctle_iir=ctle_iir, ctle_pulse_realization=method)
 
@@ -943,22 +957,53 @@ def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamMod
     """
     Build 178A path-specific COM models from aligned channel-under-test models.
 
-    Preserve victim, NEXT, and FEXT ordering defined by COMChannelConfig.
+    Preserve victim, NEXT, and FEXT ordering defined by cfg.src.channel.
     """
     link_cfg = cfg.link
     ch_cfg = cfg.channel
+    source_cfg = cfg.src.channel
     ft_cfg = cfg.filter
-    expected_count = 1 + len(ch_cfg.next_s4p_paths) + len(ch_cfg.fext_s4p_paths)
+    expected_count = 1 + len(source_cfg.next) + len(source_cfg.fext)
     if len(channels) != expected_count:
         raise COMLengthMismatchError(f'channels length must match victim + NEXT + FEXT path count. Expected {expected_count}, got {len(channels)}.')
-    paths = [_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_victim, shared=shared, kind='victim', S_ch=channels[0], out_of_measured=cfg.policy.out_of_measured)]
-    next_count = len(ch_cfg.next_s4p_paths)
+    paths = [_build_path(
+        link_cfg=link_cfg,
+        channel_cfg=ch_cfg,
+        ft_cfg=ft_cfg,
+        txpkg_cfg=cfg.txpkg_victim,
+        shared=shared,
+        kind='victim',
+        S_ch=channels[0],
+        missing_dc_policy=cfg.alg.missing_dc_policy,
+        out_of_measured=cfg.alg.out_of_measured,
+    )]
+    next_count = len(source_cfg.next)
     next_channels = channels[1:1 + next_count]
     fext_channels = channels[1 + next_count:]
     for S_ch in next_channels:
-        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_next, shared=shared, kind='next', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured))
+        paths.append(_build_path(
+            link_cfg=link_cfg,
+            channel_cfg=ch_cfg,
+            ft_cfg=ft_cfg,
+            txpkg_cfg=cfg.txpkg_next,
+            shared=shared,
+            kind='next',
+            S_ch=S_ch,
+            missing_dc_policy=cfg.alg.missing_dc_policy,
+            out_of_measured=cfg.alg.out_of_measured,
+        ))
     for S_ch in fext_channels:
-        paths.append(_build_path(link_cfg=link_cfg, channel_cfg=ch_cfg, ft_cfg=ft_cfg, txpkg_cfg=cfg.txpkg_fext, shared=shared, kind='fext', S_ch=S_ch, out_of_measured=cfg.policy.out_of_measured))
+        paths.append(_build_path(
+            link_cfg=link_cfg,
+            channel_cfg=ch_cfg,
+            ft_cfg=ft_cfg,
+            txpkg_cfg=cfg.txpkg_fext,
+            shared=shared,
+            kind='fext',
+            S_ch=S_ch,
+            missing_dc_policy=cfg.alg.missing_dc_policy,
+            out_of_measured=cfg.alg.out_of_measured,
+        ))
     return paths
 
 __all__ = [

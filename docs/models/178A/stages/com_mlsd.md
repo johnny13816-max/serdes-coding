@@ -220,7 +220,7 @@ Required completed inputs are:
 
 The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 dB` and `max_iter=64`; these are internal solver settings rather than workbook fields.
 
-`COMPolicyConfig` 將可平行的 realization 保留為具名方法：
+`COMAlgorithmPolicyConfig` 將可平行的 realization 保留為具名方法：
 
 | Method field | Annex/general | Reference profile |
 |---|---|---|
@@ -235,7 +235,7 @@ sign 不在此表，因為它是共同公式修正。
 ## Top-level flow
 
 ```text
-calculate_COM_MLSD(run_cfg=None)
+calculate_COM_MLSD()
 ├── validate enablement, N_b, and completed prerequisite status
 ├── resolve independent final_pmf_grid control
 ├── Annex: solve_g_an(target, ...)
@@ -250,10 +250,10 @@ calculate_COM_MLSD(run_cfg=None)
 └── assign status.mlsd
 ```
 
-`_run_once()` passes the active execution profile. A direct call without
-`run_cfg` uses `cfg.execution.single_run`; its effective `final_pmf_grid`
-directly owns the PMF voltage step for added-noise calibration, while final-PMF
-`keep_mass` remains 1.0. ADC-input grid controls are excluded.
+The stage reads the already resolved `cfg.alg` and `cfg.num.final_pmf_grid`.
+That final grid directly owns the PMF voltage step for added-noise calibration,
+while final-PMF `keep_mass` remains 1.0. ADC-input grid controls are excluded;
+no run profile enters Stage 7.
 
 ## Added-noise evaluation
 

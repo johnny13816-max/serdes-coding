@@ -38,7 +38,7 @@ calculate_pre_dte_imp_common(victim)
 prepare_sampling_phase_common(common_imp, h_XTs)
     -> (common_imp: COMImpairmentStatus, h_XTs_dsamp: list[np.ndarray])
 
-calculate_pre_dte_imp_at_pos(victim, pos, common_imp, h_XTs_dsamp, run_cfg)
+calculate_pre_dte_imp_at_pos(victim, pos, common_imp, h_XTs_dsamp)
     -> (COMEqChannelStatus, COMImpairmentStatus)
 ```
 
@@ -130,7 +130,7 @@ The common return values are run-local cache objects. They are not a separate `C
 | Input | Required data | Use |
 |---|---|---|
 | `COMConfig.link` | sampled grid, `fb`, `theta`, and `per_ui` | sampled PSD/response construction |
-| `COMConfig.policy.eq_ch_imp_len/num_trunc_ui` | `full` or `truncated` plus an even UI count | shared impairment PSD/correlation record |
+| `COMConfig.num.eq_ch_imp_len/num_trunc_ui` | `full` or `truncated` plus an even UI count | shared impairment PSD/correlation record |
 | `COMConfig.filter` | receiver noise-filter and CTF controls | receiver-noise filtering |
 | `COMConfig.imp` | `eta_0` | receiver-noise PSD |
 | `COMConfig.L` | PAM order | normalized symbol standard deviation |
@@ -148,7 +148,7 @@ The `victim` argument is accepted by the current public method but is not read i
 | `h_XTs_dsamp` | one-dimensional sampled response for each aggressor | selected candidate equivalent-channel status |
 | `COMConfig.imp` | `SNR_TX`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc`, `R_LM` | phase-specific impairment and optional quantization controls |
 | `COMConfig.pmf` | PMF support/tap/mass defaults | ADC-input PMF construction |
-| `run_cfg` | `pmf_keep_mass`, effective `adc_input_pmf_grid` | retained-mass and grid numerical controls；no PMF-method selector |
+| `COMConfig.num` | `pmf_keep_mass`, effective `adc_input_pmf_grid` | retained-mass and grid numerical controls；no PMF-method selector |
 
 The exact workbook mappings are defined in [Configuration tree](../config_tree.md).
 

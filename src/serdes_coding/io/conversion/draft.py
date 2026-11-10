@@ -28,7 +28,7 @@ class ProjectFieldDraft:
     sheet: str
     row: int
     value_column: int
-    group: str
+    domain: str
     parameter: str
     parameter_class: str
     value: Any

@@ -21,21 +21,15 @@ from serdes_coding.utilities.link import _s4p_to_sdd
 from serdes_coding.utilities.sparam import SparamModel
 
 
-def build_sicopr_order_channels(channel_cfg):
+def build_sicopr_order_channels(source_cfg, channel_cfg):
     """Build measured Sdd using SiCoPR's single-ended-first order for A/B only."""
-    paths = [
-        channel_cfg.victim_s4p_path,
-        *channel_cfg.next_s4p_paths,
-        *channel_cfg.fext_s4p_paths,
-    ]
-    if paths[0] is None:
-        raise ValueError("A victim S4P path is required.")
+    bindings = source_cfg.channel.ordered()
 
     channels = []
-    for path in paths:
-        network = rf.Network(path)
+    for binding in bindings:
+        network = rf.Network(binding.path)
         network.renormalize(channel_cfg.R0)
-        sdd = _s4p_to_sdd(network.s, channel_cfg.port_order, network.f)
+        sdd = _s4p_to_sdd(network.s, binding.port_order, network.f)
         channels.append(
             SparamModel.from_sdd_array(network.f, sdd, z0=2 * channel_cfg.R0)
         )
@@ -143,7 +137,7 @@ def main() -> None:
             figure.savefig(args.plot, dpi=180)
             plt.close(figure)
     if args.run_mse:
-        cfg.execution.single_run = replace(cfg.execution.single_run, target="mse")
+        cfg.exe = replace(cfg.exe, target="mse")
         with sicopr_order_for_one_run():
             status = model.COM(cfg).run(progress=False)
         result.update(

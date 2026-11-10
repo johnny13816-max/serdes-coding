@@ -35,13 +35,15 @@ def replace_channels(draft, channels):
         name=f'{kind}[{counts[kind]}]'
         for key,column in COLUMNS.items():
             value=values[key]
-            draft.fields.append(ProjectFieldDraft('channels',row,column,kind,f'{name}.{key}','channel',value,None,'User-selected channel',value,MappingStatus.OVERRIDE))
+            draft.fields.append(ProjectFieldDraft('channels',row,column,'block_source',f'{name}.{key}','channel',value,None,'User-selected channel',value,MappingStatus.OVERRIDE))
     draft.changed.add(('channels','__rows__'))
 
 
 def write_fields(workbook, fields):
     """Clear removed channel rows; explicitly assign None (cell(...,None) is a no-op)."""
     sheet=workbook['channels']
+    headers={sheet.cell(3,column).value:column for column in range(1,sheet.max_column+1)}
+    domain_column=headers.get('Domain')
     for row in sheet.iter_rows(min_row=4):
         for cell in row:cell.value=None
     for f in fields:
@@ -51,3 +53,5 @@ def write_fields(workbook, fields):
             kind,index=f.parameter.split(']',1)[0].split('[')
             sheet.cell(f.row,1).value=kind
             sheet.cell(f.row,2).value=int(index)
+            if domain_column is not None:
+                sheet.cell(f.row,domain_column).value='block_source'

@@ -1,6 +1,7 @@
 """Canonical Annex 178A configuration, state, and error contracts."""
 
 from .config import (
+    COMAlgorithmPolicyConfig,
     COMChannelConfig,
     COMConfig,
     COMDTEConfig,
@@ -15,9 +16,9 @@ from .config import (
     COMPMFGridControl,
     COMPMFRuntimeConfig,
     COMPartialHostConfig,
-    COMPolicyConfig,
     COMPkgConfig,
     COMRunConfig,
+    COMSourceConfig,
 )
 from .errors import (
     COMError,

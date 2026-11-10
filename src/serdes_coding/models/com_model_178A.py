@@ -21,7 +21,7 @@ try:
     from ..utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, SampledPSD, SampledResponse
     from ..utilities.pmf import Pmf1D
     from ..search.com_search_178A import (
-        COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus, run_full_search,
+        COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus,
     )
     from .com_dataclass_text import COMDataclassText, TextField, TextSection
     from .com_178a import (
@@ -33,8 +33,8 @@ try:
         COMMainCursorError, COMMLSDConfig, COMMLSDNoiseStatus, COMMLSDStatus,
         COMNumericalControlConfig, COMPMFConfig, COMPMFGridControl,
         COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
-        COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
-        COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
+        COMAlgorithmPolicyConfig, COMPartialHostConfig, COMPath,
+        COMPkgConfig, COMRunConfig, COMRunStatus, COMSharedPath, COMSourceConfig, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
         COMPostFFEEqChannelStatus, COMPreDTEEqChannelStatus,
     )
@@ -54,7 +54,7 @@ except ImportError:
     from serdes_coding.utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, SampledPSD, SampledResponse
     from serdes_coding.utilities.pmf import Pmf1D
     from serdes_coding.search.com_search_178A import (
-        COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus, run_full_search,
+        COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus,
     )
     from serdes_coding.models.com_dataclass_text import COMDataclassText, TextField, TextSection
     from serdes_coding.models.com_178a import (
@@ -66,8 +66,8 @@ except ImportError:
         COMMainCursorError, COMMLSDConfig, COMMLSDNoiseStatus, COMMLSDStatus,
         COMNumericalControlConfig, COMPMFConfig, COMPMFGridControl,
         COMPMFRuntimeConfig, COMPMFStatus, COMPSDStatus,
-        COMPartialHostConfig, COMPath, COMPolicyConfig, COMPkgConfig,
-        COMRunConfig, COMRunStatus, COMSharedPath, COMStatus,
+        COMAlgorithmPolicyConfig, COMPartialHostConfig, COMPath,
+        COMPkgConfig, COMRunConfig, COMRunStatus, COMSharedPath, COMSourceConfig, COMStatus,
         COMTxfirMainCursorError, COMEqChannelStatus,
         COMPostFFEEqChannelStatus, COMPreDTEEqChannelStatus,
     )
@@ -307,7 +307,7 @@ def _calculate_V_qc(
     pmf_cfg: COMPMFRuntimeConfig,
     *,
     cdf_tail: Optional[float] = None,
-    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the exact ADC-input PMF chain and resolve V_qc from p_sn."""
@@ -354,7 +354,7 @@ def _build_psd_adc_qn(
     link_cfg: LinkConfig,
     *,
     cdf_tail: Optional[float] = None,
-    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[SampledPSD, COMAdcInputPMF]:
 
@@ -731,53 +731,27 @@ class COM_MMSE_DTE:
 def _resolve_adc_input_pmf_config(
     pmf_config: COMPMFConfig,
     As: float,
-    run_cfg: COMRunConfig,
+    num_cfg: COMNumericalControlConfig,
 ) -> COMPMFRuntimeConfig:
-    """Resolve execution-policy PMF settings used before ADC quantization."""
-    resolved = pmf_config.resolve(As, grid_quality=run_cfg.pmf_grid_quality)
-    grid_control = run_cfg.adc_input_pmf_grid
+    """Resolve NUM-owned PMF settings used before ADC quantization."""
+    resolved = pmf_config.resolve(As, grid_quality=num_cfg.pmf_grid_quality)
     return replace(
         resolved,
-        dy=(
-            grid_control.resolve_dy(As)
-            if grid_control is not None
-            else run_cfg.pmf_dy_override
-            if run_cfg.pmf_dy_override is not None
-            else resolved.dy
-        ),
-        keep_mass=run_cfg.pmf_keep_mass,
+        dy=num_cfg.adc_input_pmf_grid.resolve_dy(As),
+        keep_mass=num_cfg.pmf_keep_mass,
     )
 
 
 def _resolve_final_com_pmf_config(
     pmf_config: COMPMFConfig,
     As: float,
-    run_cfg: COMRunConfig,
-    *,
-    final_pmf_grid: Literal["fine", "relative_As"] = "fine",
+    num_cfg: COMNumericalControlConfig,
 ) -> COMPMFRuntimeConfig:
-    """Resolve accuracy-required PMF settings used to calculate final COM."""
-    grid_control = run_cfg.final_pmf_grid
-    if grid_control is not None:
-        resolved = pmf_config.resolve(As, grid_quality="fine")
-        return replace(
-            resolved,
-            dy=grid_control.resolve_dy(As),
-            keep_mass=1.0,
-        )
-    # In the reference profile, RxFFE is represented with a unit main tap.
-    # This model retains the unnormalized main gain, so reference delta_y
-    # must be multiplied by that gain: 0.001*(As/gain)*gain = 0.001*As.
-    use_relative_grid = final_pmf_grid == "relative_As"
-    if final_pmf_grid not in {"fine", "relative_As"}:
-        raise ValueError("final_pmf_grid must be fine or relative_As.")
-    resolved = pmf_config.resolve(As, grid_quality="coarse" if use_relative_grid else "fine")
+    """Resolve NUM-owned accuracy settings used to calculate final COM."""
+    resolved = pmf_config.resolve(As, grid_quality="fine")
     return replace(
         resolved,
-        dy=(
-            resolved.dy if use_relative_grid or run_cfg.pmf_dy_override is None
-            else run_cfg.pmf_dy_override
-        ),
+        dy=num_cfg.final_pmf_grid.resolve_dy(As),
         keep_mass=1.0,
     )
 
@@ -857,7 +831,7 @@ def _build_adc_input_pmf_exact(
     N_qb: int,
     pmf_cfg: COMPMFRuntimeConfig,
     *,
-    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the selected-phase exact ADC-input PMF chain for final COM."""
@@ -942,7 +916,7 @@ def _reconstruct_final_vqc_sicopr(
     A_DD: float,
     P_qc: float,
     *,
-    pmf_methods: COMPolicyConfig = COMPolicyConfig(),
+    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[float, COMPMFRuntimeConfig, Pmf1D]:
     """Reconstruct the SiCoPR final-COM clipping distribution and V_qc.
@@ -1544,7 +1518,7 @@ class COM:
 
     def _resolve_post_ffe_response_cfg(self) -> LinkConfig:
         """Resolve the one time-domain response grid owned by Stage 5."""
-        realization = self.cfg.policy.rxffe_record_realization
+        realization = self.cfg.alg.rxffe_record_realization
         if realization in {"linear_fixed_grid", "finite_record_circshift"}:
             return self.cfg.link
         if realization != "linear_expanded_grid":
@@ -1564,7 +1538,7 @@ class COM:
         self, post_ffe_response_cfg: LinkConfig,
     ) -> LinkConfig:
         """Apply NUM-003 to the Stage 5/7 post-FFE numerical domain."""
-        if self.cfg.policy.eq_ch_imp_len == "full":
+        if self.cfg.num.eq_ch_imp_len == "full":
             return post_ffe_response_cfg
         return self._eq_ch_imp_record_cfg
 
@@ -1594,12 +1568,12 @@ class COM:
 
     def _resolve_eq_ch_imp_record_cfg(self) -> LinkConfig:
         """Resolve the single PSD/correlation record shared by NUM-003 consumers."""
-        if self.cfg.policy.eq_ch_imp_len == "full":
+        if self.cfg.num.eq_ch_imp_len == "full":
             return self.cfg.link
         return LinkConfig.from_Nfft(
             fb=self.cfg.link.fb,
             per_ui=self.cfg.link.per_ui,
-            Nfft=int(self.cfg.policy.num_trunc_ui) * self.cfg.link.per_ui,
+            Nfft=int(self.cfg.num.num_trunc_ui) * self.cfg.link.per_ui,
         )
 
     def _realize_eq_ch_imp_record(
@@ -1612,9 +1586,9 @@ class COM:
         response = np.asarray(response, dtype=float)
         if response.ndim != 1:
             raise ValueError(f"{source_name} must be a one-dimensional response.")
-        if self.cfg.policy.eq_ch_imp_len == "full":
+        if self.cfg.num.eq_ch_imp_len == "full":
             return response
-        record = np.zeros(int(self.cfg.policy.num_trunc_ui), dtype=float)
+        record = np.zeros(int(self.cfg.num.num_trunc_ui), dtype=float)
         count = min(len(response), len(record))
         record[:count] = response[:count]
         return record
@@ -1631,10 +1605,10 @@ class COM:
         record_cfg = record_cfg or self._eq_ch_imp_record_cfg
         if not np.isclose(record_cfg.fb, self._eq_ch_imp_record_cfg.fb):
             raise ValueError(
-                f"{source_name} record config conflicts with COMPolicyConfig.eq_ch_imp_len."
+                f"{source_name} record config conflicts with COMNumericalControlConfig.eq_ch_imp_len."
             )
         if (
-            self.cfg.policy.eq_ch_imp_len == "truncated"
+            self.cfg.num.eq_ch_imp_len == "truncated"
             and record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
         ):
             raise ValueError(
@@ -1649,10 +1623,6 @@ class COM:
             record_cfg,
             variance,
         )
-
-    def _effective_run_cfg(self, run_cfg: COMRunConfig) -> COMRunConfig:
-        """Return the run profile already resolved by the input adapter."""
-        return self.cfg.resolve_run_cfg(run_cfg)
 
     @staticmethod
     def _validate_victim_time_alignment(victim: COMPath) -> None:
@@ -1672,36 +1642,20 @@ class COM:
             source_name="victim pulse_no_txffe causal_ir",
         )
 
-    def run(
-        self,
-        search: Optional[COMSearchConfig] = None,
-        *,
-        report_dir: Optional[str | Path] = None,
-        progress: bool = False,
-    ) -> COMStatus | COMSearchStatus:
-        """Run the configured single profile or delegate file-backed search.
-
-        ``progress`` prints single-run stage/phase timing for interactive
-        debugging only. Search execution deliberately remains file-backed and
-        does not emit this per-phase reporting.
-        """
-        if search is None:
-            self.status = self._run_once(
-                run_cfg=self.cfg.execution.single_run,
-                progress=progress,
+    def run(self, *, progress: bool = False) -> COMStatus:
+        """Run this simulator instance's one mode-resolved configuration."""
+        candidate_count = self.cfg.srch.candidate_count(self.cfg.filter)
+        if candidate_count != 1:
+            raise ValueError(
+                "COM.run() requires scalar SRCH candidate axes; use the outer "
+                f"search dispatcher for {candidate_count} Cartesian candidates."
             )
-        else:
-            if report_dir is None:
-                raise ValueError(
-                    "178A search requires report_dir. Use the case path "
-                    "cases/<case_id>/report/178A/search_run."
-                )
-            self.status = run_full_search(self.cfg, search, report_dir)
+        self.status = self._run_once(progress=progress)
         return self.status
 
-    def _run_once(self, *, run_cfg: COMRunConfig, progress: bool = False) -> COMStatus:
+    def _run_once(self, *, progress: bool = False) -> COMStatus:
         """
-        Run one concrete 178A COMConfig point under one execution profile.
+        Run one concrete, mode-resolved 178A COMConfig point.
 
         178A pipeline:
         paths -> pre-DTE common impairment cache ->
@@ -1713,14 +1667,14 @@ class COM:
         the enabled MLSD receiver stage. ``target="all_enabled"`` includes
         MLSD only when ``cfg.mlsd.enable`` is true.
         """
-        run_cfg = self._effective_run_cfg(run_cfg)
+        exe_cfg = self.cfg.exe
         self.status = COMStatus()
         started = perf_counter()
 
-        mlsd_requested = run_cfg.target == "mlsd" or (
-            run_cfg.target == "all_enabled" and self.cfg.mlsd.enable
+        mlsd_requested = exe_cfg.target == "mlsd" or (
+            exe_cfg.target == "all_enabled" and self.cfg.mlsd.enable
         )
-        if run_cfg.target == "mlsd" and not self.cfg.mlsd.enable:
+        if exe_cfg.target == "mlsd" and not self.cfg.mlsd.enable:
             raise ValueError("target='mlsd' requires cfg.mlsd.enable=True.")
         if mlsd_requested and self.cfg.dte.N_b != 1:
             raise ValueError(
@@ -1760,8 +1714,8 @@ class COM:
         # pos sweeping
         # ===========================
         run_status = COMRunStatus(
-            pmf_grid_quality=run_cfg.pmf_grid_quality,
-            pmf_keep_mass=run_cfg.pmf_keep_mass,
+            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
+            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
             mse_by_pos=[None] * self.per_ui,
             main_cursor_error_by_pos=[None] * self.per_ui,
         )
@@ -1781,7 +1735,6 @@ class COM:
                         pos=pos,
                         common=pre_dte_imp_common,
                         h_XTs_dsamp=h_XTs_dsamp,
-                        run_cfg=run_cfg,
                     )
                 except COMMainCursorError as error:
                     run_status.main_cursor_error_by_pos[pos] = str(error)
@@ -1800,18 +1753,17 @@ class COM:
                     f"{' (best)' if is_best else ''}"
                 )
 
-        coarse_pos_indices = self._initial_pos_sweep_indices(run_cfg)
+        coarse_pos_indices = self._initial_pos_sweep_indices()
         run_status.coarse_pos = list(coarse_pos_indices)
-        report(f"pos sweep ({run_cfg.pos_sweep_method}): {coarse_pos_indices}")
-        initial_label = "phase" if run_cfg.pos_sweep_method == "each_phase" else "coarse"
+        report(f"pos sweep ({self.cfg.srch.pos_sweep_method}): {coarse_pos_indices}")
+        initial_label = "phase" if self.cfg.srch.pos_sweep_method == "each_phase" else "coarse"
         evaluate_pos_indices(coarse_pos_indices, initial_label)
 
-        if run_cfg.pos_sweep_method == "coarse_fine":
+        if self.cfg.srch.pos_sweep_method == "coarse_fine":
             if best_dte is None:
                 raise RuntimeError("Coarse phase sweep did not produce any valid sampling phase candidate.")
             fine_pos_indices = self._fine_pos_sweep_indices(
                 coarse_best_pos=best_dte.pos,
-                run_cfg=run_cfg,
                 evaluated_indices=set(coarse_pos_indices),
             )
             run_status.fine_pos = list(fine_pos_indices)
@@ -1824,7 +1776,7 @@ class COM:
         self._assign_selected_phase(best_eq_ch, best_imp_pre, best_dte)
         report(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
 
-        if run_cfg.target == "mse":
+        if exe_cfg.target == "mse":
             report("single-run complete (target=mse)")
             return self._require_status()
 
@@ -1834,7 +1786,6 @@ class COM:
             eq_ch=best_eq_ch,
             imp_pre=best_imp_pre,
             h=victim.pulse.ir,
-            run_cfg=run_cfg,
         )
         self._assign_post_ffe(best_eq_ch.phase_index, eq_ch_post, imp_status)
         report("post_ffe_imp: done")
@@ -1843,19 +1794,19 @@ class COM:
         if not isinstance(merged_imp_status, COMImpairmentStatus):
             raise RuntimeError("Merged 178A impairment status is not available after post-FFE impairment.")
 
-        if run_cfg.target in {"dfe", "mlsd", "all_enabled"}:
+        if exe_cfg.target in {"dfe", "mlsd", "all_enabled"}:
             report("calculate_COM_DFE: start")
             selected_eq_ch = self._require_status().eq_ch
             if selected_eq_ch is None:
                 raise RuntimeError("Selected equivalent-channel status is not available.")
             self._assign_pmf(self.calculate_COM_DFE(
-                merged_imp_status, selected_eq_ch, best_dte, run_cfg=run_cfg,
+                merged_imp_status, selected_eq_ch, best_dte,
             ))
             report("calculate_COM_DFE: done")
 
         if mlsd_requested:
             report("calculate_COM_MLSD: start")
-            self.calculate_COM_MLSD(run_cfg=run_cfg)
+            self.calculate_COM_MLSD()
             report("calculate_COM_MLSD: done")
         report("single-run complete")
         return self._require_status()
@@ -2009,7 +1960,7 @@ class COM:
         2. build path-shared models
         3. build every path-specific model
         """
-        channels = _build_channel_under_test(self.cfg.channel)
+        channels = _build_channel_under_test(self.cfg.src, self.cfg.channel)
         shared = _build_shared_path(self.cfg, channels[0].freqs)
         return _build_paths(self.cfg, shared, channels)
 
@@ -2100,7 +2051,6 @@ class COM:
         pos: int,
         common: COMImpairmentStatus,
         h_XTs_dsamp: list[np.ndarray],
-        run_cfg: COMRunConfig,
     ) -> tuple[COMEqChannelStatus, COMImpairmentStatus]:
         """
         Calculate complete pre-DTE impairment status for one phase candidate.
@@ -2119,16 +2069,12 @@ class COM:
         common:
             Sampling-phase-independent impairment components computed once by
             calculate_pre_dte_imp_common().
-        run_cfg:
-            Execution profile providing the pre-DTE quantization method.
-
         Notes
         -----
         The selected sampling metadata is not an impairment result. ``pos``
         and the derived oversampled main-cursor index ``ts`` are stored only
         by the subsequent COMDTEStatus.
         """
-        run_cfg = self._effective_run_cfg(run_cfg)
         link_cfg = self.cfg.link
         imp_cfg = self.cfg.imp
         ft_cfg = self.cfg.filter
@@ -2161,7 +2107,7 @@ class COM:
         pmf_cfg = _resolve_adc_input_pmf_config(
             self.cfg.pmf,
             imp_cfg.R_LM / (L - 1),
-            run_cfg,
+            self.cfg.num,
         )
         
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
@@ -2216,7 +2162,7 @@ class COM:
         # covariance. Only the ADC clipping input changes in the reference
         # comparison branch.
         S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
-        if self.cfg.policy.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference":
+        if self.cfg.alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference":
             S_jn_clip = self._build_eq_ch_imp_psd(
                 h_J,
                 sigma_X**2 * imp_cfg.sigma_RJ**2,
@@ -2242,10 +2188,10 @@ class COM:
                 pmf_cfg = pmf_cfg, 
                 link_cfg = eq_ch_imp_record_cfg,
                 cdf_tail=cdf_tail,
-                pmf_methods=self.cfg.policy,
-                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                pmf_methods=self.cfg.alg,
+                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
-        adc_input_pmf.clipping_convention = self.cfg.policy.pre_dte_adc_clipping_convention
+        adc_input_pmf.clipping_convention = self.cfg.alg.pre_dte_adc_clipping_convention
         sigma_qn = S_qn.to_sigma()
 
         # summation and IDFT
@@ -2293,7 +2239,6 @@ class COM:
         pos: int,
         common: COMImpairmentStatus,
         h_XTs_dsamp: list[np.ndarray],
-        run_cfg: COMRunConfig,
     ) -> tuple[COMEqChannelStatus, COMImpairmentStatus, COMDTEStatus]:
         """Calculate one sampling phase's pre-DTE impairment and MMSE-DTE result."""
         eq_ch, imp_pre = self.calculate_pre_dte_imp_at_pos(
@@ -2301,36 +2246,34 @@ class COM:
             pos=pos,
             common=common,
             h_XTs_dsamp=h_XTs_dsamp,
-            run_cfg=run_cfg,
         )
         dte_status = self.calculate_MMSE_DTE(
             victim=victim,
             eq_ch=eq_ch,
             imp_pre=imp_pre,
             pos=pos,
-            run_cfg=run_cfg,
         )
         return eq_ch, imp_pre, dte_status
 
-    def _initial_pos_sweep_indices(self, run_cfg: COMRunConfig) -> list[int]:
+    def _initial_pos_sweep_indices(self) -> list[int]:
         """Return the first phase set for exhaustive or coarse-fine sampling."""
-        if run_cfg.pos_sweep_method == "each_phase":
+        srch_cfg = self.cfg.srch
+        if srch_cfg.pos_sweep_method == "each_phase":
             return list(range(self.per_ui))
-        if run_cfg.pos_coarse_stride > self.per_ui:
+        if srch_cfg.pos_coarse_stride > self.per_ui:
             raise ValueError(
-                "COMRunConfig.pos_coarse_stride must not exceed LinkConfig.per_ui."
+                "COMSearchConfig.pos_coarse_stride must not exceed LinkConfig.per_ui."
             )
-        return list(range(0, self.per_ui, run_cfg.pos_coarse_stride))
+        return list(range(0, self.per_ui, srch_cfg.pos_coarse_stride))
 
     def _fine_pos_sweep_indices(
         self,
         *,
         coarse_best_pos: int,
-        run_cfg: COMRunConfig,
         evaluated_indices: set[int],
     ) -> list[int]:
         """Return unvisited integer phases in the circular fine window."""
-        radius = (run_cfg.pos_coarse_stride + 1) // 2
+        radius = (self.cfg.srch.pos_coarse_stride + 1) // 2
         window = [
             (coarse_best_pos + offset) % self.per_ui
             for offset in range(-radius, radius + 1)
@@ -2343,7 +2286,6 @@ class COM:
         eq_ch: COMEqChannelStatus,
         imp_pre: COMImpairmentStatus,
         pos: int,
-        run_cfg: COMRunConfig,
     ) -> COMDTEStatus:
         """
         Calculate 178A MMSE DTE status for one sampling-phase candidate.
@@ -2358,7 +2300,7 @@ class COM:
         h_dsamp = eq_ch.h_dsamp.ir
         solver = COM_MMSE_DTE(
             self.cfg.dte,
-            run_cfg.floating_mode,
+            self.cfg.alg.floating_mode,
         )
         dte_status = solver.run(
             h_dsamp = h_dsamp,
@@ -2379,7 +2321,6 @@ class COM:
         eq_ch: COMEqChannelStatus,
         imp_pre: COMImpairmentStatus,
         h: np.ndarray,
-        run_cfg: COMRunConfig,
     ) -> tuple[COMPostFFEEqChannelStatus, COMImpairmentStatus]:
         """Finalize selected-phase equivalent responses and post-DTE diagnostics.
 
@@ -2417,7 +2358,7 @@ class COM:
             eq_ch.pre_dte.h_dsamp,
             w_lim_ndarray,
             post_ffe_response_cfg,
-            self.cfg.policy.rxffe_record_realization,
+            self.cfg.alg.rxffe_record_realization,
             "post_ffe victim",
         )
         H_rxffe = SampledResponse.from_ir(w_lim_ndarray, post_ffe_imp_record_cfg)
@@ -2428,7 +2369,7 @@ class COM:
                 h_XT_dsamp,
                 w_lim_ndarray,
                 post_ffe_response_cfg,
-                self.cfg.policy.rxffe_record_realization,
+                self.cfg.alg.rxffe_record_realization,
                 f"post_ffe XT{path_index}",
             )
             h_XTs_w.append(h_XT_w)
@@ -2458,11 +2399,10 @@ class COM:
             h_J_pre,
             w_lim_ndarray,
             post_ffe_response_cfg,
-            self.cfg.policy.rxffe_record_realization,
+            self.cfg.alg.rxffe_record_realization,
             "post_ffe DDJ",
         )
 
-        run_cfg = self._effective_run_cfg(run_cfg)
         # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
         # three Gaussian sources there, and filter once by the pre-grid FFE.
         S_jn_RJ_pre = self._build_eq_ch_imp_psd(
@@ -2480,7 +2420,7 @@ class COM:
         pmf_cfg_adc_input = _resolve_adc_input_pmf_config(
             self.cfg.pmf,
             As,
-            run_cfg,
+            self.cfg.num,
         )
         p_sig = _build_pmf_pam_L(self.cfg.L)
         if self.cfg.imp.N_qb is None or self.cfg.imp.P_qc is None:
@@ -2496,8 +2436,8 @@ class COM:
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
                 pmf_cfg=pmf_cfg_adc_input,
-                pmf_methods=self.cfg.policy,
-                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                pmf_methods=self.cfg.alg,
+                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
 
         # ALG-011 resolves the full Stage 5 response support. NUM-003 then
@@ -2545,7 +2485,7 @@ class COM:
 
         return (
             COMPostFFEEqChannelStatus(
-                record_realization=self.cfg.policy.rxffe_record_realization,
+                record_realization=self.cfg.alg.rxffe_record_realization,
                 response_cfg=post_ffe_response_cfg,
                 h_w=h_w,
                 h_XTs_w=h_XTs_w,
@@ -2639,7 +2579,7 @@ class COM:
         # RxFFE response.  The reference realization keeps S_qn white and
         # applies only the RxFFE main-tap gain; all other components still use
         # the complete response.
-        quantization_method = self.cfg.policy.mlsd_quantization_psd
+        quantization_method = self.cfg.alg.mlsd_quantization_psd
         source_qn = pre_dte.psd.S_qn
         if source_qn is not None:
             source_qn = self._resample_psd_to_cfg(
@@ -2716,7 +2656,6 @@ class COM:
         imp_status: COMImpairmentStatus,
         eq_ch: COMEqChannelStatus,
         dte_status: COMDTEStatus,
-        run_cfg: Optional[COMRunConfig] = None,
     ) -> COMPMFStatus:
         """
         Calculate 178A final COM result after DFE.
@@ -2729,14 +2668,10 @@ class COM:
             Selected 178A receiver DTE result.
         """
         imp_cfg = self.cfg.imp
-        run_cfg = self._effective_run_cfg(
-            self.cfg.execution.single_run if run_cfg is None else run_cfg
-        )
         pmf_cfg_for_com = _resolve_final_com_pmf_config(
             self.cfg.pmf,
             imp_status.As,
-            run_cfg,
-            final_pmf_grid=self.cfg.policy.final_pmf_grid,
+            self.cfg.num,
         )
         As = imp_status.As
 
@@ -2748,7 +2683,7 @@ class COM:
             p_sig,
             eq_ch.h_ISI.ir,
             pmf_cfg_for_com,
-            projection_method=self.cfg.policy.pmf_projection_method,
+            projection_method=self.cfg.alg.pmf_projection_method,
             name="ISI",
         )
 
@@ -2757,7 +2692,7 @@ class COM:
             p_sig,
             eq_ch.h_XTs_w or [],
             pmf_cfg_for_com,
-            projection_method=self.cfg.policy.pmf_projection_method,
+            projection_method=self.cfg.alg.pmf_projection_method,
         )
 
         # pmf of tx Dual-dirac jitter
@@ -2765,7 +2700,7 @@ class COM:
             p_sig,
             imp_cfg.A_DD * eq_ch.h_w_J.ir,
             pmf_cfg_for_com,
-            projection_method=self.cfg.policy.pmf_projection_method,
+            projection_method=self.cfg.alg.pmf_projection_method,
             name="Dual-Dirac",
         )
 
@@ -2783,7 +2718,7 @@ class COM:
                 dx=pmf_cfg_for_com.dy,
                 unit="volt",
                 name="ADC_QN",
-                projection_method=self.cfg.policy.pmf_projection_method,
+                projection_method=self.cfg.alg.pmf_projection_method,
             )
         else:
             if adc_input_pmf.method != "pmf_exact":
@@ -2797,7 +2732,7 @@ class COM:
                     "calculate_COM_DFE() requires COMDTEStatus.w_lim to be the "
                     f"full zero-filled FFE tap vector with shape {expected_shape}, got {w_lim.shape}."
                 )
-            if self.cfg.policy.final_com_vqc_convention == "sicopr_final_reconstruction":
+            if self.cfg.alg.final_com_vqc_convention == "sicopr_final_reconstruction":
                 # SiCoPR final-COM V_qc convention: reconstruct the clipping
                 # distribution and apply its P_qc tail rule. The existing tap
                 # accumulation is frozen for reference regression only; main-
@@ -2811,8 +2746,8 @@ class COM:
                     main_gain,
                     imp_cfg.A_DD,
                     imp_cfg.P_qc,
-                    pmf_methods=self.cfg.policy,
-                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                    pmf_methods=self.cfg.alg,
+                    pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
                 )
                 delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
                 quantization_taps = w_lim.copy()
@@ -2821,10 +2756,10 @@ class COM:
                 # scaled tap to the final (post-FFE) PMF grid in fir_filter.
                 p_delta = Pmf1D.uniform(
                     delta, adc_grid_cfg,
-                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                    pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
                     support=(
                         p_noise_adc
-                        if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                        if self.cfg.alg.final_adc_pmf_projection == "reference_support"
                         else None
                     ),
                 )
@@ -2837,7 +2772,7 @@ class COM:
                 quantization_taps = w_lim
                 p_delta = Pmf1D.uniform(
                     delta, pmf_cfg_for_com,
-                    pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                    pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
                 )
             p_qn = p_delta.fir_filter(
                 quantization_taps,
@@ -2845,16 +2780,16 @@ class COM:
                 dx_ref = pmf_cfg_for_com.dy,
                 tap_abs_th = (
                     np.nextafter(0.0, 1.0)
-                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
+                    if self.cfg.alg.final_adc_pmf_projection == "reference_support"
                     else pmf_cfg_for_com.tap_abs_th
                 ),
                 max_taps = None,
                 name = "ADC_QN",
-                projection_method=self.cfg.policy.pmf_projection_method,
+                projection_method=self.cfg.alg.pmf_projection_method,
                 initial_bin_range=(
                     (p_noise_adc.st_idx, p_noise_adc.st_idx + len(p_noise_adc.pmf) - 1)
-                    if self.cfg.policy.final_adc_pmf_projection == "reference_support"
-                    and self.cfg.policy.final_com_vqc_convention
+                    if self.cfg.alg.final_adc_pmf_projection == "reference_support"
+                    and self.cfg.alg.final_com_vqc_convention
                     == "sicopr_final_reconstruction"
                     else None
                 ),
@@ -2863,7 +2798,7 @@ class COM:
         # pmf of gaussian noise
         p_G = _build_pmf_G(
             imp_status, dte_status, self.cfg.link, pmf_cfg_for_com,
-            pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+            pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
         )
 
         # combined pmf, A_ni
@@ -2876,12 +2811,12 @@ class COM:
         return COMPMFStatus(
             dy=pmf_cfg_for_com.dy,
             tap_abs_th=pmf_cfg_for_com.tap_abs_th,
-            final_vqc_convention=self.cfg.policy.final_com_vqc_convention,
+            final_vqc_convention=self.cfg.alg.final_com_vqc_convention,
             final_V_qc=(
                 None
                 if adc_input_pmf is None or adc_input_pmf.method == "disabled"
                 else float(V_qc)
-                if self.cfg.policy.final_com_vqc_convention
+                if self.cfg.alg.final_com_vqc_convention
                 == "sicopr_final_reconstruction"
                 else adc_input_pmf.V_qc
             ),
@@ -2901,7 +2836,7 @@ class COM:
             COM=COM,
         )
 
-    def calculate_COM_MLSD(self, run_cfg: Optional[COMRunConfig] = None) -> COMMLSDStatus:
+    def calculate_COM_MLSD(self) -> COMMLSDStatus:
         """Calculate the Annex 178A MLSD COM adjustment after COM_DFE.
 
         The DFE PMF remains the immutable baseline.  Eq. (178A-47) derives
@@ -2945,24 +2880,20 @@ class COM:
                 f"got COM_DFE={COM_DFE!r}, A_ni={A_ni!r}."
             )
 
-        run_cfg = self._effective_run_cfg(
-            self.cfg.execution.single_run if run_cfg is None else run_cfg
-        )
         pmf_cfg = _resolve_final_com_pmf_config(
-            self.cfg.pmf, imp_status.As, run_cfg,
-            final_pmf_grid=self.cfg.policy.final_pmf_grid,
+            self.cfg.pmf, imp_status.As, self.cfg.num,
         )
         # Eqs. (178A-50) and (178A-51): calibrate added receiver noise.
         # The Annex realization replaces only the Gaussian component.  The
         # reference realization scales the complete DFE PDF before deriving g_an.
-        if self.cfg.policy.added_noise_pdf == "scaled_total_pdf":
+        if self.cfg.alg.added_noise_pdf == "scaled_total_pdf":
             added_noise = _build_scaled_total_pdf_added_noise(
                 self.cfg.mlsd.resolved_delta_com_an(),
                 imp_status.post_ffe,
                 pmf_dfe,
                 self.cfg.DER_0,
-                scaling_method=self.cfg.policy.pmf_scaling_method,
-                projection_method=self.cfg.policy.pmf_projection_method,
+                scaling_method=self.cfg.alg.pmf_scaling_method,
+                projection_method=self.cfg.alg.pmf_projection_method,
             )
         else:
             added_noise = solve_g_an(
@@ -2971,7 +2902,7 @@ class COM:
                 pmf_dfe,
                 pmf_cfg,
                 self.cfg.DER_0,
-                pdf_to_pmf_method=self.cfg.policy.pdf_to_pmf_method,
+                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
         # Eq. (178A-54): build the MLSD noise PSD and autocorrelation.
         noise = self.build_mlsd_noise(imp_status, eq_ch, dte_status, added_noise)
@@ -2983,9 +2914,9 @@ class COM:
             As=imp_status.As,
             b_lim_1=float(b_lim[0]),
             trunc_len=self.cfg.mlsd.trunc_len,
-            pmf_scaling_method=self.cfg.policy.pmf_scaling_method,
-            pmf_projection_method=self.cfg.policy.pmf_projection_method,
-            sequence_termination=self.cfg.policy.sequence_termination,
+            pmf_scaling_method=self.cfg.alg.pmf_scaling_method,
+            pmf_projection_method=self.cfg.alg.pmf_projection_method,
+            sequence_termination=self.cfg.alg.sequence_termination,
         )
         if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:
             raise COMError(
@@ -3004,7 +2935,7 @@ class COM:
         delta_COM = float(20.0 * np.log10(A_MLSD / imp_status.As))
         COM_MLSD_raw = COM_DFE + delta_COM
         DER_MLSD_raw_sequence = float(np.sum(der_by_j))
-        if self.cfg.policy.reported_der == "baseline_pdf_re_evaluation":
+        if self.cfg.alg.reported_der == "baseline_pdf_re_evaluation":
             # MATLAB 4.17 re-evaluates the published DER on the original DFE
             # PDF at the amplitude implied by the calculated MLSD increment.
             DER_MLSD_reported = _reference_cdf_ev(
@@ -3072,6 +3003,7 @@ __all__ = [
     "COMBilinearCTLE",
     "COMChannelConfig",
     "COMConfig",
+    "COMAlgorithmPolicyConfig",
     "COMDTEConfig",
     "COMDTEStatus",
     "COMError",
@@ -3084,10 +3016,10 @@ __all__ = [
     "COMNumericalControlConfig",
     "COMPMFConfig",
     "COMPMFGridControl",
-    "COMPolicyConfig",
     "COMPMFStatus",
     "COMRunStatus",
     "COMRunConfig",
+    "COMSourceConfig",
     "COMSharedPath",
     "COMMainCursorError",
     "COMLengthMismatchError",
@@ -3153,9 +3085,11 @@ if __name__ == "__main__":
     if __package__:
         from ..io import com_excel_io
         from ..reporting.com_report_178A import COMReport178A
+        from ..search.com_search_178A import run_full_search
     else:
         from serdes_coding.io import com_excel_io
         from serdes_coding.reporting.com_report_178A import COMReport178A
+        from serdes_coding.search.com_search_178A import run_full_search
     com_excel_io = importlib.reload(com_excel_io)
 
     if RUN_MODE not in {"single_run", "search_run"}:
@@ -3163,32 +3097,30 @@ if __name__ == "__main__":
     if not CONFIG_PATH.exists():
         raise FileNotFoundError(f"178A project workbook not found: {CONFIG_PATH}")
 
-    cfg = com_excel_io.excel_to_config_178A(str(CONFIG_PATH))
-
-    # Manual overrides apply only to execution-policy fields.  They do not
-    # alter fixed config, search ranges, or the COM calculation implementation.
-    profiles = {
-        "single_run": cfg.execution.single_run,
-        "search_sweep": cfg.execution.search_sweep,
-        "search_final": cfg.execution.search_final,
-    }
-    for profile_name, overrides in EXEC_POLICY.items():
-        if profile_name not in profiles:
-            raise ValueError(f"Unknown EXEC_POLICY profile: {profile_name}")
-        invalid = set(overrides) - set(profiles[profile_name].__dataclass_fields__)
+    def load_mode_config(mode: Literal["single_run", "search_sweep", "search_final"]) -> COMConfig:
+        mode_cfg = com_excel_io.excel_to_config_178A(
+            str(CONFIG_PATH),
+            run_mode=mode,
+        )
+        overrides = EXEC_POLICY.get(mode, {})
+        invalid = set(overrides) - set(mode_cfg.exe.__dataclass_fields__)
         if invalid:
             raise ValueError(
-                f"Unsupported EXEC_POLICY fields for {profile_name}: {sorted(invalid)}"
+                f"Unsupported EXEC_POLICY fields for {mode}: {sorted(invalid)}"
             )
-        profiles[profile_name] = replace(profiles[profile_name], **overrides)
-    cfg.execution = replace(
-        cfg.execution,
-        single_run=profiles["single_run"],
-        search_sweep=profiles["search_sweep"],
-        search_final=profiles["search_final"],
-    )
+        return replace(
+            mode_cfg,
+            exe=replace(mode_cfg.exe, **overrides),
+        )
+
+    unknown_profiles = set(EXEC_POLICY) - {
+        "single_run", "search_sweep", "search_final"
+    }
+    if unknown_profiles:
+        raise ValueError(f"Unknown EXEC_POLICY profiles: {sorted(unknown_profiles)}")
 
     if RUN_MODE == "single_run":
+        cfg = load_mode_config("single_run")
         REPORT_PATH = REPORT_ROOT / "single_run"
         started = perf_counter()
         status = COM(cfg).run(progress=True)
@@ -3199,11 +3131,16 @@ if __name__ == "__main__":
         outputs.update(COMReport178A(cfg, status).export_single_run(REPORT_PATH))
         print(outputs)
     else:
+        sweep_cfg = load_mode_config("search_sweep")
+        final_cfg = load_mode_config("search_final")
         REPORT_PATH = REPORT_ROOT / SEARCH_OUTPUT_NAME
-        search_cfg = com_excel_io.excel_to_search_config_178A(str(CONFIG_PATH))
-        candidate_count = len(search_cfg.candidates(cfg.filter))
+        candidate_count = sweep_cfg.srch.candidate_count(sweep_cfg.filter)
         print(f"178A search_run: {candidate_count} candidates from workbook search_config")
         started = perf_counter()
-        status = COM(cfg).run(search=search_cfg, report_dir=REPORT_PATH)
+        status = run_full_search(
+            sweep_cfg,
+            final_cfg,
+            REPORT_PATH,
+        )
         elapsed_s = perf_counter() - started
         print(f"178A search_run completed in {elapsed_s:.2f} s ({elapsed_s / 60.0:.2f} min)")

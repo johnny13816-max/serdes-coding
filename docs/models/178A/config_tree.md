@@ -8,28 +8,31 @@ extensions are deferred to the separate core contract described there.
 
 > This is the 178A-specific inventory of project fields and typed runtime ownership. It does not define model equations. Project-wide rules are in [configuration architecture](../../architecture/configuration_architecture.md).
 
-## Configuration layers
+## Configuration layers after CFG-178A-F
 
 ```text
 CASE_CONFIG
 └── case identity and provenance
-RUN_MODE
-├── single_run
-└── search_run
 FIXED_CONFIG
-├── intrinsic
-├── derived
-└── policy
-EXEC_POLICY
-├── control.execution_profile
-├── single_run
-├── search_sweep
-└── search_final
+├── intrinsic                         physical inputs; class may be intrinsic/derived
+├── algorithm_policy                  ALG selector rows
+└── numerical_control                 NUM rows
+CHANNELS
+└── block_source                      path / representation metadata
 SEARCH_CONFIG
-└── candidate values and search controls
+└── search                            candidate values and retention
+RUN_CONFIG
+├── algorithm_policy                  facade selector / floating method
+├── numerical_control                 per-run PMF convergence input
+├── search                            phase coverage and outer orchestration
+└── execution                         target only
 ```
 
-`search_sweep` is the first step of `search_run`; `search_final` evaluates retained candidates. Execution policy selects computational path/efficiency settings. Search ranges stay in `search_config`.
+`search_sweep` is the first step of `search_run`; `search_final` evaluates
+retained candidates.  These workbook rows are adapter inputs that resolve
+algorithm, numerical, search, and execution values before a `COMConfig` is
+constructed.  They are not one runtime `execution` object. Search ranges stay
+in `search_config`.
 
 ## Runtime dataclass tree
 
@@ -39,63 +42,96 @@ formatter owns layout only; each class owns its field selection, order, labels,
 stored/display units, and conversions. See
 [COM dataclass 文字介面契約](../../architecture/dataclass_text_contract.md).
 
+### Current implementation after CFG-178A-F
+
+```text
+COMConfig
+├── physical root fields and leaf dataclasses
+├── channel: COMChannelConfig
+│   ├── R0 / R_d_tx / R_d_rx
+│   ├── gamma_src / gamma_load              construction-derived
+│   └── sparam_frequency_limit_Hz            measured-data boundary
+├── src: COMSourceConfig
+│   └── channel
+│       ├── victim: ChannelBinding
+│       ├── next: tuple[ChannelBinding, ...]
+│       └── fext: tuple[ChannelBinding, ...]
+│           └── each binding: path / representation / port_order
+├── pmf: COMPMFConfig
+├── alg: COMAlgorithmPolicyConfig
+│   └── missing_dc_policy                    ALG-001
+├── num: COMNumericalControlConfig
+├── srch: COMSearchConfig
+│   ├── TX FFE / CTLE scalar-or-vector candidate axes
+│   ├── pos_sweep_method / pos_coarse_stride
+│   ├── result-retention controls
+│   └── group_size / final_top_k
+├── exe: COMExecutionConfig
+│   └── target
+└── mlsd: COMMLSDConfig
+```
+
+ALG/NUM/SRCH/EXE/SRC runtime boundaries are implemented. `COMRunConfig` and
+`COMRunProfiles` are adapter-only workbook compatibility objects and never
+enter `COMConfig` or Stage 1--7. Profile resolution metadata is not a runtime
+config field; `to_export_dict()` emits the adapter's private resolution record
+separately from `config` and `derived`.
+
+### Approved target after CFG-178A-B through F
+
+Project Config uses the full classification names. Runtime grouped-field names
+use the registered lower-case prefixes:
+
 ```text
 COMConfig
 ├── L
+├── DER_0
 ├── link: LinkConfig
 ├── filter: COMFilterConfig
-├── channel: COMChannelConfig
+├── channel: COMChannelConfig           physical conditions / input boundary
 ├── txpkg_victim: COMPkgConfig
 ├── txpkg_fext: COMPkgConfig
 ├── txpkg_next: COMPkgConfig
 ├── rxpkg: COMPkgConfig
 ├── dte: COMDTEConfig
 ├── imp: COMImpairmentConfig
-├── DER_0
-├── pmf: COMPMFConfig
-├── numerical_control: COMNumericalControlConfig
-│   ├── adc_input_pmf_grid: COMPMFGridControl
-│   │   ├── rule
-│   │   ├── dy_rel_As
-│   │   ├── dy_abs_max
-│   │   └── dy_override
-│   └── final_pmf_grid: COMPMFGridControl
-│       ├── rule
-│       ├── dy_rel_As
-│       ├── dy_abs_max
-│       └── dy_override
-├── policy: COMPolicyConfig
-│   ├── out_of_measured
-│   ├── pre_dte_adc_clipping_convention
-│   ├── final_com_vqc_convention
-│   ├── ctle_pulse_realization
-│   ├── rxffe_record_realization
-│   ├── eq_ch_imp_len
-│   ├── num_trunc_ui
-│   ├── pmf_projection_method
-│   ├── xtalk_pmf_accumulation
-│   ├── pdf_to_pmf_method
-│   ├── pmf_scaling_method
-│   ├── final_pmf_grid
-│   ├── final_adc_pmf_projection
-│   ├── added_noise_pdf
-│   ├── mlsd_quantization_psd
-│   ├── sequence_termination
-│   ├── reported_der
-│   ├── applied_config_profile           provenance only
-│   └── config_profile_overrides         provenance only
-├── execution: COMExecutionConfig
-│   ├── single_run: COMRunConfig
-│   ├── search_sweep: COMRunConfig
-│   ├── search_final: COMRunConfig
-│   ├── search_group_size
-│   └── search_top_k
-└── mlsd: COMMLSDConfig
-
-COMSearchConfig                 separate search-run input
+├── mlsd: COMMLSDConfig
+├── src: COMSourceConfig                SRC / block_source
+│   ├── channel.victim
+│   ├── channel.next
+│   └── channel.fext
+├── alg: COMAlgorithmPolicyConfig       ALG / algorithm_policy
+├── num: COMNumericalControlConfig      NUM / numerical_control
+├── srch: COMSearchConfig               SRCH / search
+└── exe: COMExecutionConfig             EXE / execution
+    └── target
 ```
 
-`excel_to_config_178A()` reads `fixed_config`, `run_config`, and `channels`; `excel_to_search_config_178A()` reads `search_config`.
+There is no `cfg.intrinsic`, `cfg.phy`, `cfg.provenance`, or `cfg.derived`.
+Intrinsic physical inputs keep their direct paths. Construction-derived values
+stay in the owning dataclass; runtime-derived values stay with their owner or
+status; profile/source history stays in adapter/report metadata.
+
+`COMSearchConfig` is the only SRCH dataclass. At the Project Config/job
+boundary, candidate fields may be scalar or non-empty one-dimensional vectors.
+The outer runner normalizes axes and expands their Cartesian product. A product
+of one uses the single-run path; a larger product uses sweep/ranking/final
+orchestration. Every `COM` instance still receives one resolved scalar
+candidate. Stage 3 reads only its sampling-phase search controls.
+
+The grouped `COMRunProfiles` is adapter-internal: it reads the three workbook
+profiles before `run_mode` selects one profile and flattens its ALG/NUM/EXE
+values. It is never stored in `COMConfig` or passed through Stage 1--7.
+Production search planning/finalization reads orchestration values from
+`COMSearchConfig`.
+
+`excel_to_config_178A(..., run_mode=...)` reads `fixed_config`, `run_config`, and
+`channels`, then selects exactly one of `single_run`, `search_sweep`, or
+`search_final` before constructing `COMConfig`. Each result includes the same
+canonical `cfg.srch`; single-run mode scalarizes it to the physical filter,
+while search modes retain the workbook axes for the outer runner.
+`excel_to_search_config_178A()` remains a compatibility reader for the same
+dataclass and is not a second production source.
 
 ## Case config
 
@@ -142,13 +178,18 @@ These rows stay in the template by the approved decision and are labeled
 
 These fields are project-owned and are not Ad Hoc mapping targets. Current defaults are carried forward from the project template.
 
+The `Runtime owner` column below records the current production path until its
+own approved migration slice completes. The canonical target is `cfg.alg` for
+ALG controls and `cfg.num` for NUM controls; the exact field-by-field slice is
+listed in [the migration contract](../../planning/comconfig_domain_migration.md#field-migration-inventory).
+
 | Field（舊欄位保留讀取相容） | Runtime owner | Default |
 |---|---|---:|
-| `adc_input_pmf_grid.rule` | `COMConfig.numerical_control.adc_input_pmf_grid` | `relative_As_with_cap` |
+| `adc_input_pmf_grid.rule` | `COMConfig.num.adc_input_pmf_grid` | `relative_As_with_cap` |
 | `adc_input_pmf_grid.dy_rel_As` | same | 0.001 |
 | `adc_input_pmf_grid.dy_abs_max` | same | 1e-5 V |
 | `adc_input_pmf_grid.dy_override` | same | blank / `None` |
-| `final_pmf_grid.rule` | `COMConfig.numerical_control.final_pmf_grid` | `relative_As_with_cap` |
+| `final_pmf_grid.rule` | `COMConfig.num.final_pmf_grid` | `relative_As_with_cap` |
 | `final_pmf_grid.dy_rel_As` | same | 0.001 |
 | `final_pmf_grid.dy_abs_max` | same | 1e-5 V |
 | `final_pmf_grid.dy_override` | same | blank / `None` |
@@ -156,15 +197,15 @@ These fields are project-owned and are not Ad Hoc mapping targets. Current defau
 | `missing_dc_policy` | `COMChannelConfig` | `skrf`; reference profile selects `mag_phase_trend_to_dc` |
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
-| `out_of_measured` | `COMConfig.policy` | `cosine_decay` |
-| `pre_dte_adc_clipping_convention` | `COMConfig.policy` | `full_jitter_half_tail` |
-| `final_com_vqc_convention` | `COMConfig.policy` | `selected_phase_adc_input` |
-| `ctle_pulse_realization` | `COMConfig.policy`（workbook 不單獨曝露） | `continuous_tf` |
-| `rxffe_record_realization` | `COMConfig.policy`（workbook `fixed_config` 可明示；profile 可覆蓋） | `linear_fixed_grid` |
-| `eq_ch_imp_len` | `COMConfig.policy`（workbook 獨立曝露） | `full` |
-| `num_trunc_ui` | `COMConfig.policy`（僅 `truncated` 適用） | blank / `None` |
-| `pmf_projection_method` | `COMConfig.policy`（workbook 獨立曝露） | `linear` |
-| `pdf_to_pmf_method` | `COMConfig.policy`（由 profile 或 Python 設定） | `bin_integral` |
+| `out_of_measured` | `COMConfig.alg` | `cosine_decay` |
+| `pre_dte_adc_clipping_convention` | `COMConfig.alg` | `full_jitter_half_tail` |
+| `final_com_vqc_convention` | `COMConfig.alg` | `selected_phase_adc_input` |
+| `ctle_pulse_realization` | `COMConfig.alg`（workbook 不單獨曝露） | `continuous_tf` |
+| `rxffe_record_realization` | `COMConfig.alg`（workbook `fixed_config` 可明示；profile 可覆蓋） | `linear_fixed_grid` |
+| `eq_ch_imp_len` | `COMConfig.num`（workbook 獨立曝露） | `full` |
+| `num_trunc_ui` | `COMConfig.num`（僅 `truncated` 適用） | blank / `None` |
+| `pmf_projection_method` | `COMConfig.alg`（workbook 獨立曝露） | `linear` |
+| `pdf_to_pmf_method` | `COMConfig.alg`（由 profile 或 Python 設定） | `bin_integral` |
 
 The eight grid fields have primary domain `numerical_control`, exposure
 `advanced`, effect `accuracy/cost`, and workbook class `policy`. Their owners
@@ -192,7 +233,7 @@ template. Pre-DTE ADC-input clipping uses the fixed exact-PMF flow owned by
 具名方法：`mag_phase_trend_to_dc`、`zero_padding`、`bilinear_iir`、
 `finite_record_circshift`、pre-DTE/final ADC reference 分支，
 `truncated` eq-channel impairment record（本案 4096 UI）、
-以及 `COMPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑
+以及 `COMAlgorithmPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑
 XT、Gaussian grid sampling（支撐範圍由 `NormalDist().inv_cdf(1-DER_0)`
 決定）、uniform 最近端點、ordinate interpolation、reference support 與
 relative-`As` final grid。`COMConfig` 不保留此 boolean；model 只讀上述
@@ -203,9 +244,9 @@ RX FFE 電壓座標使用 `dy_rel_As*As`，相當於 SiCoPR 主 tap 正規化後
 乘回主 tap gain。
 舊 workbook 的 `align_to_ref` 與仍受支援的個別欄位可讀；legacy boolean 為 `True` 時
 等價於 `sicopr_reference_v1`，為 `False` 且存在個別 method 時等價於 `custom`。
-Reference profile 以 preset 覆蓋，
-並在 `COMConfig.policy.applied_config_profile`／`config_profile_overrides` 記錄 profile 與
-raw/effective 值。此模式只供 reference 比對，不宣稱為 178A 通用方法。
+Reference profile 以 preset 覆蓋；adapter 的 export-only
+`adapter_resolution` 記錄 profile 與 raw/effective 值，不進入 `cfg.alg`。
+此模式只供 reference 比對，不宣稱為 178A 通用方法。
 
 `ctle_pulse_realization="bilinear_iir"` 是完整且不可拆分的 pulse-realization
 方法：measured composite pre-CTLE TF、reference frequency grid、raw IFFT、
@@ -215,7 +256,7 @@ Stage 5 post-FFE record policy：`linear_fixed_grid` 保留 run grid 與 overflo
 `linear_expanded_grid` 建立足以容納完整 linear convolution 的共同 response grid；
 `finite_record_circshift` 在原有限 record 做 shift-sum，供 reference preset 使用。
 Stage 5 為唯一 branch owner，Stage 6 DFE 與 Stage 7 MLSD 只消費 status 中已解析的
-response／PSD record grid。`policy.eq_ch_imp_len`（NUM-003）仍獨立決定 full 或
+response／PSD record grid。`num.eq_ch_imp_len`（NUM-003）仍獨立決定 full 或
 truncated PSD/correlation record，不改變 ALG-011 的 response realization。
 
 `out_of_measured` 控制 terminated scalar `H_21` 從量測 S-parameter grid
@@ -231,7 +272,7 @@ FEXT 與 victim TX-noise equivalent channel 使用同一政策。analysis-grid
 `sparam_frequency_limit_GHz=67`。一般模板留白，execution profile 本身不強制
 任何固定頻率。
 
-`channel_renormalization_order` 已從 `COMPolicyConfig`、profile 與 workbook
+`channel_renormalization_order` 已從 `COMAlgorithmPolicyConfig`、profile 與 workbook
 mapping 移除。舊 workbook 若仍帶此欄位會收到明確 migration error。178A
 由 `_build_channel_under_test()` 依 Touchstone port count dispatch：measured S4P
 固定先對完整 single-ended 四埠 renormalize 至 `R_0`，再取 Sdd；native
@@ -269,7 +310,14 @@ internal 8σ invariant；`pdf_to_pmf_method` 不能改變 support。
 
 ## Channels
 
-The `channels` sheet provides one victim and indexed NEXT/FEXT rows, with S4P path, port order, and enable/use state. S4P files remain under `reference_data/COM_channel_data/` and are referenced by path. `R_0`, `R_d_tx`, and `R_d_rx` live in fixed config. Every package `R0` remains required and the project adapter rejects any package/channel `R0` mismatch.
+The `channels` sheet provides one victim and indexed NEXT/FEXT rows, with the
+legacy `S4P Path` column, port order, and enable/use state. The adapter maps each
+enabled row to `cfg.src.channel` as a `ChannelBinding`; the existing column may
+identify a supported S4P or native differential S2P artifact, and representation
+is validated independently for each file. `R_0`, `R_d_tx`, `R_d_rx`, and the
+measured frequency limit map to physical `cfg.channel`. `missing_dc_policy` maps
+to `cfg.alg`. Every package `R0` remains required and the adapter rejects any
+package/channel `R0` mismatch. CFG-D does not rename workbook columns.
 
 ## Search config
 
@@ -280,6 +328,8 @@ The `channels` sheet provides one victim and indexed NEXT/FEXT rows, with S4P pa
 | `keep_top_n` | `keep_top_n` | Retained successful result count |
 | `keep_all_rows` | `keep_all_rows` | Result retention behavior |
 | `continue_on_error` | `continue_on_error` | Candidate error handling |
+| `run_config.search.group_size` | `group_size` | Candidates per partial-search group |
+| `run_config.search.top_k` | `final_top_k` | Candidates receiving full final evaluation |
 
 Fixed baselines and search candidates are separate. The current fixed baselines for `c_m2`, `c_m1`, `c_1`, `g_1`, and `g_2` are zero.
 
@@ -291,7 +341,7 @@ Fixed baselines and search candidates are separate. The current fixed baselines 
 | `single_run` | Manual single execution |
 | `search_sweep` | First step of `search_run`; candidate evaluation |
 | `search_final` | Second step; final evaluation of retained candidates |
-| `search` | Orchestration values `group_size` and `top_k` |
+| `search` | Adapter input for outer `COMSearchConfig.group_size/final_top_k`; not a simulator-runtime owner |
 
 Each canonical run profile supplies `target`, `pmf_keep_mass`, `floating_mode`, `pos_sweep_method`, and
 `pos_coarse_stride`. Grid values come from the two fixed-config

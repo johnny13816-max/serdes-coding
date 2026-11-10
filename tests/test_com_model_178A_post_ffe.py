@@ -16,7 +16,8 @@ class TestPostFFEImpairment178A(unittest.TestCase):
     def setUpClass(cls) -> None:
         root = Path(__file__).resolve().parents[1]
         cfg = excel_to_config_178A(
-            str(root / "cases" / "case_260915_full" / "178A" / "config.xlsx")
+            str(root / "cases" / "case_260915_full" / "178A" / "config.xlsx"),
+            run_mode="search_final",
         )
         cls.cfg = replace(
             cfg,
@@ -30,10 +31,7 @@ class TestPostFFEImpairment178A(unittest.TestCase):
             ),
         )
         cls.model = COM(cls.cfg)
-        cls.status = cls.model._run_once(
-            run_cfg=cls.cfg.execution.search_final,
-            progress=False,
-        )
+        cls.status = cls.model.run(progress=False)
 
     def test_mse_and_post_grid_contract(self) -> None:
         status = self.status
@@ -61,18 +59,18 @@ class TestPostFFEImpairment178A(unittest.TestCase):
     def test_expanded_record_uses_one_stage5_grid_for_responses_and_psds(self) -> None:
         expanded_cfg = replace(
             self.cfg,
-            policy=replace(
-                self.cfg.policy,
+            alg=replace(
+                self.cfg.alg,
                 rxffe_record_realization="linear_expanded_grid",
+            ),
+            num=replace(
+                self.cfg.num,
                 eq_ch_imp_len="full",
                 num_trunc_ui=None,
             ),
         )
         model = COM(expanded_cfg)
-        status = model._run_once(
-            run_cfg=expanded_cfg.execution.search_final,
-            progress=False,
-        )
+        status = model.run(progress=False)
         response_cfg = status.eq_ch.post_ffe.response_cfg
         record_cfg = status.imp.post_ffe.record_cfg
         expected = expanded_cfg.link.sampled_nfft + expanded_cfg.dte.N_max - 1
@@ -125,17 +123,25 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         original_delta = status.imp.post_ffe.adc_input.delta
         reference_cfg = replace(
             self.cfg,
-            policy=replace(
-                self.cfg.policy,
+            alg=replace(
+                self.cfg.alg,
                 final_com_vqc_convention="sicopr_final_reconstruction",
             ),
         )
         # The reference branch is tested here for stage isolation; a coarse
         # final grid keeps this generic integration fixture inexpensive.
-        run_cfg = replace(reference_cfg.execution.search_final, pmf_dy_override=1e-3)
-        annex = self.model.calculate_COM_DFE(status.imp, status.eq_ch, status.dte, run_cfg)
-        alternate = COM(reference_cfg).calculate_COM_DFE(
-            status.imp, status.eq_ch, status.dte, run_cfg
+        num_cfg = replace(
+            reference_cfg.num,
+            final_pmf_grid=replace(
+                reference_cfg.num.final_pmf_grid,
+                dy_override=1e-3,
+            ),
+        )
+        annex = COM(replace(self.cfg, num=num_cfg)).calculate_COM_DFE(
+            status.imp, status.eq_ch, status.dte
+        )
+        alternate = COM(replace(reference_cfg, num=num_cfg)).calculate_COM_DFE(
+            status.imp, status.eq_ch, status.dte
         )
         self.assertTrue(np.isfinite(alternate.COM))
         self.assertNotAlmostEqual(alternate.COM, annex.COM, places=4)

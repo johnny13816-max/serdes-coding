@@ -11,7 +11,7 @@ import csv
 from itertools import product
 from pathlib import Path
 import time
-from typing import Any, Iterable, Literal, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Iterable, Literal, Optional, Sequence, TYPE_CHECKING, Union
 
 import numpy as np
 
@@ -80,25 +80,42 @@ class COMSearchCandidate(COMDataclassText):
 
 @dataclass(repr=False)
 class COMSearchConfig(COMDataclassText):
-    """Annex 178A outer-search ranges and result-retention controls."""
+    """One Annex 178A SRCH domain for candidate and phase coverage."""
 
-    c_m2_values: Optional[Sequence[float]] = None
-    c_m1_values: Optional[Sequence[float]] = None
-    c_1_values: Optional[Sequence[float]] = None
-    g_DC_values: Optional[Sequence[float]] = None
-    g_DC2_values: Optional[Sequence[float]] = None
+    c_m2_values: Optional[Union[float, Sequence[float]]] = None
+    c_m1_values: Optional[Union[float, Sequence[float]]] = None
+    c_1_values: Optional[Union[float, Sequence[float]]] = None
+    g_DC_values: Optional[Union[float, Sequence[float]]] = None
+    g_DC2_values: Optional[Union[float, Sequence[float]]] = None
+    pos_sweep_method: Literal["each_phase", "coarse_fine"] = "each_phase"
+    pos_coarse_stride: int = 4
     keep_top_n: int = 10
     keep_all_rows: bool = False
     continue_on_error: bool = False
+    group_size: int = 100
+    final_top_k: int = 10
 
     def __post_init__(self) -> None:
         self.keep_top_n = int(self.keep_top_n)
         if self.keep_top_n <= 0:
             raise ValueError("COMSearchConfig.keep_top_n must be positive.")
+        self.group_size = int(self.group_size)
+        if self.group_size <= 0:
+            raise ValueError("COMSearchConfig.group_size must be positive.")
+        self.final_top_k = int(self.final_top_k)
+        if self.final_top_k <= 0:
+            raise ValueError("COMSearchConfig.final_top_k must be positive.")
+        if self.pos_sweep_method not in {"each_phase", "coarse_fine"}:
+            raise ValueError(
+                "COMSearchConfig.pos_sweep_method must be 'each_phase' or 'coarse_fine'."
+            )
+        self.pos_coarse_stride = int(self.pos_coarse_stride)
+        if self.pos_coarse_stride <= 0:
+            raise ValueError("COMSearchConfig.pos_coarse_stride must be positive.")
 
     @staticmethod
     def _values_or_default(
-        values: Optional[Sequence[float]],
+        values: Optional[Union[float, Sequence[float]]],
         default: Optional[float],
         name: str,
     ) -> np.ndarray:
@@ -107,8 +124,10 @@ class COMSearchConfig(COMDataclassText):
                 raise ValueError(f"{name} has no search values and no COMFilterConfig default value.")
             values = (default,)
         array = np.asarray(values, dtype=float)
+        if array.ndim == 0:
+            array = array.reshape(1)
         if array.ndim != 1 or len(array) == 0:
-            raise ValueError(f"{name} search values must be a non-empty 1D sequence.")
+            raise ValueError(f"{name} search values must be a scalar or non-empty 1D sequence.")
         if not np.all(np.isfinite(array)):
             raise ValueError(f"{name} search values must be finite.")
         return array
@@ -141,6 +160,34 @@ class COMSearchConfig(COMDataclassText):
             for values in product(*axes)
         ]
 
+    def candidate_count(self, filter_cfg: Any) -> int:
+        """Return the Cartesian product size without constructing model state."""
+        return len(self.candidates(filter_cfg))
+
+    def is_single_point(self, filter_cfg: Any) -> bool:
+        return self.candidate_count(filter_cfg) == 1
+
+    def with_candidate(self, candidate: COMSearchCandidate) -> "COMSearchConfig":
+        """Return scalar-only SRCH state for one concrete COM instance."""
+        return replace(
+            self,
+            c_m2_values=float(candidate.c_m2),
+            c_m1_values=float(candidate.c_m1),
+            c_1_values=float(candidate.c_1),
+            g_DC_values=float(candidate.g_DC),
+            g_DC2_values=float(candidate.g_DC2),
+        )
+
+    def with_filter_defaults(self, filter_cfg: Any) -> "COMSearchConfig":
+        """Return scalar-only SRCH state matching one physical filter config."""
+        return self.with_candidate(COMSearchCandidate(
+            c_m2=float(filter_cfg.c_m2),
+            c_m1=float(filter_cfg.c_m1),
+            c_1=float(filter_cfg.c_1),
+            g_DC=float(self._filter_default(filter_cfg, "g_DC", "g_1")),
+            g_DC2=float(self._filter_default(filter_cfg, "g_DC2", "g_2")),
+        ))
+
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Search axes", tuple(
@@ -154,12 +201,23 @@ class COMSearchConfig(COMDataclassText):
                 self._field("keep_all_rows", "retain all rows", stored_unit="status"),
                 self._field("continue_on_error", "continue on error", stored_unit="status"),
             )),
+            TextSection("Sampling phase", (
+                self._field("pos_sweep_method", "sampling-position sweep", stored_unit="search"),
+                self._field("pos_coarse_stride", "coarse sampling stride", stored_unit="sample count"),
+            )),
+            TextSection("Orchestration", (
+                self._field("group_size", "candidates per partial group", stored_unit="candidate count"),
+                self._field("final_top_k", "finalized candidates", stored_unit="candidate count"),
+            )),
         )
 
     def _repr_fields(self) -> tuple[TextField, ...]:
         return (
             self._field("keep_top_n", "retained candidates", stored_unit="candidate count"),
             self._field("keep_all_rows", "retain all rows", stored_unit="status"),
+            self._field("group_size", "candidates per partial group", stored_unit="candidate count"),
+            self._field("final_top_k", "finalized candidates", stored_unit="candidate count"),
+            self._field("pos_sweep_method", "sampling-position sweep", stored_unit="search"),
         )
 
 
@@ -307,7 +365,6 @@ class SearchArtifacts:
 
 def create_search_plan(
     cfg: "COMConfig",
-    search: COMSearchConfig,
     report_dir: str | Path,
     *,
     candidate_limit: Optional[int] = None,
@@ -316,7 +373,9 @@ def create_search_plan(
     artifacts = SearchArtifacts(Path(report_dir))
     artifacts.root.mkdir(parents=True, exist_ok=True)
     artifacts.group_results_dir.mkdir(parents=True, exist_ok=True)
+    cfg.export(str(artifacts.root / "config" / "search_sweep"))
 
+    search = cfg.srch
     candidates = search.candidates(cfg.filter)
     if candidate_limit is not None:
         if candidate_limit <= 0:
@@ -327,7 +386,7 @@ def create_search_plan(
     manifest = [_manifest_dict(idx, candidate) for idx, candidate in enumerate(candidates)]
     _write_csv(artifacts.manifest_path, MANIFEST_FIELDS, manifest)
 
-    group_size = cfg.execution.search_group_size
+    group_size = search.group_size
     groups = []
     for group_id, start in enumerate(range(0, len(manifest), group_size)):
         stop = min(start + group_size, len(manifest))
@@ -342,19 +401,19 @@ def create_search_plan(
 
 
 def run_partial_group(
-    cfg: "COMConfig",
-    search: COMSearchConfig,
+    sweep_cfg: "COMConfig",
     report_dir: str | Path,
     group_id: int,
 ) -> Path:
-    """Evaluate one planned candidate interval using the `search_sweep` profile."""
+    """Evaluate one planned interval using a mode-resolved sweep config."""
     artifacts = SearchArtifacts(Path(report_dir))
     manifest = _read_csv(artifacts.manifest_path, MANIFEST_FIELDS)
     group = _find_group(_read_csv(artifacts.group_plan_path, GROUP_PLAN_FIELDS), group_id)
     start, stop = int(group["start"]), int(group["stop"])
     rows: list[dict[str, Any]] = []
     started = time.perf_counter()
-    signal_amplitude = _signal_amplitude(cfg)
+    signal_amplitude = _signal_amplitude(sweep_cfg)
+    search = sweep_cfg.srch
 
     for offset, entry in enumerate(manifest[start:stop], start=1):
         search_index = int(entry["search_index"])
@@ -362,10 +421,8 @@ def run_partial_group(
         try:
             from ..models.com_model_178A import COM, COMTxfirMainCursorError
 
-            candidate_cfg = _config_with_candidate(cfg, candidate)
-            status = COM(candidate_cfg)._run_once(
-                run_cfg=candidate_cfg.execution.search_sweep,
-            )
+            candidate_cfg = _config_with_candidate(sweep_cfg, candidate)
+            status = COM(candidate_cfg).run()
             rows.append(_partial_row_from_status(
                 search_index, candidate, status, signal_amplitude=signal_amplitude
             ))
@@ -409,19 +466,19 @@ def merge_partial_results(report_dir: str | Path) -> list[COMSearchRow]:
 
 
 def finalize_search(
-    cfg: "COMConfig",
-    search: COMSearchConfig,
+    final_cfg: "COMConfig",
     report_dir: str | Path,
     *,
     include_plots: bool = True,
 ) -> COMSearchStatus:
     """Re-run top-K candidates and export a wider partial-result ranking.
 
-    ``search_top_k`` controls the expensive full COM reruns.  The CSV keeps
+    ``final_top_k`` controls the expensive full COM reruns.  The CSV keeps
     ten times that many successful partial-search rows for diagnosis; rows
     beyond top-K have blank final-status and COM columns by design.
     """
     artifacts = SearchArtifacts(Path(report_dir))
+    search = final_cfg.srch
     partial_rows = merge_partial_results(artifacts.root)
     successful = sorted(
         (row for row in partial_rows if row.status == "ok"),
@@ -431,9 +488,9 @@ def finalize_search(
         raise RuntimeError("No successful partial-search candidate is available for finalization.")
 
     artifacts.top_k_dir.mkdir(parents=True, exist_ok=True)
-    report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * cfg.execution.search_top_k
+    report_limit = PARTIAL_RESULT_REPORT_MULTIPLIER * search.final_top_k
     report_rows = successful[:report_limit]
-    signal_amplitude = _signal_amplitude(cfg)
+    signal_amplitude = _signal_amplitude(final_cfg)
     final_rows_by_idx = {
         row.idx: _final_row(row, status="", signal_amplitude=signal_amplitude)
         for row in report_rows
@@ -443,7 +500,7 @@ def finalize_search(
     generic_error_count = 0
     attempted_count = 0
     final_started = time.perf_counter()
-    target_final = min(cfg.execution.search_top_k, len(successful))
+    target_final = min(search.final_top_k, len(successful))
     print(f"178A search_final: start, target={target_final} valid candidates, include_plots={include_plots}", flush=True)
     for row in successful:
         if len(finalized) >= target_final:
@@ -453,13 +510,11 @@ def finalize_search(
         label = f"178A search_final attempt={attempted_count} valid={len(finalized)}/{target_final} candidate={row.idx}"
         stage = "calculation"
         print(f"{label}: calculation start", flush=True)
-        candidate_cfg = _config_with_candidate(cfg, row.candidate)
+        candidate_cfg = _config_with_candidate(final_cfg, row.candidate)
         try:
             from ..models.com_model_178A import COM
 
-            status = COM(candidate_cfg)._run_once(
-                run_cfg=candidate_cfg.execution.search_final,
-            )
+            status = COM(candidate_cfg).run()
             print(f"{label}: calculation done in {time.perf_counter() - candidate_started:.1f}s", flush=True)
             stage = "report export"
             print(f"{label}: report export start, include_plots={include_plots}", flush=True)
@@ -539,32 +594,59 @@ def finalize_search(
         num_error=sum(row.status == "error" for row in partial_rows),
         num_grid_overflow=grid_overflow_count,
     )
-    cfg.export(str(artifacts.root))
+    final_cfg.export(str(artifacts.root))
+    final_cfg.export(str(artifacts.root / "config" / "search_final"))
     search_status.export(str(artifacts.root))
     if include_plots:
         from serdes_coding.reporting.com_report_178A import COMReport178A
 
-        best_cfg = _config_with_candidate(cfg, best_row.candidate)
+        best_cfg = _config_with_candidate(final_cfg, best_row.candidate)
         COMReport178A(best_cfg, search_status).export_search_run(artifacts.root)
     return search_status
 
 
 def run_full_search(
-    cfg: "COMConfig",
-    search: COMSearchConfig,
+    sweep_cfg: "COMConfig",
+    final_cfg: "COMConfig",
     report_dir: str | Path,
     *,
     include_plots: bool = True,
 ) -> COMSearchStatus:
     """Execute manifest creation, every partial group, merge, and top-K finalization."""
-    artifacts = create_search_plan(cfg, search, report_dir)
+    artifacts = create_search_plan(sweep_cfg, report_dir)
     for group in _read_csv(artifacts.group_plan_path, GROUP_PLAN_FIELDS):
-        run_partial_group(cfg, search, artifacts.root, int(group["group_id"]))
-    return finalize_search(cfg, search, artifacts.root, include_plots=include_plots)
+        run_partial_group(sweep_cfg, artifacts.root, int(group["group_id"]))
+    return finalize_search(
+        final_cfg,
+        artifacts.root,
+        include_plots=include_plots,
+    )
+
+
+def run_configured(
+    single_cfg: "COMConfig",
+    sweep_cfg: "COMConfig",
+    final_cfg: "COMConfig",
+    report_dir: str | Path,
+    *,
+    include_plots: bool = True,
+) -> Any:
+    """Dispatch one scalar point directly or a multi-point Cartesian search."""
+    candidates = sweep_cfg.srch.candidates(sweep_cfg.filter)
+    if len(candidates) == 1:
+        from ..models.com_model_178A import COM
+
+        return COM(_config_with_candidate(single_cfg, candidates[0])).run()
+    return run_full_search(
+        sweep_cfg,
+        final_cfg,
+        report_dir,
+        include_plots=include_plots,
+    )
 
 
 def _config_with_candidate(cfg: "COMConfig", candidate: COMSearchCandidate) -> "COMConfig":
-    """Apply shared candidate fields to the 178A two-gain CTF configuration."""
+    """Resolve one candidate into scalar physical and SRCH runtime state."""
     filter_cfg = replace(
         cfg.filter,
         c_m2=candidate.c_m2,
@@ -573,7 +655,10 @@ def _config_with_candidate(cfg: "COMConfig", candidate: COMSearchCandidate) -> "
         g_1=candidate.g_DC,
         g_2=candidate.g_DC2,
     )
-    return replace(cfg, filter=filter_cfg)
+    return cfg._resolved_copy(
+        filter=filter_cfg,
+        srch=cfg.srch.with_candidate(candidate),
+    )
 
 
 def _manifest_dict(idx: int, candidate: COMSearchCandidate) -> dict[str, Any]:
@@ -821,4 +906,7 @@ __all__ = [
     "merge_partial_results",
     "finalize_search",
     "run_full_search",
+    "run_configured",
+    "COMSearchCandidate",
+    "COMSearchConfig",
 ]

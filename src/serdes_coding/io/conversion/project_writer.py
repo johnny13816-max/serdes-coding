@@ -72,7 +72,7 @@ def write_conversion_audit(draft: ConversionDraft, workbook_path: str | Path) ->
     }
     json_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     columns = (
-        "sheet", "group", "parameter", "parameter_class", "status", "original_status", "value", "unit",
+        "sheet", "domain", "parameter", "parameter_class", "status", "original_status", "value", "unit",
         "source_key", "source_block", "source_cell", "source_value", "base_value", "note",
         "source_unit", "converted_value", "method", "condition_key", "condition_cell",
         "condition_value",

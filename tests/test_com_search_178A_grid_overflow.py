@@ -1,12 +1,15 @@
 """A grid overflow excludes one final candidate without ending the search."""
 
 import csv
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from serdes_coding.io.com_excel_io_178A import excel_to_config_178A
+from serdes_coding.io.com_excel_io_178A import (
+    excel_to_config_178A,
+)
 from serdes_coding.models import com_model_178A as model_178a
 from serdes_coding.search import com_search_178A as search_178a
 from serdes_coding.utilities.link import GridOverflowError
@@ -39,21 +42,37 @@ def _rows():
 
 
 def _config():
-    cfg = excel_to_config_178A(str(ROOT / "cases/case_260915_ci_small/178A/config.xlsx"))
-    cfg.execution.search_top_k = 1
-    return cfg
+    cfg = excel_to_config_178A(
+        str(ROOT / "cases/case_260915_ci_small/178A/config.xlsx"),
+        run_mode="search_final",
+    )
+    return replace(cfg, srch=_search_config())
+
+
+def _search_config():
+    return model_178a.COMSearchConfig(final_top_k=1)
+
+
+def test_project_search_orchestration_is_owned_by_search_config():
+    search = excel_to_config_178A(
+        str(ROOT / "cases/case_260915_ci_small/178A/config.xlsx"),
+        run_mode="search_sweep",
+    ).srch
+    assert search.group_size == 100
+    assert search.final_top_k == 10
+    assert search.keep_top_n == 10
 
 
 def test_final_search_backfills_after_grid_overflow(monkeypatch, tmp_path):
     monkeypatch.setattr(search_178a, "merge_partial_results", lambda path: _rows())
 
-    def run(self, *, run_cfg):
+    def run(self, *, progress=False):
         if self.cfg.filter.g_1 == -16.0:
             raise GridOverflowError(100, 128, 0.004, 5e-6)
         return _FinalStatus()
 
-    monkeypatch.setattr(model_178a.COM, "_run_once", run)
-    result = search_178a.finalize_search(_config(), model_178a.COMSearchConfig(), tmp_path,
+    monkeypatch.setattr(model_178a.COM, "run", run)
+    result = search_178a.finalize_search(_config(), tmp_path,
                                          include_plots=False)
     assert result.best_row.idx == 2
     assert result.num_grid_overflow == 1
@@ -68,24 +87,24 @@ def test_final_search_backfills_after_grid_overflow(monkeypatch, tmp_path):
 def test_final_search_fails_only_when_no_candidate_fits(monkeypatch, tmp_path):
     monkeypatch.setattr(search_178a, "merge_partial_results", lambda path: _rows())
 
-    def run(self, *, run_cfg):
+    def run(self, *, progress=False):
         raise GridOverflowError(100, 128, 0.004, 5e-6)
 
-    monkeypatch.setattr(model_178a.COM, "_run_once", run)
+    monkeypatch.setattr(model_178a.COM, "run", run)
     with pytest.raises(RuntimeError, match="No final candidate fits the fixed grid"):
-        search_178a.finalize_search(_config(), model_178a.COMSearchConfig(), tmp_path,
+        search_178a.finalize_search(_config(), tmp_path,
                                     include_plots=False)
 
 
 def test_non_grid_final_failure_keeps_existing_error_policy(monkeypatch, tmp_path):
     monkeypatch.setattr(search_178a, "merge_partial_results", lambda path: _rows())
 
-    def run(self, *, run_cfg):
+    def run(self, *, progress=False):
         if self.cfg.filter.g_1 == -16.0:
             raise ArithmeticError("unrelated solver failure")
         return _FinalStatus()
 
-    monkeypatch.setattr(model_178a.COM, "_run_once", run)
+    monkeypatch.setattr(model_178a.COM, "run", run)
     with pytest.raises(RuntimeError, match="non-grid reasons"):
-        search_178a.finalize_search(_config(), model_178a.COMSearchConfig(), tmp_path,
+        search_178a.finalize_search(_config(), tmp_path,
                                     include_plots=False)

@@ -35,7 +35,7 @@ jobs:
           CASE_ID: ${{ inputs.case_id || 'c2m_8023dj_4p13p0_50mm' }}
         run: >-
           python scripts/validate_partial_search_178A.py
-          --case-root "cases/${CASE_ID}"
+          --case-root "cases/${CASE_ID}/178A"
           --mode smoke
           --output-root "artifacts/partial_search"
 

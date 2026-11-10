@@ -49,7 +49,7 @@ class ChannelEditor(ttk.LabelFrame):
         self.tree.delete(*self.tree.get_children())
         rows={}
         for field in draft.fields:
-            if field.sheet=='channels':rows.setdefault(field.row,{'kind':field.group})[field.parameter.rsplit('.',1)[1]]=field.value
+            if field.sheet=='channels':rows.setdefault(field.row,{'kind':field.domain})[field.parameter.rsplit('.',1)[1]]=field.value
         for row in rows.values():
             if row.get('S4P Path') and hasattr(draft,'source_path'):
                 from ..io.com_excel_common import _resolve_channel_path

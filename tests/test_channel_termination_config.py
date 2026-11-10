@@ -65,20 +65,14 @@ def test_gamma_is_not_a_constructor_input():
 
 
 def test_178a_missing_dc_policy_accepts_reference_method_and_rejects_unknown():
-    from serdes_coding.models.com_178a import COMChannelConfig as COMChannelConfig178A
+    from serdes_coding.models.com_178a import COMAlgorithmPolicyConfig
 
-    cfg = COMChannelConfig178A(
-        R0=50.0,
-        R_d_tx=50.0,
-        R_d_rx=50.0,
+    cfg = COMAlgorithmPolicyConfig(
         missing_dc_policy="mag_phase_trend_to_dc",
     )
     assert cfg.missing_dc_policy == "mag_phase_trend_to_dc"
 
     with pytest.raises(ValueError, match="missing_dc_policy"):
-        COMChannelConfig178A(
-            R0=50.0,
-            R_d_tx=50.0,
-            R_d_rx=50.0,
+        COMAlgorithmPolicyConfig(
             missing_dc_policy="unknown",
         )

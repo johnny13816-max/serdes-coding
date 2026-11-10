@@ -24,7 +24,7 @@ Current solver docstrings identify Annex 178A Eq. 178A-31 through Eq. 178A-35 fo
 calculate_pos_candidate(...)
     -> (candidate_eq_ch, candidate_impairment, candidate_dte)
 
-calculate_MMSE_DTE(victim, eq_ch, imp_pre, pos, run_cfg)
+calculate_MMSE_DTE(victim, eq_ch, imp_pre, pos)
     -> COMDTEStatus
 
 COM_MMSE_DTE.run(h_dsamp, R_n, sigma_x, pos, per_ui)
@@ -84,8 +84,8 @@ A phase with `COMMainCursorError` keeps `mse_by_pos[pos]` as `None` and stores t
 | Input | Role |
 |---|---|
 | `LinkConfig.per_ui` | complete phase domain |
-| `COMRunConfig.pos_sweep_method` | exhaustive or coarse/fine scheduling |
-| `COMRunConfig.pos_coarse_stride` | initial stride and fine-window construction |
+| `COMSearchConfig.pos_sweep_method` | exhaustive or coarse/fine scheduling |
+| `COMSearchConfig.pos_coarse_stride` | initial stride and fine-window construction |
 | pre-DTE common cache and aggressor responses | input to the preceding per-phase impairment calculation |
 
 ### One-phase DTE solve
@@ -98,7 +98,7 @@ A phase with `COMMainCursorError` keeps `mse_by_pos[pos]` as `None` and stores t
 | `pos` | phase orchestrator | integer in `[0, per_ui)` |
 | `per_ui` | `LinkConfig` | positive |
 | `COMDTEConfig` | fixed config | tap counts, placement domain, and coefficient limits |
-| `COMRunConfig.floating_mode` | execution policy | floating-group algorithm |
+| `COMAlgorithmPolicyConfig.floating_mode` | algorithm policy | floating-group algorithm |
 
 The workbook mapping and intrinsic/policy classification are defined in [Configuration tree](../config_tree.md).
 

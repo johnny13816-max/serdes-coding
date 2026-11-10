@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 
 from ..utilities.link import LinkConfig
 from ..models.com_178a import (
+    COMAlgorithmPolicyConfig,
     COMChannelConfig,
     COMDevicePackageConfig,
     COMDeviceTermConfig,
@@ -17,11 +20,12 @@ from ..models.com_178a import (
     COMNumericalControlConfig,
     COMPMFConfig,
     COMPMFGridControl,
-    COMPolicyConfig,
     COMPartialHostConfig,
     COMPkgConfig as COMPkgConfig_178A,
     COMRunConfig,
+    COMSourceConfig,
 )
+from ..models.com_178a.config import COMRunProfiles
 from ..search.com_search_178A import COMSearchConfig as COMSearchConfig_178A
 from .com_excel_common import (
     _coerce_bool,
@@ -48,12 +52,20 @@ from .com_excel_common import (
 )
 
 
-def excel_to_config_178A(excel_path: str) -> COMConfig:
-    """Build native 178A COMConfig from a project-owned workbook."""
+def excel_to_config_178A(
+    excel_path: str,
+    *,
+    run_mode: Literal["single_run", "search_sweep", "search_final"] = "single_run",
+) -> COMConfig:
+    """Build one mode-resolved 178A COMConfig from a project workbook."""
+    if run_mode not in {"single_run", "search_sweep", "search_final"}:
+        raise ValueError(
+            "run_mode must be 'single_run', 'search_sweep', or 'search_final'."
+        )
     path = Path(excel_path)
     sheets = _excel_sheet_names(path)
     if {"fixed_config", "run_config", "channels"}.issubset(sheets):
-        return _project_excel_to_config_178A(path)
+        return _project_excel_to_config_178A(path, run_mode=run_mode)
     raise ValueError(
         "excel_to_config_178A supports only project-owned workbooks with "
         "fixed_config/run_config/channels sheets."
@@ -61,13 +73,17 @@ def excel_to_config_178A(excel_path: str) -> COMConfig:
 
 
 def excel_to_search_config_178A(excel_path: str) -> COMSearchConfig:
-    """Build native 178A COMSearchConfig from a project-owned workbook."""
+    """Compatibility reader for the workbook's canonical 178A SRCH domain."""
     path = Path(excel_path)
     if "search_config" not in _excel_sheet_names(path):
         raise ValueError("178A workbook must contain a search_config sheet.")
     return _project_excel_to_search_config_178A(path)
 
-def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
+def _project_excel_to_config_178A(
+    excel_path: Path,
+    *,
+    run_mode: Literal["single_run", "search_sweep", "search_final"],
+) -> COMConfig_178A:
     fixed = _read_project_fixed_config(excel_path)
     if "channel_renormalization_order" in fixed:
         raise ValueError(
@@ -75,14 +91,36 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             "uses D3.2 single-ended renormalization for S4P and automatically "
             "dispatches native differential S2P input. Remove the legacy field."
         )
-    channel = _read_project_channels(excel_path, channel_config_type=COMChannelConfig)
+    channel_input = _read_project_channels(
+        excel_path,
+        channel_config_type=SimpleNamespace,
+    )
+    channel = COMChannelConfig(
+        R0=channel_input.R0,
+        R_d_tx=channel_input.R_d_tx,
+        R_d_rx=channel_input.R_d_rx,
+        sparam_frequency_limit_Hz=channel_input.sparam_frequency_limit_Hz,
+    )
+    def source_binding(path: str) -> COMSourceConfig.ChannelBinding:
+        return COMSourceConfig.ChannelBinding(
+            path=path,
+            representation="auto",
+            port_order=channel_input.port_order,
+        )
+    source = COMSourceConfig(
+        channel=COMSourceConfig.Channel(
+            victim=source_binding(channel_input.victim_s4p_path),
+            next=tuple(source_binding(path) for path in channel_input.next_s4p_paths),
+            fext=tuple(source_binding(path) for path in channel_input.fext_s4p_paths),
+        )
+    )
     der_0 = _fixed_float(fixed, "DER_0")
     execution = _read_project_execution_config(excel_path)
     execution_profile = _read_project_execution_profile(excel_path, fixed)
     numerical_control, has_canonical_numerical_control = (
         _read_project_numerical_control_178A(fixed)
     )
-    methods, execution, applied_profile, profile_overrides = _resolve_project_profile_178A(
+    methods, execution, numerical_control, applied_profile, profile_overrides = _resolve_project_profile_178A(
         fixed,
         execution,
         numerical_control,
@@ -90,17 +128,7 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
         der_0,
         execution_profile,
     )
-    if execution_profile == "sicopr_reference_v1":
-        raw_missing_dc_policy = channel.missing_dc_policy
-        channel = replace(channel, missing_dc_policy="mag_phase_trend_to_dc")
-        if raw_missing_dc_policy != channel.missing_dc_policy:
-            profile_overrides = dict(profile_overrides)
-            profile_overrides["channel.missing_dc_policy"] = {
-                "raw": raw_missing_dc_policy,
-                "effective": channel.missing_dc_policy,
-                "overridden_by_profile": execution_profile,
-            }
-
+    selected_execution = getattr(execution, run_mode)
     link_cfg = LinkConfig(
         fb=_fixed_float(fixed, "fb"),
         per_ui=int(_fixed_float(fixed, "per_ui")),
@@ -131,6 +159,7 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             A_ne=_fixed_float(fixed, "A_ne"),
         ),
         channel=channel,
+        src=source,
         txpkg_victim=_fixed_pkg_config_178A(fixed, "txpkg_victim"),
         txpkg_fext=_fixed_pkg_config_178A(fixed, "txpkg_fext"),
         txpkg_next=_fixed_pkg_config_178A(fixed, "txpkg_next"),
@@ -171,43 +200,69 @@ def _project_excel_to_config_178A(excel_path: Path) -> COMConfig_178A:
             ),
             tap_rel_As=_fixed_float(fixed, "tap_rel_As"),
         ),
-        numerical_control=numerical_control,
-        execution=execution,
         mlsd=COMMLSDConfig(
             enable=_coerce_bool(fixed.get("mlsd_enable", False)),
             trunc_len=_fixed_optional_int(fixed, "mlsd_trunc_len") or 0,
             delta_com_an=_fixed_optional_float(fixed, "delta_com_an"),
             minimum_com_limit=_fixed_optional_float(fixed, "minimum_com_limit"),
         ),
-        policy=replace(
+        alg=replace(
             methods,
-            applied_config_profile=applied_profile,
-            config_profile_overrides=profile_overrides,
+            floating_mode=selected_execution.floating_mode,
+        ),
+        num=replace(
+            numerical_control,
+            adc_input_pmf_grid=(
+                selected_execution.adc_input_pmf_grid
+                or numerical_control.adc_input_pmf_grid
+            ),
+            final_pmf_grid=(
+                selected_execution.final_pmf_grid
+                or numerical_control.final_pmf_grid
+            ),
+            pmf_grid_quality=selected_execution.pmf_grid_quality,
+            pmf_keep_mass=selected_execution.pmf_keep_mass,
+        ),
+        srch=_project_excel_to_search_config_178A(
+            excel_path,
+            pos_sweep_method=selected_execution.pos_sweep_method,
+            pos_coarse_stride=selected_execution.pos_coarse_stride,
+        ),
+        exe=COMExecutionConfig(
+            target=selected_execution.target,
         ),
     )
+    if run_mode == "single_run":
+        cfg = replace(cfg, srch=cfg.srch.with_filter_defaults(cfg.filter))
     _validate_channel_package_R0(
         cfg.channel, cfg.txpkg_victim, cfg.txpkg_fext, cfg.txpkg_next, cfg.rxpkg
+    )
+    cfg._set_adapter_resolution(
+        applied_profile=applied_profile,
+        profile_overrides=profile_overrides,
     )
     return cfg
 
 
 def _resolve_project_profile_178A(
     fixed: dict[str, object],
-    execution: COMExecutionConfig,
+    execution: COMRunProfiles,
     numerical_control: COMNumericalControlConfig,
     has_canonical_numerical_control: bool,
     der_0: float,
     execution_profile: str,
 ) -> tuple[
-    COMPolicyConfig,
-    COMExecutionConfig,
+    COMAlgorithmPolicyConfig,
+    COMRunProfiles,
+    COMNumericalControlConfig,
     str | None,
     dict[str, object],
 ]:
     """Expand a named workbook execution profile into typed runtime settings."""
     configured_eq_ch_imp_len = str(fixed.get("eq_ch_imp_len", "full")).strip()
     configured_num_trunc_ui = _fixed_optional_int(fixed, "num_trunc_ui")
-    general_methods = COMPolicyConfig(
+    general_methods = COMAlgorithmPolicyConfig(
+        missing_dc_policy=str(fixed.get("missing_dc_policy", "error")).strip().lower(),
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
         pre_dte_adc_clipping_convention=str(
             fixed.get("pre_dte_adc_clipping_convention", "full_jitter_half_tail")
@@ -223,17 +278,15 @@ def _resolve_project_profile_178A(
         rxffe_record_realization=str(
             fixed.get("rxffe_record_realization", "linear_fixed_grid")
         ).strip(),
+    )
+    effective_numerical = replace(
+        numerical_control,
         eq_ch_imp_len=configured_eq_ch_imp_len,
         num_trunc_ui=configured_num_trunc_ui,
-        final_pmf_grid=(
-            "relative_As"
-            if numerical_control.final_pmf_grid.rule == "relative_As"
-            else "fine"
-        ),
     )
     if execution_profile == "project_standard":
         if not has_canonical_numerical_control:
-            return general_methods, execution, execution_profile, {}
+            return general_methods, execution, effective_numerical, execution_profile, {}
         accurate_adc = replace(
             numerical_control.adc_input_pmf_grid,
             rule="relative_As_with_cap",
@@ -260,10 +313,10 @@ def _resolve_project_profile_178A(
                 final_pmf_grid=numerical_control.final_pmf_grid,
             ),
         )
-        return general_methods, effective_execution, execution_profile, {}
+        return general_methods, effective_execution, effective_numerical, execution_profile, {}
     if execution_profile == "custom":
         if not has_canonical_numerical_control:
-            return general_methods, execution, execution_profile, {}
+            return general_methods, execution, effective_numerical, execution_profile, {}
         effective_execution = replace(
             execution,
             single_run=replace(
@@ -282,7 +335,7 @@ def _resolve_project_profile_178A(
                 final_pmf_grid=numerical_control.final_pmf_grid,
             ),
         )
-        return general_methods, effective_execution, execution_profile, {}
+        return general_methods, effective_execution, effective_numerical, execution_profile, {}
     if execution_profile != "sicopr_reference_v1":
         raise ValueError(f"Unsupported 178A execution_profile: {execution_profile!r}.")
 
@@ -304,19 +357,17 @@ def _resolve_project_profile_178A(
             "overridden_by_profile": profile_name,
         }
 
-    methods = COMPolicyConfig(
+    methods = COMAlgorithmPolicyConfig(
+        missing_dc_policy="mag_phase_trend_to_dc",
         out_of_measured="zero_padding",
         pre_dte_adc_clipping_convention="rj_only_full_tail_reference",
         final_com_vqc_convention="sicopr_final_reconstruction",
         ctle_pulse_realization="bilinear_iir",
         rxffe_record_realization="finite_record_circshift",
-        eq_ch_imp_len="truncated",
-        num_trunc_ui=4096,
         pmf_projection_method="nearest",
         xtalk_pmf_accumulation="pathwise_convolution",
         pdf_to_pmf_method="pmf_sample",
         pmf_scaling_method="interpolate_ordinates",
-        final_pmf_grid="relative_As",
         final_adc_pmf_projection="reference_support",
         added_noise_pdf="scaled_total_pdf",
         mlsd_quantization_psd="main_tap_white",
@@ -324,7 +375,7 @@ def _resolve_project_profile_178A(
         reported_der="baseline_pdf_re_evaluation",
     )
     overrides: dict[str, object] = {
-        f"policy.{field_name}": override_record(
+        f"alg.{field_name}": override_record(
             getattr(general_methods, field_name), value
         )
         for field_name, value in vars(methods).items()
@@ -357,7 +408,7 @@ def _resolve_project_profile_178A(
             raw = getattr(raw_grid, field_name)
             value = getattr(effective_grid, field_name)
             overrides[
-                f"numerical_control.{family_name}.{field_name}"
+                f"num.{family_name}.{field_name}"
             ] = override_record(raw, value)
 
     def aligned_run(name: str, run_cfg: COMRunConfig) -> COMRunConfig:
@@ -374,7 +425,7 @@ def _resolve_project_profile_178A(
         ):
             raw = getattr(run_cfg, field_name)
             value = getattr(effective, field_name)
-            overrides[f"execution.{name}.{field_name}"] = override_record(raw, value)
+            overrides[f"run_profile.{name}.num.{field_name}"] = override_record(raw, value)
         return effective
 
     effective_execution = replace(
@@ -386,6 +437,13 @@ def _resolve_project_profile_178A(
     return (
         methods,
         effective_execution,
+        replace(
+            effective_numerical,
+            eq_ch_imp_len="truncated",
+            num_trunc_ui=4096,
+            adc_input_pmf_grid=reference_adc_grid,
+            final_pmf_grid=reference_final_grid,
+        ),
         profile_name,
         overrides,
     )
@@ -496,8 +554,15 @@ def _read_project_execution_profile(
     return "project_standard"
 
 
-def _project_excel_to_search_config_178A(excel_path: Path) -> COMSearchConfig_178A:
+def _project_excel_to_search_config_178A(
+    excel_path: Path,
+    *,
+    pos_sweep_method: str = "each_phase",
+    pos_coarse_stride: int = 4,
+) -> COMSearchConfig_178A:
     search_params, search_settings = _read_project_search_config(excel_path)
+    run_profiles = _read_project_run_config_profiles(excel_path)
+    orchestration = run_profiles.get("search", {})
     return COMSearchConfig_178A(
         c_m2_values=search_params.get("c_m2"),
         c_m1_values=search_params.get("c_m1"),
@@ -507,11 +572,15 @@ def _project_excel_to_search_config_178A(excel_path: Path) -> COMSearchConfig_17
         keep_top_n=int(search_settings.get("keep_top_n", 10)),
         keep_all_rows=_coerce_bool(search_settings.get("keep_all_rows", False)),
         continue_on_error=_coerce_bool(search_settings.get("continue_on_error", False)),
+        group_size=int(_run_value(orchestration, "search", "group_size")),
+        final_top_k=int(_run_value(orchestration, "search", "top_k")),
+        pos_sweep_method=pos_sweep_method,
+        pos_coarse_stride=pos_coarse_stride,
     )
 
 
-def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
-    """Read 178A execution profiles from the project-owned ``run_config`` sheet."""
+def _read_project_run_config_profiles(excel_path: Path) -> dict[str, dict[str, object]]:
+    """Read raw named rows from the project-owned ``run_config`` sheet."""
     import pandas as pd
 
     df = pd.read_excel(excel_path, sheet_name="run_config", header=2)
@@ -526,6 +595,12 @@ def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
         if _is_blank(profile) or _is_blank(parameter):
             continue
         profiles.setdefault(str(profile).strip(), {})[str(parameter).strip()] = row.get("Value")
+    return profiles
+
+
+def _read_project_execution_config(excel_path: Path) -> COMRunProfiles:
+    """Read legacy grouped execution profiles pending runtime-config migration."""
+    profiles = _read_project_run_config_profiles(excel_path)
 
     def run_profile(name: str) -> COMRunConfig:
         values = profiles.get(name, {})
@@ -554,7 +629,7 @@ def _read_project_execution_config(excel_path: Path) -> COMExecutionConfig:
         )
 
     search_values = profiles.get("search", {})
-    return COMExecutionConfig(
+    return COMRunProfiles(
         single_run=run_profile("single_run"),
         search_sweep=run_profile("search_sweep"),
         search_final=run_profile("search_final"),

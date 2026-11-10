@@ -181,6 +181,11 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
     workbook = load_workbook(path, read_only=False, data_only=False)
     fields: list[ProjectFieldDraft] = []
     try:
+        is_178a = "run_config" in workbook.sheetnames
+        canonical_domains = {
+            "case", "intrinsic", "block_source", "algorithm_policy",
+            "numerical_control", "search", "execution",
+        }
         for sheet_name in ("fixed_config", "search_config", "channels", "run_config"):
             if sheet_name not in workbook.sheetnames:
                 continue
@@ -190,6 +195,18 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
                 for col in range(1, sheet.max_column + 1)
                 if sheet.cell(3, col).value is not None
             }
+            if is_178a and "Domain" not in headers:
+                raise ValueError(f"178A {sheet_name} sheet must contain a Domain column.")
+
+            def domain_for(row: int, fallback: str) -> str:
+                value = sheet.cell(row, headers["Domain"]).value if "Domain" in headers else fallback
+                domain = str(value or "").strip()
+                if is_178a and domain not in canonical_domains:
+                    raise ValueError(
+                        f"178A {sheet_name} row {row} has invalid Domain {domain!r}."
+                    )
+                return domain or fallback
+
             if sheet_name == "fixed_config":
                 for row in range(4, sheet.max_row + 1):
                     parameter = sheet.cell(row, headers["Parameter"]).value
@@ -201,7 +218,7 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
                     )
                     fields.append(_field(
                         sheet_name, row, headers["Value"],
-                        sheet.cell(row, headers["Domain"]).value if "Domain" in headers else "fixed",
+                        domain_for(row, "intrinsic"),
                         parameter,
                         parameter_class,
                         sheet.cell(row, headers["Value"]).value,
@@ -214,7 +231,7 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
                     if parameter is None:
                         continue
                     fields.append(_field(
-                        sheet_name, row, headers["Values"], "search", parameter, "policy",
+                        sheet_name, row, headers["Values"], domain_for(row, "search"), parameter, "policy",
                         sheet.cell(row, headers["Values"]).value,
                         sheet.cell(row, headers["Unit"]).value,
                         sheet.cell(row, headers["Description"]).value,
@@ -227,7 +244,7 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
                         continue
                     name = f"{profile}.{parameter}"
                     fields.append(_field(
-                        sheet_name, row, headers["Value"], profile, name, "policy",
+                        sheet_name, row, headers["Value"], domain_for(row, "execution"), name, "policy",
                         sheet.cell(row, headers["Value"]).value,
                         sheet.cell(row, headers["Unit"]).value,
                         sheet.cell(row, headers["Description"]).value,
@@ -242,7 +259,7 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
                     for column_name in ("S4P Path", "Port Order", "Use"):
                         name = f"{row_id}.{column_name}"
                         fields.append(_field(
-                            sheet_name, row, headers[column_name], kind, name, "runtime",
+                            sheet_name, row, headers[column_name], domain_for(row, "block_source"), name, "runtime",
                             sheet.cell(row, headers[column_name]).value, None,
                             sheet.cell(row, headers.get("Description", headers[column_name])).value,
                             status=MappingStatus.MANUAL,
@@ -253,13 +270,13 @@ def _read_project_schema(path: str | Path) -> list[ProjectFieldDraft]:
 
 
 def _field(
-    sheet: str, row: int, value_column: int, group: Any, parameter: Any,
+    sheet: str, row: int, value_column: int, domain: Any, parameter: Any,
     parameter_class: Any, value: Any, unit: Any, description: Any,
     *, status: MappingStatus = MappingStatus.FALLBACK,
 ) -> ProjectFieldDraft:
     return ProjectFieldDraft(
         sheet=sheet, row=row, value_column=value_column,
-        group=str(group), parameter=str(parameter), parameter_class=str(parameter_class),
+        domain=str(domain), parameter=str(parameter), parameter_class=str(parameter_class),
         value=value, unit=unit, description=description, base_value=value, status=status,
         note="Retained from the reviewed base project workbook.",
     )

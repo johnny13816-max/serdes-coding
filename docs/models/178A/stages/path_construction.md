@@ -196,8 +196,8 @@ realization implementation under this L3 block.
 |---|---|---|
 | `COMConfig.link` | frequency/time grid and symbol timing consumed by filter and response constructors | common response grid |
 | `COMConfig.channel` | victim/NEXT/FEXT paths, port order, `R0`, source/load reflection coefficients, `missing_dc_policy`, optional `sparam_frequency_limit_Hz` | measured channel ingestion and transfer conversion |
-| `COMConfig.policy.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` and every bilinear finite-record consumer derived from the same completed transfer |
-| `COMConfig.policy.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
+| `COMConfig.alg.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` and every bilinear finite-record consumer derived from the same completed transfer |
+| `COMConfig.alg.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
 | `COMConfig.filter` | TX FFE taps and cursor constraint, transition time, receiver filter/equalizer controls, victim/NEXT/FEXT amplitudes | shared and path-specific scalar responses |
 | `txpkg_victim` | nested termination/package/partial-host config | victim TX package |
 | `txpkg_next` | nested termination/package/partial-host config | NEXT TX package |
@@ -378,7 +378,7 @@ The notation above denotes software cascade order and object ownership. It is no
 
 ## Fixed-policy control
 
-`COMChannelConfig.missing_dc_policy` is the path stage's project-defined fixed policy:
+`cfg.alg.missing_dc_policy` is the path stage's resolved algorithm policy:
 
 | Value | Intended software behavior |
 |---|---|
@@ -387,7 +387,8 @@ The notation above denotes software cascade order and object ownership. It is no
 | `skrf` | complete the S-matrix with scikit-rf before calculating terminated H21 |
 | `mag_phase_trend_to_dc` | complete scalar H21 using the pinned SiCoPR magnitude and low-frequency group-delay trends |
 
-The chosen policy is passed to
+`_build_paths()` reads the resolved value and passes the concrete method to
+`_build_path()`, which passes it to
 `S_all.completed_voltage_transfer_function(...)`. The resulting
 `completed_freqs`／`completed_H21` are shared by the analysis-grid path,
 `bilinear_iir` pulse construction and TX-noise equivalent-channel construction.
@@ -398,7 +399,7 @@ policy. The same selection applies to every victim and aggressor path in one con
 
 The stage rejects or propagates errors for these conditions:
 
-- victim channel path is absent;
+- `cfg.src.channel.victim` is absent or invalid;
 - a Touchstone file cannot be read or converted with the configured port order/reference impedance;
 - channel grids have no valid common alignment domain;
 - loaded channel count differs from configured victim plus NEXT plus FEXT count;

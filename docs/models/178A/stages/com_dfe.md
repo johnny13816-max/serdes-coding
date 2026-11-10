@@ -36,7 +36,7 @@ RX FFE 電壓座標表示，除以主 tap gain 後即為 reference 的 grid。
 ## Entry and prerequisites
 
 ```text
-calculate_COM_DFE(imp_status, dte_status, run_cfg=None) -> COMPMFStatus
+calculate_COM_DFE(imp_status, eq_ch, dte_status) -> COMPMFStatus
 ```
 
 Required completed inputs are:
@@ -71,7 +71,9 @@ changing final COM. A positive final override directly supplies `dy`; otherwise
 the final family selects relative-only or relative-with-cap. Tap threshold and
 Gaussian span still come from `COMPMFConfig`.
 
-`_run_once()` passes its selected `COMRunConfig` explicitly. A direct call without `run_cfg` uses `cfg.execution.single_run` for compatibility.
+The stage reads the resolved `cfg.alg` and `cfg.num` of its `COM` instance.
+The adapter selects the run mode before construction, so this method neither
+accepts nor resolves an execution profile.
 
 ## Ordered functional blocks
 
@@ -202,7 +204,7 @@ Until these exist, this document makes no specification-accuracy claim.
 
 - Shared 93A PMF helper reuse in the 178A stage needs explicit reference confirmation.
 - Final PMF mass retention remains hard-coded to 1.0; its voltage grid is owned by
-  `run_cfg.final_pmf_grid`. The legacy shared `run_cfg.pmf_dy_override` is only
-  consulted when no canonical final-grid control was resolved.
+  `cfg.num.final_pmf_grid`. There is no shared runtime `dy` override in the
+  stage API.
 - `calculate_COM()` remains a compatibility alias to `calculate_COM_DFE()` and should not be documented as a separate numerical stage.
 - The PMF backend and general `Pmf1D` contracts remain utility-level documentation work outside this stage.

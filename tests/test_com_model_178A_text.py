@@ -24,9 +24,13 @@ MODEL_TEXT_CLASSES = (
     model.COMDTEConfig,
     model.COMRunConfig,
     model.COMExecutionConfig,
+    model.COMSourceConfig.ChannelBinding,
+    model.COMSourceConfig.Channel,
+    model.COMSourceConfig,
+    model.COMNumericalControlConfig,
     model.COMImpairmentConfig,
     model.COMMLSDConfig,
-    model.COMPolicyConfig,
+    model.COMAlgorithmPolicyConfig,
     model.COMConfig,
     model.COMPSDStatus,
     model.COMAddedNoiseIterationStatus,
@@ -44,7 +48,11 @@ MODEL_TEXT_CLASSES = (
     model.COMStatus,
 )
 
-SEARCH_TEXT_CLASSES = (search.COMSearchRow, search.COMSearchStatus)
+SEARCH_TEXT_CLASSES = (
+    search.COMSearchConfig,
+    search.COMSearchRow,
+    search.COMSearchStatus,
+)
 
 
 def _blank_instance(cls: type[COMDataclassText]) -> COMDataclassText:
@@ -142,11 +150,11 @@ def test_dte_text_is_semantic_bounded_and_unit_aware() -> None:
 
 
 def test_print_matches_to_string_and_none_is_explicit() -> None:
-    cfg = model.COMRunConfig(pmf_dy_override=None)
+    cfg = model.COMNumericalControlConfig()
     stream = StringIO()
     cfg.print(file=stream)
     assert stream.getvalue() == cfg.to_string() + "\n"
-    assert "PMF voltage-grid spacing override: <not available>" in cfg.to_string()
+    assert "impairment eq-channel record length: full" in cfg.to_string()
 
 
 def test_search_row_names_every_equalizer_coefficient() -> None:
@@ -182,25 +190,17 @@ def test_root_status_reports_stage_lifecycle_without_expanding_full_status() -> 
 
 
 def test_json_snapshot_contract_remains_available() -> None:
-    cfg = model.COMRunConfig(target="mse", pmf_dy_override=2.5e-6)
+    cfg = model.COMExecutionConfig(target="mse")
     assert cfg._json_value(cfg) == {
         "target": "mse",
-        "pmf_grid_quality": "fine",
-        "pmf_keep_mass": 0.99999,
-        "pmf_dy_override": 2.5e-6,
-        "adc_input_pmf_grid": None,
-        "final_pmf_grid": None,
-        "floating_mode": "heuristic",
-        "pos_sweep_method": "each_phase",
-        "pos_coarse_stride": 4,
     }
 
 
 @pytest.mark.parametrize("target", ("mse", "dfe", "mlsd", "all_enabled"))
 def test_run_target_contract_accepts_only_canonical_values(target: str) -> None:
-    assert model.COMRunConfig(target=target).target == target
+    assert model.COMExecutionConfig(target=target).target == target
 
 
 def test_run_target_contract_rejects_retired_full_name() -> None:
     with pytest.raises(ValueError, match="all_enabled"):
-        model.COMRunConfig(target="full")
+        model.COMExecutionConfig(target="full")
