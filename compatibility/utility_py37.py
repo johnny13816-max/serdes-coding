@@ -1289,7 +1289,7 @@ class Pmf1D:
             raise ValueError("mu must be finite and sigma must be finite and positive.")
         if not np.isfinite(n_sigma) or n_sigma <= 0.0:
             raise ValueError("n_sigma must be finite and positive.")
-        extent = int(np.floor(2.0 * n_sigma * sigma / dx + 0.5))
+        extent = int(np.floor(n_sigma * sigma / dx + 0.5))
         center = int(np.floor(mu / dx + 0.5)) if mu >= 0 else -int(np.floor(-mu / dx + 0.5))
         indices = np.arange(center - extent, center + extent + 1)
         x = indices * dx

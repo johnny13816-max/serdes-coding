@@ -85,13 +85,18 @@ def test_scale_x_uses_projection_method_only_for_mass_deposit():
 def test_pmf_sample_uses_distribution_specific_construction_rules():
     sigma = 0.2
     dx = 0.1
+    n_sigma = 2
     gaussian = Pmf1D.gaussian(
-        0.0, sigma, dx, n_sigma=2, pdf_to_pmf_method="pmf_sample",
+        0.0, sigma, dx, n_sigma=n_sigma, pdf_to_pmf_method="pmf_sample",
     )
-    extent = round(2 * 2 * sigma / dx)
+    extent = round(n_sigma * sigma / dx)
     x = np.arange(-extent, extent + 1) * dx
     expected = np.exp(-x**2 / (2 * sigma**2 + np.finfo(float).eps))
     expected /= expected.sum()
+    integrated = Pmf1D.gaussian(
+        0.0, sigma, dx, n_sigma=n_sigma, pdf_to_pmf_method="bin_integral",
+    )
+    np.testing.assert_array_equal(gaussian.x, integrated.x)
     np.testing.assert_allclose(gaussian.pmf, expected, rtol=1e-15, atol=1e-15)
 
     cfg = type("Grid", (), {"dy": dx})()
