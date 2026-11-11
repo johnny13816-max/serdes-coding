@@ -72,7 +72,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
-| `ALG-006` | approved branch | Stage 1 out-of-measured extension | `alg.out_of_measured`：`cosine_decay`／`zero_padding` | `zero_padding` | **目前登錄 L5** `resample_tf()` | 待二次審查 |
+| `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：`continuous_tf`／`bilinear_iir` | `bilinear_iir` | **目前登錄 L3** `_realize_ctle_pulse()` | 待二次審查 |
 | `NUM-003` | approved branch | Stages 2／3／5／7 impairment record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **目前登錄 shared L3** `_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` | 待二次審查 |
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **目前登錄 L3** `calculate_pre_dte_imp()` phase-scheduling block | 待二次審查 |
@@ -101,7 +101,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-002` | 已建立 PMF 投影至 target grid 的 placement method | source atoms、PDF discretization、scalar scaling semantics、retained mass |
 | `ALG-003` | Gaussian／uniform PDF 離散成 PMF 的方法 | Gaussian initial support 固定 ±8σ；target-grid projection 與 scalar-PMF scaling 保持獨立 |
 | `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
-| `ALG-006` | completed H21 在有效量測邊界外的延伸 | `S_ch`、`S_all`、boundary-in response、case frequency limit |
+| `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
 | `ALG-007` | path pulse 與 victim `pulse_no_txffe` 的 CTLE realization | TX FFE、continuous `H_all`、Stage 3 sampling policy |
 | `NUM-003` | shared PSD/correlation record 的 full/truncated length | full responses、phase selection、channel grids |
 | `SRCH-001` | 要評估的 phase schedule | 每個 visited phase 使用的 Stage 4 solver 與公式 |
@@ -131,12 +131,15 @@ review 尚未完成。Retired／fixed non-branches 不放入本樹，統一列�
 COM model
 ├─ L0 Stage 1 — path construction
 │  └─ L2 path construction function set
-│     ├─ _build_paths()                                      [ALG-001 injector]
-│     │  └─ _build_path()
-│     │     └─ SparamModel.completed_voltage_transfer_function() [ALG-001 L5 owner]
-│     ├─ _build_path() / _reference_fd_to_td_record()
-│     │  └─ resample_tf()                                    [ALG-006 L5 owner]
-│     └─ _realize_ctle_pulse()                               [ALG-007 owner]
+│     └─ _build_paths()                                      [ALG-001/006 config resolver / fanout]
+│        └─ _build_path() × victim / NEXT / FEXT
+│           ├─ SparamModel.completed_voltage_transfer_function() [ALG-001 L5 owner]
+│           ├─ LinkSegment.from_tf()                         [ALG-006 analysis-grid direct injector]
+│           │  └─ resample_tf()                              [ALG-006 L5 owner]
+│           └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 owner]
+│              ├─ continuous_tf                              [uses analysis-grid H21; ALG-006 upstream-folded]
+│              └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
+│                 └─ resample_tf()                           [same ALG-006 L5 owner]
 ├─ L0 Stages 2／3／5／7 — shared impairment record
 │  └─ _realize_eq_ch_imp_record() / _build_eq_ch_imp_psd()   [NUM-003 shared L3 owner]
 ├─ L0 Stage 3 — sampling phase and ADC input
@@ -145,6 +148,8 @@ COM model
 │  │  ├─ clipping PSD/tail selection                         [ALG-008 owner]
 │  │  ├─ _resolve_adc_input_pmf_config()                     [NUM-004 owner]
 │  │  └─ PMF retained-mass consumer                          [NUM-006 pending owner/scope]
+│  ├─ _calculate_tx_noise_eq_ch()
+│  │  └─ victim.pulse_no_txffe                               [ALG-006/007 upstream-folded consumer]
 │  └─ selected phase → Stage 4 solver                        [SRCH-001 consumer]
 ├─ L0 Stage 4 — MMSE DTE
 │  └─ COM_MMSE_DTE.run() floating tap/group solve            [ALG-010 owner]
@@ -270,7 +275,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | 範圍 | 主要實作入口 | 主要驗證 |
 |---|---|---|
 | Channel representation normalization（fixed/input dispatch） | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
-| High-frequency handling | `SparamModel.to_LinkSegment()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py` |
+| High-frequency handling | `LinkSegment.from_tf()`、`_reference_fd_to_td_record()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py`、`tests/test_com_model_178A_ctle_pulse.py` |
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse()`；`COMPath.pulse_no_txffe` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；Stage 6/7 consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
 | Eq-channel impairment record／MMSE inputs | `COM._realize_eq_ch_imp_record()`、`COM._build_eq_ch_imp_psd()`；Stage 3 `_select_xtalk_path_phase()` | policy tests、`tests/test_com_model_178A_mlsd_noise.py` |

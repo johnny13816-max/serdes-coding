@@ -14,7 +14,8 @@ branch review；93A、reporting、C2M migration 與 release 項目仍維持暫�
 再繼續尚未完成一次審查的項目。ALG-003 已完成二次審查並關閉；TC-025 將
 Gaussian `pmf_sample` 收斂至固定 ±8σ support。ALG-002 也已完成 owner
 convergence、驗證與 isolated integration。ALG-004 signed-scale contract、實作、
-驗證與 remote integration 已完成並關閉；二次審查移至 ALG-006。NUM-006
+驗證與 remote integration 已完成並關閉；ALG-006 也已完成二次 ownership
+審查，確認 `resample_tf()` 為 L5 owner。二次審查移至 ALG-007。NUM-006
 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
@@ -29,7 +30,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — ALG-006** | Branch Registry 是唯一分類表與 ownership/function-position tree；ALG-002／ALG-003／ALG-004 已關閉 | 盤點 ALG-006 的 analysis-grid、bilinear-record 與 TX-noise consumers，重新確認 L5 owner boundary |
+| CP-BR — 178A branch ownership second review | **Active — ALG-007** | Branch Registry 是唯一分類表與 ownership/function-position tree；ALG-006 已關閉，確認 `resample_tf()` 為 L5 owner，analysis-grid 與 bilinear-record direct injectors 已分開，TX-noise 是 `pulse_no_txffe` 的 downstream consumer | 重新確認 ALG-007 CTLE pulse-realization owner、direct injectors 與 consumers |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
@@ -59,7 +60,7 @@ reporting、C2M migration 或 release 工作。
 | NUM-002（legacy B-014）— Gaussian support | Retired as non-branch。178A 固定 internal 8σ；focused `48 passed`、workbook scans 0、SiCoPR golden `1 passed`；COM_DFE 與 final COM 不變。Evidence 見 `num002_gaussian_support.md`。 |
 | legacy E-001 — Pipeline target（reclassified non-branch） | `full` 已改名為 `all_enabled` 且不保留 alias；`COM._run_once()` 只依 `cfg.exe.target` 決定執行範圍，不改變已執行 stage 的方法，因此不再使用 `EXE-001` branch identity。Focused `43 passed`；七份 workbook legal-value／stale-value／formula-error scans 通過；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。Implementation `68ea755`、workbook/docs `3f2bc73` 已推送。 |
 | ALG-005（legacy B-001）— Channel renormalization | Retired as non-branch。D3.2 measured S4P 固定 single-ended renormalization → mixed-mode；native S2P 僅依 port count dispatch，錯誤不 fallback。Focused `52 passed`、Python 3.7 validator passed、9 份 workbook selector scan 0、matrix formula errors 0；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。 |
-| ALG-006（legacy B-002）— Out-of-measured transfer | 保留 `cosine_decay`／`zero_padding` branch；`resample_tf()` 是共同數值 owner，analysis-grid `H_21`、bilinear path pulse 與 victim TX-noise finite record 使用同一 resolved policy。Focused `41 passed`；SiCoPR fixed 67 GHz＋zero-padding golden `1 passed`，MSE `0.0061912610245255335`、`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 stage digests 不變。Full suite 的七項既有／環境 failure 已依 contract 記錄 deviation。Implementation `db0e836` 已推送至 `origin/main`。 |
+| ALG-006（legacy B-002）— Out-of-measured transfer | 保留 `cosine_decay`／`zero_padding` branch；`resample_tf()` 是共同數值 owner。Analysis-grid `H_21` 與 bilinear finite record 是兩個 direct execution paths；victim TX noise 只抽樣已建立的 `pulse_no_txffe`，不是第三個 execution point。Focused `41 passed`；SiCoPR fixed 67 GHz＋zero-padding golden `1 passed`，MSE `0.0061912610245255335`、`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 stage digests 不變。Full suite 的七項既有／環境 failure 已依 contract 記錄 deviation。Implementation `db0e836` 已推送至 `origin/main`。 |
 | ALG-007（legacy B-003）— CTLE pulse realization | Stage 1 `_realize_ctle_pulse()` 是 sole execution owner；victim `COMPath` 同時保存 `pulse` 與 `pulse_no_txffe`，NEXT／FEXT 的後者為 `None`。Stage 3 只抽樣 no-TX-FFE pulse。Focused `38 passed`；SiCoPR production golden 的 MSE、COM_DFE、final COM 與三個 digests 不變。Implementation `e676a45` 已推送至 `origin/main`。 |
 | ALG-008（legacy B-006）— Pre-DTE ADC clipping convention | Stage 3 `calculate_pre_dte_imp_at_pos()` 是 sole execution owner；D3.2 確認 `full_jitter_half_tail`，MATLAB 4.17 對照為 `rj_only_full_tail_reference`。直接影響 `V_qc/delta/S_qn/R_n`；後續 COM 僅可能經 phase／taps 間接受影響，final ADC PMF 不讀此 selector。Focused `29 passed`；SiCoPR production golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。 |
 | RC-20261106-001 — Remove stale branch-review checklist | `9161e63823daaa1009deeccebd927ea72dc46ab0`；registry 與 stage progress 為現行分類／待辦來源。 |

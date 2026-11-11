@@ -29,7 +29,7 @@ Current source identifies these specification-facing builders:
 | device termination ladder | IEEE 802.3 Annex 178A, Eq. 178A-7 | implementation reference recorded; equation not revalidated here |
 | device package | IEEE 802.3 Annex 178A, Eq. 178A-9 | implementation reference recorded; equation not revalidated here |
 | partial host | IEEE 802.3 Annex 178A, Eq. 178A-10 | implementation reference recorded; equation not revalidated here |
-| augmented path transfer | Annex 178A path-transfer definition; implemented through shared `SparamModel.to_LinkSegment()` | conversion boundary confirmed from source; equation not revalidated here |
+| augmented path transfer | Annex 178A path-transfer definition; implemented through `SparamModel.completed_voltage_transfer_function()` followed by `LinkSegment.from_tf()` | conversion boundary confirmed from source; equation not revalidated here |
 
 The 178A concrete `IEEECOMSparam` and `IEEECOMFilter` types directly inherit
 the neutral `SparamModel` and `LinkSegment` utilities. They own the COM
@@ -97,9 +97,10 @@ COM                                            [Root: model]
                 ├── S-parameter path cascade    [L3]
                 │   └── cascade_com()          [L4: S-parameter cascade]
                 ├── transfer extrapolation      [L3: ALG-006]
-                │   ├── LinkSegment.from_tf() → resample_tf() [L4: analysis-grid H_21]
-                │   └── _reference_fd_to_td_record() → resample_tf()
-                │                                      [L4: bilinear path/TX-noise record]
+                │   ├── LinkSegment.from_tf()              [L4: analysis-grid direct injector]
+                │   │   └── resample_tf()                  [L5: ALG-006 owner]
+                │   └── _reference_fd_to_td_record()       [L4: bilinear-record direct injector]
+                │       └── resample_tf()                  [same L5 owner]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
                 ├── _realize_ctle_pulse() × pulse / victim pulse_no_txffe
@@ -337,7 +338,7 @@ H_ffe + H_t + H_21 + H_r cascade
           -> pre-CTLE response
 completed measured H_21 + measured-grid pre-CTLE reconstruction
           -> _reference_fd_to_td_record -> resample_tf with the same out_of_measured
-          -> bilinear path/TX-noise finite record when selected
+          -> bilinear path finite record when selected
 analysis-grid or finite-record pre-CTLE response + selected CTLE realization
           -> post-CTLE response
 post-CTLE response + common rectangular symbol pulse
@@ -365,10 +366,18 @@ raw IFFT、時間原點與截尾仍是 ALG-007 該具名方法的固定定義，
 
 `_build_path()` stores the completed measured transfer plus both victim pulses in
 `COMPath`. `_calculate_tx_noise_eq_ch()` only samples stored
-`victim.pulse_no_txffe`; it does not receive ALG-006/007 policy or rebuild CTLE.
-`SparamModel.completed_voltage_transfer_function()` owns missing-DC completion;
-`LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate numerical
-frequency extension to `resample_tf()`. `cosine_decay` retains the existing extrapolation; `zero_padding`
+`victim.pulse_no_txffe`; it does not receive ALG-006/007 policy, rebuild CTLE or
+perform a third transfer resampling. TX noise is therefore an upstream-folded
+ALG-006 consumer, not an independent ALG-006 execution point.
+
+`SparamModel.completed_voltage_transfer_function()` owns missing-DC completion.
+ALG-006 begins only after that operation has produced a completed measured scalar
+transfer. `LinkSegment.from_tf()` injects the resolved choice for analysis-grid
+H21, while `_reference_fd_to_td_record()` injects it when a `bilinear_iir` pulse
+needs a uniformly sampled pre-CTLE finite record. Both delegate numerical
+frequency extension to the sole L5 owner `resample_tf()`; the former
+`SparamModel → LinkSegment` path is the primary use but not the only use.
+`cosine_decay` retains the existing extrapolation; `zero_padding`
 sets the complex terminated `H_21` strictly to zero only above the measured
 input's effective highest frequency. The endpoint sample stays unchanged.
 The optional frequency limit is applied earlier at `SparamModel` ingestion, so
@@ -393,7 +402,8 @@ The notation above denotes software cascade order and object ownership. It is no
 `_build_path()`, which passes it to
 `S_all.completed_voltage_transfer_function(...)`. The resulting
 `completed_freqs`／`completed_H21` are shared by the analysis-grid path,
-`bilinear_iir` pulse construction and TX-noise equivalent-channel construction.
+`bilinear_iir` pulse construction and the victim no-TX-FFE pulse later sampled
+by the TX-noise calculation.
 `_reference_fd_to_td_record()` rejects missing DC rather than applying a second
 policy. The same selection applies to every victim and aggressor path in one config.
 
