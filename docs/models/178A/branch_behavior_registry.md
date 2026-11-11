@@ -69,7 +69,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | ID | Branch classification | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
 | `ALG-001` | approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
-| `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **二次審查已確認；integration pending** |
+| `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | Shared scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **目前登錄 L5** `Pmf1D.scale_x()` | 待二次審查 |
 | `ALG-006` | approved branch | Stage 1 out-of-measured extension | `alg.out_of_measured`：`cosine_decay`／`zero_padding` | `zero_padding` | **目前登錄 L5** `resample_tf()` | 待二次審查 |
@@ -237,7 +237,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 
 | Item | Record |
 |---|---|
-| Status | `Implemented / validation passed — integration pending`；尚未建立本次 isolated commit，因此不得標記 `Closed`。 |
+| Status | **Closed 2026-11-11**。Helper ownership convergence 已由 isolated commit `b417b8c` 整合並推送；權威 owner tree 已由 `c804e3c` 整合。 |
 | Code convergence | `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()` 不再接收 `COMAlgorithmPolicyConfig`，只接收 concrete `pmf_projection_method`；`pdf_to_pmf_method` 維持獨立 concrete argument。 |
 | Preserved boundary | PAM source 保持 exact natural-grid atoms；B-009 不恢復；`tap_abs_th`、retained mass、ALG-003 與 ALG-004 都是獨立決策。 |
 | Validation | Focused `47 passed`；Python 3.7 export validation passed；固定 SiCoPR golden `1 passed`，DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 與 intermediate digests 不變。 |
