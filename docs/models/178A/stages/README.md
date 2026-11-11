@@ -29,27 +29,10 @@ A stage document distinguishes:
 
 Source inspection alone does not validate a protected model equation. Mathematical assertions are added only through the Core Model Change Contract defined in `AGENTS.md`.
 
-## CP-BR review progress
+## Branch review index
 
-This table is the consolidated progress view for the per-stage layered call
-trees. Detailed behavior remains authoritative in each linked stage document
-and in the [branch registry](../branch_behavior_registry.md).
-
-| Stage | Layered call tree | Closed decisions | Pending / next |
-|---|---|---|---|
-| 0 Input/shared utilities/pipeline gate | Registry-owned | ALG-001, ALG-002, ALG-003, ALG-004, EXE-001；former NUM-001 and NUM-002 retired as non-branches | No additional Stage 0 owner |
-| 1 Path construction | Recorded | ALG-006, ALG-007 | ALG-005 retired 2026-11-07 as fixed D3.2/input-dispatch behavior |
-| 2 Common impairment | Recorded | NUM-003 shared-L3 ownership and config exposure；legacy B-009 removed | No additional Stage 2 owner |
-| 3 Sampling-phase / ADC input | Recorded | NUM-003 XT-phase separation；NUM-004 ADC-input grid；ALG-008；ALG-009 retired as fixed exact-PMF behavior | SRCH-001, NUM-006 |
-| 4 MMSE DTE | Recorded | None under current CP-BR pass | ALG-010 |
-| 5 Post-FFE impairment | Recorded | NUM-003 shared-L3 consumer；ALG-011 | No additional Stage 5 owner |
-| 6 DFE COM | Recorded | NUM-005 final-grid domain | ALG-012 pending D3p2 evidence；ALG-013 |
-| 7 MLSD COM | Recorded | NUM-003 `S_isi` shared-L3 consumer | ALG-014, ALG-015, ALG-016, ALG-017 |
-
-NUM-003 (legacy B-005) closed on 2026-11-01 after implementation,
-documentation/workbook sync, unchanged SiCoPR golden COM values, branch
-isolation tests, and full non-GUI regression. ALG-008 closed after D3.2 confirmed
-the project clipping convention and the sole Stage 3 owner. ALG-012 remains pending
-D3p2 review. ALG-012's RG name and observability status are recorded without
-changing its numerical flow; main-tap accumulation is a separate deferred
-issue, not an ALG-012 option.
+分支分類、review status、validation evidence，以及每個 branch 在 semantic
+function call tree 中的位置，統一由
+[178A Branch Behavior Registry](../branch_behavior_registry.md) 保存。本目錄的
+stage 文件只描述各 stage 的 I/O、data handoff、function ordering 與未解決的
+stage-local technical question，不另建 branch progress 或 owner 表。

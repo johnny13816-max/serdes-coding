@@ -81,8 +81,9 @@ COM                                                   [Root: model]
             │   ├── clipping PSD/tail selection        [L4: ALG-008]
             │   └── _build_psd_adc_qn()               [L4: fixed exact-PMF owner]
             │       └── _calculate_V_qc()
-            │           ├── _build_pmf_interference_178A() [L4: ALG-002 projection]
-            │           └── Pmf1D.gaussian()          [L4: ALG-003]
+            │           ├── _build_pmf_interference_178A() [L4: ALG-002 direct injector]
+            │           │   └── Pmf1D.fir_filter()/scale_x() [L5: ALG-002 owner set]
+            │           └── Pmf1D.gaussian()          [L5: ALG-003]
             └── total-noise covariance                [L3]
                 └── SampledPSD.add() / to_autocorrelation() [L4]
 ```
@@ -91,15 +92,13 @@ Stage 2 returns a phase-independent `COMImpairmentStatus` used only as a local
 cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
 `COMImpairmentStatus`; Stage 4 consumes their `h_dsamp`, `R_n`, and `sigma_X`.
 
-### Branch-behavior review candidates
+### Branch references
 
-| Candidate | L3 owner | L4 decision point | Status for this stage |
-|---|---|---|---|
-| ALG-008 pre-DTE ADC clipping convention | ADC-input / quantization | clipping PSD and CDF-tail selection in `calculate_pre_dte_imp_at_pos()` | **D3.2 evidence confirmed.** `full_jitter_half_tail` is the project method; `rj_only_full_tail_reference` remains a MATLAB 4.17 comparison. It does not remove full jitter from MMSE covariance. |
-| ALG-002 discrete-PMF projection | ADC-input / quantization | `_build_pmf_interference_178A()` → `Pmf1D._project_to_grid()` | **Closed 2026-11-03.** PAM source 固定保存在 exact natural grid；`linear`／`nearest`只在 tap scaling 後的 target-grid projection 生效。Selector 由 project policy 明示傳入每個 projection operation，不保存於 PMF object；stage 不得自行重新選擇。ALG-004 ordinate interpolation 不受此分支影響。SiCoPR DFE/final COM golden 不變。 |
-| ALG-003 PDF→PMF discretization | ADC-input / quantization | `_build_psd_adc_qn()` → Gaussian PMF；Stage 6 → uniform PMF | `policy.pdf_to_pmf_method` 由 L2 helper 顯式傳入。`bin_integral` 與 `pmf_sample` 同時適用 Gaussian／uniform，但各 distribution 保留自己的 construction rule。Gaussian support 固定 8σ；ALG-002 projection 與 ALG-004 scaling 仍獨立。 |
-| Former ALG-009 pre-DTE PMF method | ADC-input / quantization | `_build_psd_adc_qn()` | **Retired.** Cost/accuracy review found only about 1.5–2% candidate acceleration but material `V_qc`, MSE, and selected-phase changes. The owner now directly executes the exact PMF path. |
-| NUM-004/NUM-006 PMF grid quality, retained mass, explicit `dy` | ADC-input / quantization | `_resolve_adc_input_pmf_config()` | Numerical accuracy/cost controls. NUM-004 ADC-input grid is closed; NUM-006 retention remains pending. |
+本 stage 涉及 ALG-002、ALG-003、ALG-008、NUM-003、NUM-004、NUM-006，並保留
+retired ALG-009 的 fixed exact-PMF flow。它們的分類、owner、review status 與
+validation evidence 統一記錄於
+[178A Branch Behavior Registry](../branch_behavior_registry.md)；本文件不另建
+平行 review table。
 
 Quantization disabled when `N_qb`／`P_qc` is absent is input/configuration
 availability handling, not a branch behavior.

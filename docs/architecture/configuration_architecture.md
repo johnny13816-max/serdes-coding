@@ -51,24 +51,27 @@ exposure level:
 | `numerical_control` | Resolution, convergence, truncation, precision, and computational-cost controls. |
 | `execution` | Scheduling and run-flow controls that do not change mathematical results. |
 
-For 178A, these domain names and registry prefixes have one canonical mapping:
+For 178A, these domain names have one canonical runtime-access mapping:
 
-| Prefix | Project/domain name | Approved runtime field |
+| Runtime label | Project/domain name | Approved runtime field |
 |---|---|---|
-| `PHY` | workbook `intrinsic` / registry `physical_input` | physical root fields; no `cfg.phy` or `cfg.intrinsic` wrapper |
+| physical fields | workbook `intrinsic` | physical root fields; no `cfg.phy` or `cfg.intrinsic` wrapper |
 | `SRC` | `block_source` | `cfg.src` |
 | `ALG` | `algorithm_policy` | `cfg.alg` |
 | `NUM` | `numerical_control` | `cfg.num` |
 | `SRCH` | `search` | `cfg.srch` |
 | `EXE` | `execution` | `cfg.exe` |
 
-The abbreviation is a runtime access path, not a second taxonomy.  Public
+The label is a runtime access path, not a branch taxonomy. Public
 dataclass names remain descriptive (`COMSourceConfig`,
 `COMAlgorithmPolicyConfig`, `COMNumericalControlConfig`, `COMSearchConfig`, and
 `COMExecutionConfig`). Project Config uses `intrinsic` for the user-facing
-physical family accepted by the user; the branch registry retains the
-`PHY / physical_input` class name. These are an explicit parent/child mapping,
-not two runtime config trees.
+physical family accepted by the user. Physical fields and the five nonphysical
+runtime domains form the configuration set; only a selectable behavior that
+independently satisfies the
+[Branch Behavior Contract](branch_behavior_contract.md) receives a branch ID.
+In particular, `SRC` and `EXE` remain valid runtime domains without becoming
+branch classes, and no `PHY` branch prefix is created for physical inputs.
 
 `intrinsic`, `policy`, and `derived` in the workbook's `Parameter Class` column
 describe schema/source treatment; they do not replace the domains above.

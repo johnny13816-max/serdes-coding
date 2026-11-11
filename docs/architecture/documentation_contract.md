@@ -67,11 +67,13 @@ mathematical contracts.
 | L1 | Stage | One recognizable COM domain step with an explicit input, output, and status-ownership boundary. |
 | L2 | Function set | A cooperating set within one stage that constructs one class of intermediate data or model objects. |
 | L3 | Functional block | A domain-meaningful unit inside an L2 function set. It may own a branch behavior, its shared state, and its input/output contract. |
-| L4 | Function | The smallest callable model construction, transformation, or numerical operation shown in the COM call tree. |
+| L4 | Model auxiliary function | A model/version-aware helper whose complete behavior is supplied by explicit arguments. |
+| L5 | Generic utility / numerical kernel | Reusable behavior independent of COM stage, version, and status semantics. A public L5 operation may own a branch; a private kernel delegated by that operation is not automatically the owner. |
 
 For a call that crosses into a generic utility or third-party implementation,
-the L4 call is the leaf of the COM call tree unless that utility changes COM
-data ownership or mathematical behavior.  Validation guards, simple data
+the L4 call is normally the leaf of a stage call tree. The version Branch
+Registry continues to L5 when the shared utility owns selectable mathematical
+behavior. Validation guards, simple data
 presence conditions, error paths, array conversion, and trivial accessors are
 not algorithm branches and are normally omitted from this hierarchy.
 
@@ -100,6 +102,7 @@ Each supported COM version owns:
 ```text
 docs/models/<version>/
   README.md
+  branch_behavior_registry.md
   call_tree.md
   config_tree.md
   status_tree.md
@@ -108,9 +111,11 @@ docs/models/<version>/
 ```
 
 The model README defines the stage sequence and links to every authoritative
-stage document. `call_tree.md` records semantic calls between entries,
-workflows, and stages. Config and status trees are separate because their
-sources, ownership, and lifecycles differ.
+stage document. `branch_behavior_registry.md` is the single authoritative
+classification table and branch ownership/function-position tree for that
+version. `call_tree.md` records the non-duplicated pipeline and stage calls.
+Config and status trees are separate because their sources, ownership, and
+lifecycles differ.
 
 ## Stage contract
 
@@ -129,11 +134,12 @@ Every model stage document records:
 
 Every model stage document also records a **COM call-tree hierarchy**. It must
 show the owning L1 stage entry, its L2 function sets, L3 functional blocks,
-and material L4 functions in execution order. The tree marks structural
-fan-out separately from algorithm branches. Algorithm branches name their L3
-functional-block owner and their L4 execution point; path kind, guards, error handling, and input
-presence do not become algorithm branches merely because they select control
-flow.
+and material L4 functions in execution order. The stage tree marks structural
+fan-out and may annotate a branch ID, but it must not duplicate the branch's
+classification, owner conclusion, review status, or validation record. Those
+records live only in the version Branch Registry. Path kind, guards, error
+handling, and input presence do not become algorithm branches merely because
+they select control flow.
 
 The stage contract is authoritative even when private helper functions are
 refactored.

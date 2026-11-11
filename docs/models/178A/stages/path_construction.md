@@ -183,19 +183,21 @@ realization implementation under this L3 block.
   pre-ALG-006-convergence bilinear path. Selecting `cosine_decay` intentionally
   changes the out-of-measured input to that same CTLE realization.
 
-### Algorithm-branch placement
+### Branch references
 
-| Branch | L3 owner | L4 execution point | Excluded from branch definition |
-|---|---|---|---|
-| ALG-006 transfer extrapolation | transfer extrapolation | `LinkSegment.from_tf()` and `_reference_fd_to_td_record()` both delegate to `resample_tf(..., out_of_measured=...)` | `missing_dc_policy`, which handles missing input data；`ctle_pulse_realization`, which selects the CTLE formula |
-| ALG-007 CTLE pulse realization | CTLE pulse realization under shared path | `_prepare_ctle_pulse_realization()` plus sole execution owner `_realize_ctle_pulse()`; the resolved selector is stored in `COMSharedPath` | `victim`／`NEXT`／`FEXT` path kind, pulse amplitude, and downstream phase sampling |
+本 stage 涉及 ALG-001、ALG-006 與 ALG-007。它們的分類、semantic owner、
+direct execution point、non-owner 與二次審查狀態統一記錄於
+[178A Branch Behavior Registry](../branch_behavior_registry.md)；本文件只保留
+path construction 的 I/O、function ordering 與數值契約。
 
 ## Required input objects
 
 | Input | Fields used by this stage | Role |
 |---|---|---|
 | `COMConfig.link` | frequency/time grid and symbol timing consumed by filter and response constructors | common response grid |
-| `COMConfig.channel` | victim/NEXT/FEXT paths, port order, `R0`, source/load reflection coefficients, `missing_dc_policy`, optional `sparam_frequency_limit_Hz` | measured channel ingestion and transfer conversion |
+| `COMConfig.src.channel` | victim/NEXT/FEXT artifact bindings, representation and port order | source selection and measured-channel ingestion |
+| `COMConfig.channel` | `R0`, source/load reflection coefficients and optional `sparam_frequency_limit_Hz` | physical termination and measured-frequency boundary |
+| `COMConfig.alg.missing_dc_policy` | `error`／`hold`／`skrf`／`mag_phase_trend_to_dc` | ALG-001 completion of terminated scalar H21 |
 | `COMConfig.alg.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` and every bilinear finite-record consumer derived from the same completed transfer |
 | `COMConfig.alg.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
 | `COMConfig.filter` | TX FFE taps and cursor constraint, transition time, receiver filter/equalizer controls, victim/NEXT/FEXT amplitudes | shared and path-specific scalar responses |
@@ -376,7 +378,7 @@ the channel config; it does not rely on a temporary truncated copy.
 
 The notation above denotes software cascade order and object ownership. It is not a replacement for the specification equations.
 
-## Fixed-policy control
+## ALG-001 missing-DC completion
 
 `cfg.alg.missing_dc_policy` is the path stage's resolved algorithm policy:
 
@@ -394,6 +396,15 @@ The notation above denotes software cascade order and object ownership. It is no
 `bilinear_iir` pulse construction and TX-noise equivalent-channel construction.
 `_reference_fd_to_td_record()` rejects missing DC rather than applying a second
 policy. The same selection applies to every victim and aggressor path in one config.
+
+Ownership is intentionally below the COM stage: L5
+`SparamModel.completed_voltage_transfer_function()` understands the four
+behaviors and owns their ordering. L4 `_build_path()` is only the direct
+injector; `_build_paths()` resolves config and fans the same choice out to all
+paths. Downstream H21, pulse and TX-noise calculations consume completed data
+and are not ALG-001 owners. The runtime dataclass uses fail-safe `error` when
+constructed directly, the project workbook default is `skrf`, and
+`sicopr_reference_v1` selects `mag_phase_trend_to_dc`.
 
 ## Failure conditions
 

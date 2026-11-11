@@ -91,8 +91,11 @@ COM._run_once()
 │       │   └── physical measured-frequency limit → common measured grid
 │       ├── _build_shared_path(config, frequency grid)
 │       └── _build_paths(config, shared blocks, channels)
+│           ├── resolve cfg.alg.missing_dc_policy once for every path
 │           └── _build_path(...) for victim, NEXT, and FEXT paths
-│               ├── cfg.alg.missing_dc_policy → one terminated-H21 completion
+│               ├── directly inject concrete ALG-001 method
+│               │   └── L5 SparamModel.completed_voltage_transfer_function()
+│               │       └── one DC-complete terminated H21
 │               ├── _realize_ctle_pulse(...) -> path.pulse
 │               │   ├── continuous_tf: frequency-domain CTF + unit pulse
 │               │   └── bilinear_iir: measured TF -> finite record -> IIR + unit pulse
@@ -165,6 +168,11 @@ calculate_MMSE_DTE(...)
 The detailed numerical meaning of these operations belongs in the reviewed DTE stage document. This tree only fixes ownership: `COM_MMSE_DTE` owns the candidate solver and returns one `COMDTEStatus`; `_run_once()` owns phase comparison and selection.
 
 ## DFE COM and MLSD branches
+
+ALG-002 and every other branch's classification and L0--L5 ownership position
+are centralized in the
+[178A Branch Behavior Registry](branch_behavior_registry.md#分支-ownership--function-position-tree).
+This file records only the surrounding pipeline flow.
 
 ```text
 calculate_COM_DFE(imp_status, dte_status)

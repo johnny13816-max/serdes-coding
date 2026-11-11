@@ -194,7 +194,7 @@ listed in [the migration contract](../../planning/comconfig_domain_migration.md#
 | `final_pmf_grid.dy_abs_max` | same | 1e-5 V |
 | `final_pmf_grid.dy_override` | same | blank / `None` |
 | `tap_rel_As` | `COMPMFConfig` | 0.001 |
-| `missing_dc_policy` | `COMChannelConfig` | `skrf`; reference profile selects `mag_phase_trend_to_dc` |
+| `missing_dc_policy` | `COMConfig.alg` | runtime constructor `error`；project workbook `skrf`；reference profile `mag_phase_trend_to_dc` |
 | `execution_profile` | `run_config.control`；adapter preset selector，不進入 `COMConfig` | `project_standard` |
 | `align_to_ref` | legacy compatibility alias；新模板不輸出 | absent |
 | `out_of_measured` | `COMConfig.alg` | `cosine_decay` |
@@ -300,13 +300,15 @@ main-tap accumulation；該實作問題已另列 deferred issue。此分支在
 D3p2 evidence 到手前維持 pending；pre-DTE 與 final-COM clipping policy
 仍可獨立設定。
 
-`pdf_to_pmf_method` 是 ALG-003 的 shared L3 policy。值
+`pdf_to_pmf_method` 是 ALG-003 的 shared policy；semantic owner 是 L5
+`Pmf1D.gaussian()`／`uniform()` constructor set。值
 `bin_integral` 以 distribution 的 bin probability/overlap 建立 PMF；
 `pmf_sample` 則使用 SiCoPR 的 grid-center rule：Gaussian sample 後
 正規化，uniform 選取 `±delta/2` 的最近 centers（含端點）並等權重。
 `COM` orchestration 將此值明示傳入 pre-DTE、final COM、MLSD 的 L2
 helpers；`Pmf1D` 只執行建構，不保存 policy。178A Gaussian support 固定為
-internal 8σ invariant；`pdf_to_pmf_method` 不能改變 support。
+internal ±8σ invariant；兩種 discretization 使用相同 support，
+`pdf_to_pmf_method` 不能改變 support。
 
 ## Channels
 
