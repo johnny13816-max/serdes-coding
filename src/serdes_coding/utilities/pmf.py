@@ -806,7 +806,10 @@ class Pmf1D:
         Parameters
         ----------
         scale:
-            X-axis scale factor. Negative values mirror the distribution.
+            Finite x-axis scale factor. Negative values mirror the
+            distribution. For ``interpolate_ordinates``, ``+a`` and ``-a``
+            use the same output grid and the latter reverses the interpolated
+            PMF ordinates.
         keep_dx:
             If True, deposit scaled probability mass onto dx_ref.
         dx_ref:
@@ -829,11 +832,12 @@ class Pmf1D:
                 )
 
             if method == "interpolate_ordinates":
-                if scale <= 0.0:
-                    raise ValueError("interpolate_ordinates requires a positive scale.")
                 # Reference scalePDF uses the scaled minimum index and a
                 # symmetric output grid, then interpolates PDF ordinates.
-                st_pos = self.st_idx * scale * self.dx / dx_ref
+                # The grid depends on the scale magnitude; a negative scale
+                # mirrors the ordinates without changing that grid.
+                scale_magnitude = abs(scale)
+                st_pos = self.st_idx * scale_magnitude * self.dx / dx_ref
                 nearest_integer = np.rint(st_pos)
                 if np.isclose(st_pos, nearest_integer, rtol=0.0, atol=1e-12):
                     st_pos = nearest_integer
@@ -843,7 +847,11 @@ class Pmf1D:
                 indices = np.arange(st_idx, -st_idx + 1)
                 x_out = indices * dx_ref
                 pmf = np.interp(
-                    x_out, self.x * scale, self.pmf, left=np.nan, right=np.nan
+                    x_out,
+                    self.x * scale_magnitude,
+                    self.pmf,
+                    left=np.nan,
+                    right=np.nan,
                 )
                 if pmf.size < 3:
                     raise ValueError("interpolate_ordinates requires at least three grid bins.")
@@ -852,6 +860,8 @@ class Pmf1D:
                 if not np.all(np.isfinite(pmf)):
                     raise ValueError("interpolate_ordinates left unsupported interior bins.")
                 pmf = self._validate_pmf(pmf / np.sum(pmf))
+                if scale < 0.0:
+                    pmf = pmf[::-1].copy()
             elif method == "mass_deposit":
                 st_idx, pmf = self._project_to_grid(
                     scale * self.x, self.pmf, dx_ref, projection_method,

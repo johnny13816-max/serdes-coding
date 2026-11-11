@@ -13,8 +13,8 @@ branch review；93A、reporting、C2M migration 與 release 項目仍維持暫�
 使用者指定順序執行 ownership 二次審查：先重新確認曾完成一次審查的 branches，
 再繼續尚未完成一次審查的項目。ALG-003 已完成二次審查並關閉；TC-025 將
 Gaussian `pmf_sample` 收斂至固定 ±8σ support。ALG-002 也已完成 owner
-convergence、驗證與 isolated integration。二次審查現在開始 ALG-004；
-NUM-006 保持暫停。RC-004
+convergence、驗證與 isolated integration。ALG-004 signed-scale implementation
+與所有契約驗證已通過，等待 isolated integration。NUM-006 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -28,7 +28,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — ALG-004** | Branch Registry 是唯一分類表與 ownership/function-position tree；ALG-002／ALG-003 已關閉；先完成所有二次審查，再回到未完成一次審查的 NUM-006 等項目 | 盤點 ALG-004 的 selector、所有 production consumers 與 L0--L5 owner boundary |
+| CP-BR — 178A branch ownership second review | **Active — ALG-004 integration** | Branch Registry 是唯一分類表與 ownership/function-position tree；ALG-002／ALG-003 已關閉；ALG-004 L5 owner、signed-scale contract 與 validation 已確認 | 建立 isolated commit 並完成 closure reconciliation |
 | NUM-003（legacy B-005）— Eq-channel impairment length | **Closed 2026-11-01** | Shared L3 供 Stage 2/3/5/7；`full/truncated`；workbook 獨立控制 | Golden COM 不變；closed evidence 見 `tc022_mmse_noise_grid.md` |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |

@@ -126,6 +126,26 @@ def test_reference_scale_interpolates_ordinates_not_mass():
     assert not np.array_equal(scaled.pmf, source.scale_x(1.5, keep_dx=True).pmf)
 
 
+def test_reference_scale_negative_uses_same_grid_and_mirrors_ordinates():
+    source = Pmf1D(dx=0.1, st_idx=-2, pmf=np.array([0.05, 0.15, 0.5, 0.2, 0.1]))
+
+    positive = source.scale_x(
+        1.5, keep_dx=True, dx_ref=0.1, method="interpolate_ordinates",
+    )
+    negative = source.scale_x(
+        -1.5, keep_dx=True, dx_ref=0.1, method="interpolate_ordinates",
+    )
+
+    np.testing.assert_array_equal(negative.x, positive.x)
+    np.testing.assert_array_equal(negative.pmf, positive.pmf[::-1])
+
+    zero = source.scale_x(
+        0.0, keep_dx=True, dx_ref=0.1, method="interpolate_ordinates",
+    )
+    np.testing.assert_array_equal(zero.x, np.array([0.0]))
+    np.testing.assert_allclose(zero.pmf, np.array([1.0]), rtol=0.0, atol=1e-15)
+
+
 def test_fir_filter_uses_mass_deposit_not_scalar_resampling():
     source = Pmf1D(dx=0.1, st_idx=-2, pmf=np.array([0.1, 0.2, 0.4, 0.2, 0.1]))
     filtered = source.fir_filter(

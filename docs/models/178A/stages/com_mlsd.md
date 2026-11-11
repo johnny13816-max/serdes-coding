@@ -117,10 +117,11 @@ DC/Nyquist 不加倍。focused test 驗 `R_isi[0] = sigma_X² sum(h_ISI²)`、
 
 ### Eq. 178A-52／53：`p_j` recurrence
 
-`Pmf1D.scale_x(a, keep_dx=True)` 表示隨機變數 `Y=aX` 並將 probability mass
-投影回共用 PMF grid；PDF 的 `1/|a|` 正規化由該 utility 的 mass projection
-承擔。程式中 Eq. 52 的尺度是正的 `+b_1`；第 2 項起依 Eq. 53 加上
-`(1-b_1)` 倍的同一 `p_an`：
+`Pmf1D.scale_x(a, keep_dx=True)` 表示隨機變數 `Y=aX`，並由 ALG-004 選擇
+mass deposit 或 ordinate interpolation。兩種方法都保留共用 PMF spacing；
+`interpolate_ordinates` 的 output grid 只取決於 `abs(a)`，負值在同一 grid
+鏡射 ordinates。`mass_deposit` 才使用 ALG-002 placement method。程式中
+Eq. 52 的尺度是 `b_1`；第 2 項起依 Eq. 53 加上 `(1-b_1)` 倍的同一 `p_an`：
 
 ```python
 # com_model_178A.py::calculate_der_mlsd()
@@ -132,7 +133,7 @@ else:
     p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}")
 ```
 
-Eq. 52 的正負號已有非對稱 PMF test；Eq. 53 的 recurrence、每次 projection
+Eq. 52 的 signed scaling 已有非對稱 PMF test；Eq. 53 的 recurrence、每次 projection
 造成的 grid 誤差與 truncation policy 尚未完成數學 review。
 
 ### Eq. 178A-49 與 Eq. 178A-54 後文：`u_j`、`V_j`
@@ -310,9 +311,9 @@ The method requires pre-DTE `S_n`, `S_an`, `h_ISI`, and `H_rxffe` to share the c
 - evaluates one weighted detector-error contribution for each `j=1..trunc_len`;
 - returns the contribution vector `der_by_j` and its sum `DER_MLSD` without modifying either input.
 
-The intermediate PMF recurrence remains local to the function. The top-level flow stores only the contribution vector and total DER in the completed status. The Eq. 178A-52 positive scaling is covered by an asymmetric synthetic PMF; a symmetric fixed reference PMF alone cannot detect its sign.
+The intermediate PMF recurrence remains local to the function. The top-level flow stores only the contribution vector and total DER in the completed status. Eq. 178A-52 signed scaling is covered by an asymmetric synthetic PMF; a symmetric fixed reference PMF alone cannot detect its sign.
 
-This is the current implementation of the source-cited Eq. 178A-48 through Eq. 178A-53 DER flow. Eq. 178A-52's scaling sign has a focused check; the other DER details still require independent mathematical review.
+This is the current implementation of the source-cited Eq. 178A-48 through Eq. 178A-53 DER flow. Eq. 178A-52's scaling sign and ALG-004 signed-grid invariant have focused checks; the other DER details still require independent mathematical review.
 
 ## Final MLSD result
 

@@ -10,26 +10,27 @@ Generated at: 2026-11-11 Asia/Taipei
 Source branch: main
 Source revision: b417b8c; this snapshot is committed by the ALG-002 closure-state commit
 Active task: CP-BR ownership second review — ALG-004
-Current phase: ALG-002 and ALG-003 are Closed; ALG-004 source/consumer ownership review begins
+Current phase: ALG-002 and ALG-003 are Closed; ALG-004 implementation and all contract validation passed, integration pending
 Collaboration mode: Co-Build architecture review
 Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
 Completed: ALG-002 is Closed. L5 public Pmf1D.multi_dirac()/scale_x()/resample_dx()/fir_filter() is the confirmed target-grid projection owner set; private _project_to_grid() is a kernel/non-owner. Implementation b417b8c and authoritative documentation c804e3c are integrated. ALG-003 remains Closed.
-In progress: ALG-004 second ownership review. Current registry proposal is L5 Pmf1D.scale_x() for scalar-PMF scaling; production consumers and selector propagation still require source confirmation.
-Implemented change: ALG-002 removed full COMAlgorithmPolicyConfig forwarding from four model helpers in favor of concrete pmf_projection_method and independent pdf_to_pmf_method arguments.
+In progress: ALG-004 integration. L5 Pmf1D.scale_x() is the confirmed owner; Stage 7 _build_scaled_total_pdf_added_noise() and calculate_der_mlsd() are direct injectors.
+Implemented change: interpolate_ordinates now uses the same abs(scale) output grid for signed scale and mirrors ordinates for negative scale. Public signature, positive/zero behavior, mass_deposit, ALG-002 and FIR remain unchanged.
 Paused: NUM-006 remains paused. Prior ADC-only/global-PMF owner proposals remain undecided.
 Blocked: none.
-Next recommended action: map every ALG-004 production consumer and decide whether Pmf1D.scale_x() is the complete L5 owner or only one execution point.
-Next action owner: Codex performs read-only source/consumer review and presents required changes before implementation.
+Next recommended action: isolate/commit/push ALG-004, then reconcile closure state.
+Next action owner: Codex performs scoped integration and closure reconciliation.
 Post-review cleanup: after every second-review branch is complete, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
-Stop point: do not modify ALG-004 until its owner/scope conclusion is discussed or explicitly approved; do not resume NUM-006 until all second-review branches are complete.
+Stop point: do not mark ALG-004 Closed before fixed golden and traceable isolated integration; do not resume NUM-006 until all second-review branches are complete.
 Validation completed: ALG-002 focused 47 passed and fixed golden passed. ALG-003 focused 47 passed; Python 3.7 export validation passed; fixed SiCoPR golden 1 passed with existing MSE/COM_DFE/final-COM tolerances and all three digests passing. Initial ALG-003 focused run had 7 Temp setup errors; the identical suite passed with a dedicated percent-TEMP basetemp.
+ALG-004 focused PMF/MLSD/profile tests 49 passed with 2 subtests; Python 3.7 export validation passed; fixed SiCoPR golden 1 passed with existing MSE/COM_DFE/final-COM tolerances and all three digests passing.
 Evidence links: docs/architecture/documentation_contract.md;
                 docs/architecture/branch_behavior_contract.md;
                 docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/call_tree.md;
                 src/serdes_coding/utilities/pmf.py;
                 src/serdes_coding/models/com_model_178A.py
-Dirty-state summary: closure-state documentation only; ALG-002/ALG-003 implementations are integrated and no production-code change is pending.
+Dirty-state summary: ALG-004 utility/test/export/technical-doc changes only; no unrelated production change is pending.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成

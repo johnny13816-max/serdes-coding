@@ -71,7 +71,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-001` | approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
-| `ALG-004` | approved branch | Shared scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **目前登錄 L5** `Pmf1D.scale_x()` | 待二次審查 |
+| `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **二次審查已確認；integration pending** |
 | `ALG-006` | approved branch | Stage 1 out-of-measured extension | `alg.out_of_measured`：`cosine_decay`／`zero_padding` | `zero_padding` | **目前登錄 L5** `resample_tf()` | 待二次審查 |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：`continuous_tf`／`bilinear_iir` | `bilinear_iir` | **目前登錄 L3** `_realize_ctle_pulse()` | 待二次審查 |
 | `NUM-003` | approved branch | Stages 2／3／5／7 impairment record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **目前登錄 shared L3** `_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` | 待二次審查 |
@@ -100,7 +100,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-001` | terminated H21 的 missing-DC completion | source binding、measured-frequency boundary、out-of-measured extension、CTLE realization |
 | `ALG-002` | 已建立 PMF 投影至 target grid 的 placement method | source atoms、PDF discretization、scalar scaling semantics、retained mass |
 | `ALG-003` | Gaussian／uniform PDF 離散成 PMF 的方法 | Gaussian initial support 固定 ±8σ；target-grid projection 與 scalar-PMF scaling 保持獨立 |
-| `ALG-004` | scalar-PMF resampling/scaling 方法 | FIR tap construction；`mass_deposit` 使用 ALG-002 但不擁有它 |
+| `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
 | `ALG-006` | completed H21 在有效量測邊界外的延伸 | `S_ch`、`S_all`、boundary-in response、case frequency limit |
 | `ALG-007` | path pulse 與 victim `pulse_no_txffe` 的 CTLE realization | TX FFE、continuous `H_all`、Stage 3 sampling policy |
 | `NUM-003` | shared PSD/correlation record 的 full/truncated length | full responses、phase selection、channel grids |
@@ -165,7 +165,10 @@ COM model
    │  └─ Pmf1D.multi_dirac()/scale_x()/resample_dx()/fir_filter() [ALG-002 owner set]
    │     └─ Pmf1D._project_to_grid()                         [private kernel; non-owner]
    ├─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
-   └─ Pmf1D.scale_x() scalar-PMF scaling                     [ALG-004 current owner; re-review pending]
+   └─ Stage 7 scalar-PMF scaling
+      ├─ _build_scaled_total_pdf_added_noise()               [ALG-004 direct injector]
+      ├─ calculate_der_mlsd()                                [ALG-004 direct injector]
+      └─ Pmf1D.scale_x()                                     [ALG-004 L5 owner]
 ```
 
 當二次審查改變 owner 時，只修改本樹與上方分類表的正式結論；stage 文件只在
@@ -251,6 +254,16 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | Code convergence | Gaussian `pmf_sample` extent 從 `2 * n_sigma` 收斂為 `n_sigma`；178A 的 `bin_integral`／`pmf_sample` 都使用固定 ±8σ initial support。Uniform distribution-specific rule 不變。 |
 | Preserved boundary | ALG-002 projection、ALG-004 scaling、NUM-006 retained mass、93A default `bin_integral`、config/workbook schema 均不變。 |
 | Validation | Focused `47 passed`；Python 3.7 export validation passed；固定 SiCoPR golden `1 passed`，既有 MSE／COM_DFE／final-COM tolerance 與三個 intermediate digests 全數通過。 |
+
+### `ALG-004` 二次審查證據
+
+| Item | Record |
+|---|---|
+| Status | `Implemented / validation passed — integration pending`。使用者核准 signed-scale contract；未完成 isolated integration 前不得標記 `Closed`。 |
+| Owner / consumers | L5 public `Pmf1D.scale_x()` 是 sole semantic owner；Stage 7 `_build_scaled_total_pdf_added_noise()` 與 `calculate_der_mlsd()` 只注入 concrete `pmf_scaling_method`／`pmf_projection_method`。 |
+| Code convergence | `interpolate_ordinates` 對 `+a`／`-a` 使用相同 `abs(a)` output grid；負值只反轉 ordinates。Public signature、positive-scale result 與 zero-scale behavior 不變。 |
+| Preserved boundary | `mass_deposit` 才委派 ALG-002 placement；`interpolate_ordinates` 不讀 projection choice。`fir_filter()` 固定使用 `mass_deposit`，不是 ALG-004 consumer。ALG-003、grid、retained mass、config/profile 與 93A 不變。 |
+| Validation | Focused PMF／MLSD／profile tests `49 passed, 2 subtests passed`；Python 3.7 export validation passed；fixed SiCoPR golden `1 passed`，既有 MSE／COM_DFE／final-COM tolerance 與三個 intermediate digests 全數通過。 |
 
 ## 實作入口與驗證證據
 

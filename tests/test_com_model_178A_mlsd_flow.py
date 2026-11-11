@@ -75,6 +75,25 @@ class TestMLSDFlow178A(unittest.TestCase):
         self.assertAlmostEqual(der, expected, places=12)
         self.assertAlmostEqual(terms[0], expected, places=12)
 
+    def test_der_block_accepts_negative_feedback_with_ordinate_scaling(self) -> None:
+        p_an = Pmf1D(
+            dx=0.1,
+            st_idx=-2,
+            pmf=np.array([0.05, 0.15, 0.5, 0.2, 0.1]),
+        )
+        der, terms = calculate_der_mlsd(
+            p_an,
+            np.array([1.0, 0.0]),
+            L=4,
+            As=0.1,
+            b_lim_1=-0.5,
+            trunc_len=1,
+            pmf_scaling_method="interpolate_ordinates",
+        )
+
+        self.assertAlmostEqual(der, 1.0 / 12.0, places=15)
+        np.testing.assert_allclose(terms, np.array([der]), rtol=0.0, atol=1e-15)
+
 
 if __name__ == "__main__":
     unittest.main()
