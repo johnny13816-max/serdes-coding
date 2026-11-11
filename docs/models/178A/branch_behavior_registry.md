@@ -73,7 +73,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
-| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：`continuous_tf`／`bilinear_iir` | `bilinear_iir` | **目前登錄 L3** `_realize_ctle_pulse()` | 待二次審查 |
+| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **二次審查 owner 已確認；待文件／commit evidence 後關閉** |
 | `NUM-003` | approved branch | Stages 2／3／5／7 impairment record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **目前登錄 shared L3** `_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` | 待二次審查 |
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **目前登錄 L3** `calculate_pre_dte_imp()` phase-scheduling block | 待二次審查 |
 | `ALG-008` | approved branch | Stage 3 per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **目前登錄 L3** `calculate_pre_dte_imp_at_pos()` clipping block | 待二次審查 |
@@ -102,7 +102,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-003` | Gaussian／uniform PDF 離散成 PMF 的方法 | Gaussian initial support 固定 ±8σ；target-grid projection 與 scalar-PMF scaling 保持獨立 |
 | `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
 | `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
-| `ALG-007` | path pulse 與 victim `pulse_no_txffe` 的 CTLE realization | TX FFE、continuous `H_all`、Stage 3 sampling policy |
+| `ALG-007` | CTLE pulse method-specific shared state，以及 victim／NEXT／FEXT `pulse` 與 victim `pulse_no_txffe` 的完整 CTLE realization | TX FFE、continuous `H_all`、ALG-006 transfer extension、Stage 3 TX-noise sampling policy |
 | `NUM-003` | shared PSD/correlation record 的 full/truncated length | full responses、phase selection、channel grids |
 | `SRCH-001` | 要評估的 phase schedule | 每個 visited phase 使用的 Stage 4 solver 與公式 |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
@@ -131,15 +131,21 @@ review 尚未完成。Retired／fixed non-branches 不放入本樹，統一列�
 COM model
 ├─ L0 Stage 1 — path construction
 │  └─ L2 path construction function set
+│     ├─ _build_shared_path()                                [ALG-007 config resolver / shared coordinator]
+│     │  └─ CTLE pulse-realization block                     [ALG-007 L3 owner: shared setup]
+│     │     └─ _prepare_ctle_pulse_realization()             [ALG-007 L4 setup decision]
+│     │        ├─ continuous_tf → ctle_iir=None
+│     │        └─ bilinear_iir → COMBilinearCTLE
 │     └─ _build_paths()                                      [ALG-001/006 config resolver / fanout]
 │        └─ _build_path() × victim / NEXT / FEXT
 │           ├─ SparamModel.completed_voltage_transfer_function() [ALG-001 L5 owner]
 │           ├─ LinkSegment.from_tf()                         [ALG-006 analysis-grid direct injector]
 │           │  └─ resample_tf()                              [ALG-006 L5 owner]
-│           └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 owner]
-│              ├─ continuous_tf                              [uses analysis-grid H21; ALG-006 upstream-folded]
-│              └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
-│                 └─ resample_tf()                           [same ALG-006 L5 owner]
+│           └─ CTLE pulse-realization block                  [same ALG-007 L3 owner: per-path]
+│              └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 L4 execution decision]
+│                 ├─ continuous_tf                           [uses analysis-grid H21; ALG-006 upstream-folded]
+│                 └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
+│                    └─ resample_tf()                        [same ALG-006 L5 owner]
 ├─ L0 Stages 2／3／5／7 — shared impairment record
 │  └─ _realize_eq_ch_imp_record() / _build_eq_ch_imp_psd()   [NUM-003 shared L3 owner]
 ├─ L0 Stage 3 — sampling phase and ADC input

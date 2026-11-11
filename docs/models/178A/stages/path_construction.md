@@ -87,9 +87,8 @@ COM                                            [Root: model]
         │   │   └── _build_H_ctf()             [L4: continuous CTF]
         │   ├── RX package construction         [L3]
         │   │   └── _build_rxpkg()             [L4: RX package composite]
-        │   └── CTLE pulse realization          [L3: ALG-007 owner]
-        │       ├── _prepare_ctle_pulse_realization() [L4: shared setup]
-        │       └── _realize_ctle_pulse()             [L4: sole pulse owner]
+        │   └── CTLE pulse realization          [L3: ALG-007 owner, shared-setup phase]
+        │       └── _prepare_ctle_pulse_realization() [L4: shared setup decision]
         └── _build_paths()                     [L2: path-specific construction]
             └── _build_path() × victim/NEXT/FEXT [structural path coordinator]
                 ├── TX package construction     [L3]
@@ -103,14 +102,15 @@ COM                                            [Root: model]
                 │       └── resample_tf()                  [same L5 owner]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
-                ├── _realize_ctle_pulse() × pulse / victim pulse_no_txffe
-                │                                  [L4: ALG-007 execution]
+                ├── CTLE pulse realization      [same L3 ALG-007 owner, per-path phase]
+                │   └── _realize_ctle_pulse() × pulse / victim pulse_no_txffe
+                │                                      [L4: execution decision]
                 └── COMPath()                  [L4: stage-output record]
 ```
 
 ### ALG-007 implementation mapping
 
-`_build_shared_path()` resolves `policy.ctle_pulse_realization` once and stores
+`_build_shared_path()` resolves `cfg.alg.ctle_pulse_realization` once and stores
 the resolved value plus method-specific shared state in `COMSharedPath`.
 `_build_path()` never receives or selects a realization method; it delegates
 each complete pulse to `_realize_ctle_pulse()`.
@@ -119,9 +119,10 @@ The L3 `CTLE pulse realization` block owns one selector, shared realization
 state, and the CTLE realization contract. Its L4
 `_prepare_ctle_pulse_realization()` creates method-specific shared data once;
 its L4 `_realize_ctle_pulse()` accepts the path-specific pre-CTLE context and
-returns one complete pulse. It is the only function that executes the two
-realization formulae; no lower helper receives the ALG-007 selector or returns a
-domain-selection token. `H_all` remains the common continuous VTF for reporting
+returns one complete pulse. The two L4 functions are the block's concrete setup
+and execution decision points; neither is the complete semantic owner alone.
+No lower helper receives the ALG-007 selector or returns a domain-selection
+token. `H_all` remains the common continuous VTF for reporting
 and is outside ALG-007 ownership.
 
 ### ALG-007 interface contract
@@ -143,9 +144,9 @@ _prepare_ctle_pulse_realization(
 _realize_ctle_pulse(
     shared,
     H_pre,
-    S_all,
-    channel_cfg,
-    filter_cfg,
+    H_21_measured_freqs,
+    H_21_measured_tf,
+    ft_cfg,
     kind,
     X,
     amplitude,
@@ -158,7 +159,7 @@ _realize_ctle_pulse(
 | Boundary | Inputs | Output / responsibility |
 |---|---|---|
 | L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; `bilinear_iir` creates the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
-| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X`; whether TX FFE is included | Sole ALG-007 execution owner. It performs any required measured-grid reconstruction, CTLE formula and one-UI pulse application, then returns one stored full-rate pulse. |
+| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X`; whether TX FFE is included | Per-path execution decision within the L3 ALG-007 owner block. It performs any required measured-grid reconstruction, CTLE formula and one-UI pulse application, then returns one stored full-rate pulse. |
 
 The call site must not pass an ALG-007 selector into
 `_realize_ctle_pulse()`; CTLE method selection is complete in shared state
@@ -351,8 +352,10 @@ pre-CTLE response + continuous H_ctf
 
 `ctle_pulse_realization` 控制完整的 pre-CTLE-to-pulse realization。
 TX FFE 在上游依 path kind 選定並完成串接，不屬於 CTLE 分支。
-`_realize_ctle_pulse()` 是 CTLE method selection 與完整 pulse formation 的
-唯一 execution owner；`_apply_rectangular_unit_pulse()` 只是無 policy 的數值 helper。
+`_realize_ctle_pulse()` 是 L3 owner block 的 per-path execution decision point，
+負責 method-specific pulse formation；shared setup decision 已由同一 block 的
+`_prepare_ctle_pulse_realization()` 完成。任一 L4 function 都不是單獨的完整
+semantic owner；`_apply_rectangular_unit_pulse()` 只是無 policy 的數值 helper。
 `continuous_tf` 直接在 analysis grid 串接 continuous CTF 與 unit-pulse TF。
 `bilinear_iir` 則由 `_evaluate_pre_ctle_on_measured_grid()` 直接接收 ALG-001
 已完成的 scalar `H_21` 並建立 measured-domain composite TF，不再從 `S_all`
