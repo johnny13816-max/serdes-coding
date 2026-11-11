@@ -5,7 +5,8 @@
 ## 契約
 
 channel／pulse 仍使用 `COMConfig.link`。目前正式名稱為
-`COMConfig.policy.eq_ch_imp_len` 與 conditional parameter `num_trunc_ui`：
+`COMConfig.num.eq_ch_imp_len` 與 conditional parameter
+`COMConfig.num.num_trunc_ui`：
 `full` 使用完整 one-sample/UI impairment response；`truncated` 在 PSD 前以
 明示 UI 長度建立共同 record。所有 `S_rn/S_xn/S_tn/S_jn/S_qn` 必須在同一
 PSD grid 相加，不能只替 `S_xn` 特判或修改 `LinkConfig`。
@@ -24,8 +25,9 @@ waveform、`h_dsamp` 與 status 內 full equivalent-channel responses 不變。
   從 project template 自動產生該列與其預設空值；Akinwale case 明示保存 4096。
 - `sicopr_reference_v1` 展開為 `truncated/4096`。model 不讀 profile selector。
 
-Python 直接建立 `COMConfig` 時，`policy` 的 `default_factory=COMPolicyConfig` 產生
-`full / num_trunc_ui=None`。由 template 建立的新 workbook 自動保留同一個
+Python 直接建立 `COMConfig` 時，`num` 的
+`default_factory=COMNumericalControlConfig` 產生 `full / num_trunc_ui=None`。
+由 template 建立的新 workbook 自動保留同一個
 空值 default；converter 將該列分類為 optional project policy，而非 Ad Hoc
 mapping。這三個入口因此具有同一個一般模式 default。
 
@@ -49,6 +51,12 @@ mapping。這三個入口因此具有同一個一般模式 default。
 `%TEMP%/serdes-tc022-20261013/`。
 
 ## NUM-003 closure evidence (legacy B-005)
+
+2026-11-12 二次 ownership review 確認 semantic owner 是跨 Stage 2／3／5／7
+共用的 L3 impairment-record realization block。實作該 block 的 L4 functions 為
+`_resolve_eq_ch_imp_record_cfg()`、`_resolve_post_ffe_imp_record_cfg()`、
+`_realize_eq_ch_imp_record()` 與 `_build_eq_ch_imp_psd()`。本次只修正 ownership
+文件；production behavior、config 與既有 validation evidence 均未改變。
 
 - XT phase selection 改為一律先讀完整 oversampled response；SiCoPR 五條 XT
   phase 在新舊順序下相同：`23, 7, 6, 31, 0`。

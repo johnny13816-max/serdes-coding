@@ -16,7 +16,9 @@ Gaussian `pmf_sample` 收斂至固定 ±8σ support。ALG-002 也已完成 owner
 convergence、驗證與 isolated integration。ALG-004 signed-scale contract、實作、
 驗證與 remote integration 已完成並關閉；ALG-006 也已完成二次 ownership
 審查，確認 `resample_tf()` 為 L5 owner。ALG-007 也已完成二次審查，確認
-L3 CTLE pulse-realization functional block ownership。二次審查移至 NUM-003。NUM-006
+L3 CTLE pulse-realization functional block ownership。NUM-003 也已完成二次審查，
+確認 shared L3 impairment-record realization block ownership；二次審查移至
+SRCH-001。NUM-006
 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
@@ -31,8 +33,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — NUM-003** | ALG-007 已關閉；semantic owner 是 L3 CTLE pulse-realization functional block，L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` 分別負責 shared setup 與 per-path execution decision | 重新確認 NUM-003 impairment-record length 的 shared owner、consumers 與 branch parameters |
-| NUM-003（legacy B-005）— Eq-channel impairment length | **一次審查 Closed 2026-11-01；二次審查 Active** | Shared L3 供 Stage 2／3／5／7；`full/truncated`；workbook 獨立控制 | 重新核對 shared owner、所有 production consumers 與 `num_trunc_ui` parameter boundary |
+| CP-BR — 178A branch ownership second review | **Active — SRCH-001** | NUM-003 已關閉；semantic owner 是跨 Stage 2／3／5／7 共用的 L3 impairment-record realization block，四個 L4 functions 分別負責 pre/post-FFE grid resolution、record realization 與 PSD facade | 重新確認 SRCH-001 sampling-phase schedule 的 owner、consumers 與 branch parameters |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
@@ -51,7 +52,7 @@ reporting、C2M migration 或 release 工作。
 | COMPAT-PY37-001 — Python 3.7 utility export | `f774487` |
 | UTIL-SNP-002 — synthetic S4P target semantics | `94e5613` |
 | 178A P3 — Workbook/config interface review | current SiCoPR scope complete；evidence in `docs/models/178A/design_review.md` |
-| NUM-003（legacy B-005）— Eq-channel impairment length | SiCoPR golden DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB`；`187 passed`, `1 deselected`, `2 subtests passed` |
+| NUM-003（legacy B-005）— Eq-channel impairment length | **二次 ownership review Closed 2026-11-12**。L3 impairment-record realization block 是 semantic owner；L4 `_resolve_eq_ch_imp_record_cfg()`／`_resolve_post_ffe_imp_record_cfg()`／`_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` 實作 `full` 或固定 `num_trunc_ui` record。Stage 4 `H_rxffe` 只綁定 concrete PSD grid，solver 不屬此 branch。本次 production code 未變；沿用既有 SiCoPR golden DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 與 `187 passed`, `1 deselected`, `2 subtests passed` evidence。 |
 | ALG-002 — Discrete-amplitude PMF projection | **Closed 2026-11-11**。L5 public `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` owner set；private `_project_to_grid()` 是 kernel/non-owner。四個 model helpers 只接收 concrete methods。Focused `47 passed`、Python 3.7 export validation passed、固定 SiCoPR golden `1 passed`，DFE/final COM 與 intermediate digests 不變。Implementation `b417b8c`、權威文件 `c804e3c`。 |
 | ALG-003 — PDF→PMF discretization | **Closed 2026-11-11**。L5 `Pmf1D.gaussian()`／`uniform()` owner set；model helpers 只注入 concrete method。TC-025 將 `pmf_sample` Gaussian support 收斂至固定 ±8σ。Focused `47 passed`、Python 3.7 export validation passed、固定 SiCoPR golden `1 passed`，既有 tolerances 與三個 digests 全數通過。Implementation `e65f644`、權威文件 `c804e3c`。 |
 | ALG-004 — Scalar-PMF scaling | **Closed 2026-11-11**。L5 `Pmf1D.scale_x()` sole owner；Stage 7 `_build_scaled_total_pdf_added_noise()`／`calculate_der_mlsd()` 是 direct injectors。`interpolate_ordinates` 支援 signed scale 並保持同一 `abs(scale)` output grid；FIR 固定 `mass_deposit`，不屬 ALG-004。Focused `49 passed, 2 subtests passed`、Python 3.7 export passed、固定 golden `1 passed`。Implementation／docs `114e7bf`。 |

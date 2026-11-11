@@ -6,31 +6,32 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-11 Asia/Taipei
+Generated at: 2026-11-12 Asia/Taipei
 Source branch: main
-Source revision: 114e7bf; this snapshot is committed by the ALG-004 closure-state commit
-Active task: CP-BR ownership second review — ALG-006
-Current phase: ALG-002, ALG-003 and ALG-004 are Closed; ALG-006 source/consumer ownership review begins
+Source revision: 82636b8 plus isolated future-idea commit a9ab622; this snapshot is committed by the NUM-003 closure commit
+Active task: CP-BR ownership second review — SRCH-001
+Current phase: ALG-002／003／004／006／007 and NUM-003 are Closed; SRCH-001 source/consumer ownership review begins
 Collaboration mode: Co-Build architecture review
 Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
-Completed: ALG-004 is Closed. L5 Pmf1D.scale_x() is the confirmed owner; Stage 7 _build_scaled_total_pdf_added_noise() and calculate_der_mlsd() are direct injectors. Signed interpolate_ordinates uses one abs(scale) grid and mirrors negative ordinates. Implementation/docs 114e7bf is pushed. ALG-002 and ALG-003 remain Closed.
-In progress: ALG-006 second ownership review. Current registry proposal is L5 resample_tf(); analysis-grid H21, bilinear finite records and victim TX-noise consumers require source confirmation.
-Implemented change: none pending for ALG-006.
+Completed: NUM-003 second review confirms the shared L3 impairment-record realization block as semantic owner. Its L4 functions are _resolve_eq_ch_imp_record_cfg(), _resolve_post_ffe_imp_record_cfg(), _realize_eq_ch_imp_record(), and _build_eq_ch_imp_psd().
+NUM-003 boundary: full preserves the complete source record for PSD construction; truncated crops or zero-pads to num_trunc_ui. It does not change Stage 1 responses, XT phase selection, RX FFE solve, or ALG-011 response realization/grid.
+Implemented change: NUM-003 production behavior and config unchanged; ownership documentation only.
+Independent future idea: adaptive Stage 1 short/long response-grid classification is recorded in future_ideas.md and isolated in commit a9ab622. It has no branch ID and must not be coupled to NUM-003.
+In progress: SRCH-001 second ownership review has not started source mapping.
 Paused: NUM-006 remains paused. Prior ADC-only/global-PMF owner proposals remain undecided.
 Blocked: none.
-Next recommended action: map all ALG-006 production consumers and distinguish out-of-measured policy ownership from case frequency-limit input.
+Next recommended action: map SRCH-001 each_phase/coarse_fine selector resolution, visited-phase generation, Stage 4 consumption, and profile/workbook parameters.
 Next action owner: Codex performs read-only source/consumer review and presents required changes before implementation.
 Post-review cleanup: after every second-review branch is complete, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
-Stop point: do not modify ALG-006 until its owner/scope conclusion is discussed or explicitly approved; do not resume NUM-006 until all second-review branches are complete.
-Validation completed: ALG-002 focused 47 passed and fixed golden passed. ALG-003 focused 47 passed; Python 3.7 export validation passed; fixed SiCoPR golden 1 passed with existing MSE/COM_DFE/final-COM tolerances and all three digests passing. Initial ALG-003 focused run had 7 Temp setup errors; the identical suite passed with a dedicated percent-TEMP basetemp.
-ALG-004 focused PMF/MLSD/profile tests 49 passed with 2 subtests; Python 3.7 export validation passed; fixed SiCoPR golden 1 passed with existing MSE/COM_DFE/final-COM tolerances and all three digests passing.
-Evidence links: docs/architecture/documentation_contract.md;
-                docs/architecture/branch_behavior_contract.md;
-                docs/models/178A/branch_behavior_registry.md;
+Stop point: do not modify SRCH-001 until its owner/scope conclusion is discussed or explicitly approved; do not resume NUM-006 until all second-review branches are complete.
+NUM-003 evidence: existing policy tests cover full identity, 4096-UI truncation, short-record zero-padding, conditional parameter validation, and full/truncated ALG-011 grid interaction. Prior fixed evidence remains 187 passed, 1 deselected, 2 subtests passed; production code was unchanged, so no baseline rerun was required.
+Evidence links: docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/call_tree.md;
-                src/serdes_coding/utilities/pmf.py;
+                docs/models/178A/stages/pre_dte.md;
+                docs/models/178A/stages/post_ffe.md;
+                docs/planning/tc022_mmse_noise_grid.md;
                 src/serdes_coding/models/com_model_178A.py
-Dirty-state summary: closure-state documentation only; ALG-004 implementation is integrated and no production-code change is pending.
+Dirty-state summary: NUM-003 closure documentation only; no production-code change is pending.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
