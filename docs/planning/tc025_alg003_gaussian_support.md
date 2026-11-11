@@ -1,6 +1,6 @@
 # TC-025 — ALG-003 Gaussian `pmf_sample` 固定 ±8σ
 
-狀態：**Implemented / validation passed — integration pending**
+狀態：**Closed 2026-11-11**
 
 批准：使用者於 2026-11-11 明確核准 TC-025
 權威設計：[178A Branch Registry](../models/178A/branch_behavior_registry.md)
@@ -37,8 +37,10 @@ cfg.alg.pdf_to_pmf_method
 
 ## Integration
 
-Protected behavior 必須使用獨立 commit。現有工作樹包含 ALG-002 與文件收斂的
-未提交修改；只提交可安全隔離的 TC-025 hunks，否則維持 integration pending。
+Protected implementation 已由 isolated commit `e65f644` 整合並推送；Branch
+Contract、唯一 Registry、config/stage references 的權威文件更新已由 `c804e3c`
+隔離提交。Closure audit 確認 selector、所有 production callers、L5 owner set、
+固定 ±8σ invariant 與 validation evidence 一致；closure-state commit 同步目前狀態。
 本文件在整輪 branch review 後依 handoff cleanup 決策移除，不作第二份權威設計。
 
 ## Validation result

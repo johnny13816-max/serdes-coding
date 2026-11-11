@@ -6,34 +6,31 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-10 Asia/Taipei
+Generated at: 2026-11-11 Asia/Taipei
 Source branch: main
-Source revision: local main after the CFG-178A A--F integration commit; not pushed
-Active task: CP-BR — paused before NUM-006
-Current phase: CFG-178A closed; waiting to resume NUM-006 boundary review
+Source revision: c804e3c; this snapshot is committed by the ALG-003 closure-state commit
+Active task: CP-BR integration — ALG-002
+Current phase: ALG-003 second review is Closed; ALG-002 implementation/validation remains integration pending
 Collaboration mode: Co-Build architecture review
-Approved boundary: one COM instance receives one resolved COMConfig; adapter selects run mode before construction; search orchestration remains outside COM; L3 owners read domain-qualified config directly.
-Completed: ALG-009 retirement and prior CP-BR closures remain unchanged.
-In progress: none; CFG-178A integration is complete.
-Paused: NUM-006; prior ADC-only and global-PMF owner proposals are not accepted decisions.
+Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
+Completed: ALG-003 is Closed. L5 Pmf1D.gaussian()/uniform() is the confirmed owner set; Gaussian support is an independent fixed ±8 sigma invariant. Protected implementation e65f644 is pushed and authoritative documentation c804e3c is committed.
+In progress: ALG-002 integration. Its L5 public Pmf1D target-grid operation owner set and focused/golden evidence are confirmed; code/test remain uncommitted.
+Implemented change: TC-025 changed Gaussian pmf_sample extent from 2*n_sigma to n_sigma and rebuilt the Python 3.7 export. ALG-002 removed full COMAlgorithmPolicyConfig forwarding from four model helpers in favor of concrete methods.
+Paused: NUM-006 remains paused. Prior ADC-only/global-PMF owner proposals remain undecided.
 Blocked: none.
-Next recommended action: resume NUM-006 from production-consumer mapping and define its true owner boundary before any implementation.
-Next action owner: user starts or approves the resumed NUM-006 discussion.
-Stop point: do not implement or rename NUM-006 before its consumer scope and owner are reviewed.
-Evidence links: docs/architecture/configuration_architecture.md;
+Next recommended action: isolate and integrate the validated ALG-002 code/test boundary; then begin ALG-004 second review.
+Next action owner: Codex performs scoped ALG-002 diff/staging and closure reconciliation.
+Post-review cleanup: after every second-review branch is complete, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
+Stop point: do not mark ALG-002 Closed before traceable isolated integration; do not resume NUM-006 until all second-review branches are complete.
+Validation completed: ALG-002 focused 47 passed and fixed golden passed. ALG-003 focused 47 passed; Python 3.7 export validation passed; fixed SiCoPR golden 1 passed with existing MSE/COM_DFE/final-COM tolerances and all three digests passing. Initial ALG-003 focused run had 7 Temp setup errors; the identical suite passed with a dedicated percent-TEMP basetemp.
+Evidence links: docs/architecture/documentation_contract.md;
                 docs/architecture/branch_behavior_contract.md;
-                docs/planning/comconfig_domain_migration.md;
-                docs/models/178A/config_tree.md
-Dirty-state summary: CFG-178A A--F is integrated as one local commit and the worktree is expected clean after this handoff update is amended. F removed runtime aliases and the converter draft `group` vocabulary, moved profile/override metadata out of `cfg.alg` into export-only adapter resolution, aligned split-search script/workflow/GUI paths, and revised architecture tests for intentional 178A source/path/search ownership. Eight populated cases load in all modes; partial-search smoke passed; focused integration `136 passed`, `3 deselected`, `2 subtests passed`; external-temp provenance `2 passed`; Python 3.7 validator and compileall passed. The three deselected converter tests require absent local-only Ad Hoc workbooks. Fixed SiCoPR golden `1 passed` with MSE `0.0061912610245255335`, COM_DFE `1.5247607834259893 dB`, final COM `2.895898684873246 dB`, and frozen digests unchanged. Formulas, ranking and NUM-006 remain unchanged.
+                docs/models/178A/branch_behavior_registry.md;
+                docs/models/178A/call_tree.md;
+                src/serdes_coding/utilities/pmf.py;
+                src/serdes_coding/models/com_model_178A.py
+Dirty-state summary: only ALG-002 model-helper code/test changes remain uncommitted; ALG-003 implementation and authoritative documentation are integrated.
 ```
-
-ALG-009 closure evidence: `_build_psd_adc_qn()` 固定直接執行 exact PMF；
-`pre_dte_pmf_method` 已從 runtime config 與 tracked workbook 移除。Legacy
-`pmf_exact` row 可讀，`gaussian_approx` 明確拒絕。Focused tests `45 passed`；
-fixed SiCoPR golden `1 passed`，pre-DTE `V_qc=0.04162 V`、
-`delta=0.0013212698412698415 V`、MSE `0.0061912610245255335`、
-`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。
-Implementation `5dd16f8` 已推送至 `origin/main`。
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成
 v1.0 release claim。

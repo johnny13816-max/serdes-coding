@@ -70,7 +70,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 |---|---|---|---|---|---|---|
 | `ALG-001` | approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **二次審查已確認；integration pending** |
-| `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **二次審查已確認；closure audit pending** |
+| `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | Shared scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **目前登錄 L5** `Pmf1D.scale_x()` | 待二次審查 |
 | `ALG-006` | approved branch | Stage 1 out-of-measured extension | `alg.out_of_measured`：`cosine_decay`／`zero_padding` | `zero_padding` | **目前登錄 L5** `resample_tf()` | 待二次審查 |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：`continuous_tf`／`bilinear_iir` | `bilinear_iir` | **目前登錄 L3** `_realize_ctle_pulse()` | 待二次審查 |
@@ -246,7 +246,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 
 | Item | Record |
 |---|---|
-| Status | Protected implementation 已以 isolated commit `e65f644` 整合並推送；本次先整合權威文件，完成文件／owner evidence closure audit 後才標記 `Closed`。 |
+| Status | **Closed 2026-11-11**。Protected implementation `e65f644` 已整合並推送；權威文件 commit `c804e3c` 已建立；本 closure-state commit 同步 Registry、active state、handoff 與 TC-025 record。 |
 | Owner | L5 public `Pmf1D.gaussian()`／`uniform()` constructor set；model helpers 只注入 concrete `pdf_to_pmf_method`，不保存 policy。 |
 | Code convergence | Gaussian `pmf_sample` extent 從 `2 * n_sigma` 收斂為 `n_sigma`；178A 的 `bin_integral`／`pmf_sample` 都使用固定 ±8σ initial support。Uniform distribution-specific rule 不變。 |
 | Preserved boundary | ALG-002 projection、ALG-004 scaling、NUM-006 retained mass、93A default `bin_integral`、config/workbook schema 均不變。 |
