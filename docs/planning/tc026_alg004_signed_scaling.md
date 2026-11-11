@@ -1,6 +1,6 @@
 # TC-026 — ALG-004 signed scalar-PMF scaling
 
-狀態：**Implemented / validation passed — integration pending**
+狀態：**Closed 2026-11-11**
 
 批准：使用者於 2026-11-11 明確核准 ALG-004 change contract
 
@@ -37,3 +37,5 @@ config schema/default、reference profile、93A、MLSD equations、golden 或 to
 - Python 3.7 standalone export validation：passed。
 - Fixed SiCoPR golden：`1 passed`；既有 MSE、COM_DFE、final COM tolerances 與
   三個 frozen intermediate digests 全數通過，未修改 golden。
+- Isolated integration：implementation／test／export／technical docs commit
+  `114e7bf` 已推送至 `origin/main`。

@@ -71,7 +71,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-001` | approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
-| `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **二次審查已確認；integration pending** |
+| `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 | `ALG-006` | approved branch | Stage 1 out-of-measured extension | `alg.out_of_measured`：`cosine_decay`／`zero_padding` | `zero_padding` | **目前登錄 L5** `resample_tf()` | 待二次審查 |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：`continuous_tf`／`bilinear_iir` | `bilinear_iir` | **目前登錄 L3** `_realize_ctle_pulse()` | 待二次審查 |
 | `NUM-003` | approved branch | Stages 2／3／5／7 impairment record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **目前登錄 shared L3** `_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` | 待二次審查 |
@@ -259,7 +259,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 
 | Item | Record |
 |---|---|
-| Status | `Implemented / validation passed — integration pending`。使用者核准 signed-scale contract；未完成 isolated integration 前不得標記 `Closed`。 |
+| Status | **Closed 2026-11-11**。使用者核准 signed-scale contract；implementation／test／export／technical docs 已由 isolated commit `114e7bf` 整合並推送。 |
 | Owner / consumers | L5 public `Pmf1D.scale_x()` 是 sole semantic owner；Stage 7 `_build_scaled_total_pdf_added_noise()` 與 `calculate_der_mlsd()` 只注入 concrete `pmf_scaling_method`／`pmf_projection_method`。 |
 | Code convergence | `interpolate_ordinates` 對 `+a`／`-a` 使用相同 `abs(a)` output grid；負值只反轉 ordinates。Public signature、positive-scale result 與 zero-scale behavior 不變。 |
 | Preserved boundary | `mass_deposit` 才委派 ALG-002 placement；`interpolate_ordinates` 不讀 projection choice。`fir_filter()` 固定使用 `mass_deposit`，不是 ALG-004 consumer。ALG-003、grid、retained mass、config/profile 與 93A 不變。 |
