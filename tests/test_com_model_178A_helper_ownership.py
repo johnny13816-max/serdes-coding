@@ -1,6 +1,7 @@
 """Numerical ownership boundary for the final 178A-local helper migration."""
 
 import hashlib
+import inspect
 
 import numpy as np
 
@@ -20,6 +21,21 @@ def _pmf_config() -> COMPMFRuntimeConfig:
 def _quantized_digest(values: np.ndarray) -> str:
     frozen = np.ascontiguousarray(np.round(np.asarray(values, dtype=float), 12))
     return hashlib.sha256(frozen.tobytes()).hexdigest()
+
+
+def test_pmf_helpers_receive_concrete_methods_not_algorithm_config() -> None:
+    helpers = (
+        model._calculate_V_qc,
+        model._build_psd_adc_qn,
+        model._build_adc_input_pmf_exact,
+        model._reconstruct_final_vqc_sicopr,
+    )
+
+    for helper in helpers:
+        parameters = inspect.signature(helper).parameters
+        assert "pmf_methods" not in parameters
+        assert parameters["pmf_projection_method"].default == "linear"
+        assert parameters["pdf_to_pmf_method"].default == "bin_integral"
 
 
 def test_178a_owns_crosstalk_worst_phase_search() -> None:

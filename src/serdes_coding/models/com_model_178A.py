@@ -307,7 +307,7 @@ def _calculate_V_qc(
     pmf_cfg: COMPMFRuntimeConfig,
     *,
     cdf_tail: Optional[float] = None,
-    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
+    pmf_projection_method: Literal["linear", "nearest"] = "linear",
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the exact ADC-input PMF chain and resolve V_qc from p_sn."""
@@ -315,7 +315,7 @@ def _calculate_V_qc(
         p_sig,
         h_dsamp,
         pmf_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="Noiseless signal",
     )
 
@@ -354,13 +354,13 @@ def _build_psd_adc_qn(
     link_cfg: LinkConfig,
     *,
     cdf_tail: Optional[float] = None,
-    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
+    pmf_projection_method: Literal["linear", "nearest"] = "linear",
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[SampledPSD, COMAdcInputPMF]:
 
     adc_input_pmf = _calculate_V_qc(
         p_sig, h_dsamp, sigma_ga, P_qc, pmf_cfg, cdf_tail=cdf_tail,
-        pmf_methods=pmf_methods,
+        pmf_projection_method=pmf_projection_method,
         pdf_to_pmf_method=pdf_to_pmf_method,
     )
     V_qc = adc_input_pmf.V_qc
@@ -831,7 +831,7 @@ def _build_adc_input_pmf_exact(
     N_qb: int,
     pmf_cfg: COMPMFRuntimeConfig,
     *,
-    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
+    pmf_projection_method: Literal["linear", "nearest"] = "linear",
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAdcInputPMF:
     """Build the selected-phase exact ADC-input PMF chain for final COM."""
@@ -840,7 +840,7 @@ def _build_adc_input_pmf_exact(
         p_sig,
         h_dsamp,
         pmf_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="Noiseless signal",
     )
 
@@ -848,13 +848,13 @@ def _build_adc_input_pmf_exact(
         p_sig,
         h_XTs_dsamp,
         pmf_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
     )
     pmf_DD = _build_pmf_interference_178A(
         p_sig,
         A_DD * h_J,
         pmf_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="ADC-input Dual-Dirac",
     )
 
@@ -916,7 +916,7 @@ def _reconstruct_final_vqc_sicopr(
     A_DD: float,
     P_qc: float,
     *,
-    pmf_methods: COMAlgorithmPolicyConfig = COMAlgorithmPolicyConfig(),
+    pmf_projection_method: Literal["linear", "nearest"] = "linear",
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> tuple[float, COMPMFRuntimeConfig, Pmf1D]:
     """Reconstruct the SiCoPR final-COM clipping distribution and V_qc.
@@ -941,14 +941,14 @@ def _reconstruct_final_vqc_sicopr(
         p_sig,
         eq_ch.h_dsamp.ir,
         clip_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="ADC reference signal",
     )
     p_isi = _build_pmf_interference_178A(
         p_sig,
         eq_ch.h_ISI.ir / main_gain,
         clip_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="ADC reference ISI",
     )
     p_xt = _build_pmf_w_XT_all(
@@ -958,13 +958,13 @@ def _reconstruct_final_vqc_sicopr(
             for path in (eq_ch.h_XTs_w or [])
         ],
         clip_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
     )
     p_dd = _build_pmf_interference_178A(
         p_sig,
         A_DD * eq_ch.h_w_J.ir / main_gain,
         clip_cfg,
-        projection_method=pmf_methods.pmf_projection_method,
+        projection_method=pmf_projection_method,
         name="ADC reference Dual-Dirac",
     )
     p_ga = Pmf1D.gaussian(
@@ -2188,7 +2188,7 @@ class COM:
                 pmf_cfg = pmf_cfg, 
                 link_cfg = eq_ch_imp_record_cfg,
                 cdf_tail=cdf_tail,
-                pmf_methods=self.cfg.alg,
+                pmf_projection_method=self.cfg.alg.pmf_projection_method,
                 pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
         adc_input_pmf.clipping_convention = self.cfg.alg.pre_dte_adc_clipping_convention
@@ -2436,7 +2436,7 @@ class COM:
                 P_qc=self.cfg.imp.P_qc,
                 N_qb=self.cfg.imp.N_qb,
                 pmf_cfg=pmf_cfg_adc_input,
-                pmf_methods=self.cfg.alg,
+                pmf_projection_method=self.cfg.alg.pmf_projection_method,
                 pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
 
@@ -2746,7 +2746,7 @@ class COM:
                     main_gain,
                     imp_cfg.A_DD,
                     imp_cfg.P_qc,
-                    pmf_methods=self.cfg.alg,
+                    pmf_projection_method=self.cfg.alg.pmf_projection_method,
                     pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
                 )
                 delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
