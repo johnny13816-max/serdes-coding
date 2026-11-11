@@ -143,6 +143,29 @@
 
 ## PSD / Noise
 
+### Deferred: adaptive path-response grid classification
+
+> **Status: discussion captured only.** 尚未建立 branch ID、config contract 或
+> implementation contract；不得併入或改變現行 NUM-003。
+
+- 動機：單一 `LinkConfig` 若依 victim path 的集中能量選擇，可能無法完整容納
+  時間上較分散的 NEXT／FEXT tail；直接截斷會把 response-domain mismatch 帶入
+  後續 PSD。
+- 候選流程：Stage 1 `build_path` 先以可設定的 fine `df` 建立 probe response，
+  量測有效 support／tail energy，再為 production response 選擇 short 或 long
+  `LinkConfig`。初期保留 probe `df` 作為 `numerical_control` 以蒐集證據；若後續
+  證明固定值足以涵蓋目標案例，再評估收斂為 implementation constant。
+- 待決估計範圍：victim `pulse`、victim `pulse_no_txffe`、各 NEXT/FEXT `pulse`；
+  是否還有其他 Stage 1 response 必須納入，需在正式契約前重新核對 production
+  consumers。
+- RX FFE 可在 Stage 1 以允許的最大 tap offset span 保守加入 support margin，
+  不必等待實際 tap solve。判定條件應使用實際 grid capacity，並另外保留 guard。
+- short／long cfg 的 UI capacity、tail-energy tolerance、long-grid buckets、probe
+  boundary adequacy，以及不同 response grids 如何進入共同 PSD aggregation grid，
+  都尚未決定。
+- 此提案控制的是 Stage 1 response representation；NUM-003 仍只控制 PSD 建構前
+  是否把 impairment record 截斷／補零到 `num_trunc_ui`，兩者不得耦合。
+
 21. PSD arithmetic
    - 定義 PSD addition / filtering / integration。
    - 支援多個 imp PSD 合成。
