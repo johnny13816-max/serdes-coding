@@ -78,7 +78,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L2** `COM.calculate_sampling_phase()` | **Closed 2026-11-12** |
 | `ALG-008` | approved branch | Stage 2 pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
-| `NUM-005` | approved branch | Stage 6 final PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As`；`dy_override=None` | **目前登錄 L4** `_resolve_final_com_pmf_config()` | 待二次審查 |
+| `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-006` | pending candidate | Stage 3 ADC-input PMF convergence | `num.pmf_keep_mass`：project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **未決定** | 一次審查暫停；不宣稱 branch owner |
 | `ALG-010` | approved branch | Stage 4 MMSE DTE | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **目前登錄 L3** `COM_MMSE_DTE.run()` floating-tap/group block | 待二次審查 |
 | `ALG-011` | approved branch | Stage 5 post-FFE impairment | `alg.rxffe_record_realization`：`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | `finite_record_circshift` | **目前登錄 L3** `_apply_rxffe_response()` | 待二次審查 |
@@ -107,7 +107,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `SRCH-001` | 要評估的 phase schedule、coarse/fine visit order、最低 MSE phase bundle 與 per-phase run status | `calculate_pos_candidate()` 的單點演算法、每個 visited phase 使用的 Stage 4 solver／公式、XT independent phase preparation |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
 | `NUM-004` | Stage 2 pre-DTE 與 Stage 5 selected-phase ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
-| `NUM-005` | final DFE/MLSD PMF grid | Stage 3 ADC-input PMF grid |
+| `NUM-005` | Stage 6 final DFE component／combined PMFs 與 Stage 7 added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Stage 7 Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 Stage 6 PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、Stage 7 PSD record grid |
 | `NUM-006` | pending：ADC-input PMF retained-mass／convergence effect | branch eligibility、consumer scope 與 owner 尚未核准 |
 | `ALG-010` | floating tap/group selection and solve flow | fixed-tap limiter definition |
 | `ALG-011` | victim、all XT、DDJ 的 post-FFE response record/grid | RX FFE taps、MMSE solve、pre-FFE responses、NUM-003 record length |
@@ -181,10 +181,16 @@ COM model
 │  │  └─ COMPMFGridControl.resolve_dy()                      [same L5 shared grid kernel]
 │  └─ transform pre-DTE PSDs on their existing record        [NUM-003 non-owner]
 ├─ L0 Stage 6 — DFE COM / final PMF
-│  ├─ _resolve_final_com_pmf_config()                        [NUM-005 owner]
+│  ├─ _resolve_final_com_pmf_config()                        [NUM-005 L4 owner; execution point 1]
+│  │  └─ COMPMFGridControl.resolve_dy()                      [L5 shared grid kernel]
+│  ├─ calculate_COM_DFE() component／combined PMFs           [NUM-005 direct consumer]
 │  ├─ calculate_COM_DFE() final V_qc selection               [ALG-012 owner; evidence pending]
 │  └─ calculate_COM_DFE() final ADC PMF projection           [ALG-013 owner]
 ├─ L0 Stage 7 — MLSD COM
+│  ├─ _resolve_final_com_pmf_config()                        [same NUM-005 L4 owner; execution point 2]
+│  │  └─ gaussian_addition → solve_g_an()／evaluate_delta_com_an()
+│  │     [direct consumer; rebuild p_G_an on final-domain dy]
+│  ├─ scaled_total_pdf → reuse Stage 6 PMFs                  [NUM-005 indirect consumer]
 │  ├─ solve_g_an() added-noise PDF                           [ALG-014 owner]
 │  ├─ build_mlsd_noise()                                     [NUM-003 L3 owner + ALG-015 owner]
 │  │  ├─ resolve MLSD record_cfg and rebuild component PSDs
@@ -242,7 +248,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | B-008 | `ALG-002` | L5 public `Pmf1D` target-grid projection function set |
 | B-009 | — | Retired selector; historical ID only |
 | B-010/B-011 | `ALG-003` | Merged shared PDF→PMF control |
-| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / — / `ALG-013` | B-014 retired：178A Gaussian support 固定 8σ，不再是 Project Config；B-013 remains the independent Stage 6 final-grid function set |
+| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / — / `ALG-013` | B-014 retired：178A Gaussian support 固定 8σ，不再是 Project Config；B-013 remains the independent final-domain grid resolver consumed in Stages 6／7 |
 | B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
 | B-019 / B-020 / B-021 | `ALG-001` / — / `ALG-015` | B-020 retired as a selectable control：`force_grid=False` is diagnostic utility behavior, not Project Config；B-021 remains Stage 7 PSD |
 | E-001 / E-002 / E-003 / E-004 | — / — / `NUM-004` / `NUM-006` | E-001 是 `cfg.exe.target` non-branch execution control；E-002 retired with ALG-009 after exact PMF became fixed behavior；E-003/E-004 依實際 function-set effect 歸入 NUM。 |

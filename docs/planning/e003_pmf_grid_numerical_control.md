@@ -43,8 +43,10 @@ execution_profile
    │  ├─ pre-DTE phase/MMSE
    │  └─ selected-phase ADC-input PMF
    └─ final family → _resolve_final_com_pmf_config() [NUM-005 L4 owner]
-      ├─ final DFE COM
-      └─ final MLSD
+      ├─ Stage 6 final DFE component／combined PMFs [direct]
+      └─ Stage 7 added-noise PMF
+         ├─ gaussian_addition [direct rebuild on final dy]
+         └─ scaled_total_pdf [indirect reuse of Stage 6 PMFs]
 
 Both L4 domain owners delegate the common spacing formula to
 `COMPMFGridControl.resolve_dy()`. That L5 kernel does not select the ADC-input

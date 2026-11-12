@@ -238,9 +238,11 @@ sign 不在此表，因為它是共同公式修正。
 ```text
 calculate_COM_MLSD()
 ├── validate enablement, N_b, and completed prerequisite status
-├── resolve independent final_pmf_grid control
-├── Annex: solve_g_an(target, ...)
-│   └── reference: scale complete DFE PDF and derive g_an from variance delta
+├── _resolve_final_com_pmf_config(...) [NUM-005 execution point 2]
+├── gaussian_addition: solve_g_an(target, ...)
+│   └── evaluate_delta_com_an() rebuilds p_G_an on the resolved final dy
+├── scaled_total_pdf: scale complete Stage 6 DFE PMFs and derive g_an
+│   └── no new grid construction; NUM-005 is inherited from Stage 6
 ├── build_mlsd_noise(...)
 │   └── return COMMLSDNoiseStatus with S_isi, S_ni, and R_ni
 ├── calculate_der_mlsd(p_an, R_ni, ...)
@@ -252,10 +254,13 @@ calculate_COM_MLSD()
 ```
 
 The stage reads the already resolved `cfg.alg`, NUM-003 fields, and
-`cfg.num.final_pmf_grid`.
-That final grid directly owns the PMF voltage step for added-noise calibration,
-while final-PMF `keep_mass` remains 1.0. ADC-input grid controls are excluded;
-no run profile enters Stage 7.
+`cfg.num.final_pmf_grid`. `_resolve_final_com_pmf_config()` remains the same
+NUM-005 L4 owner used by Stage 6. In the `gaussian_addition` flow its runtime
+config is consumed directly by `solve_g_an()`／`evaluate_delta_com_an()` to
+construct `p_G_an`. In the `scaled_total_pdf` flow the local runtime config is
+not used to rebuild a PMF; the flow instead inherits NUM-005 through the Stage 6
+component PMFs. Final-PMF `keep_mass` remains 1.0. ADC-input grid controls are
+excluded, and no run profile enters Stage 7.
 
 ## Added-noise evaluation
 

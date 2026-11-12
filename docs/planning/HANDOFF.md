@@ -8,29 +8,29 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-12 Asia/Taipei
 Source branch: main
-Source revision: current main plus the isolated NUM-004 closure commit
-Active task: CP-BR ownership second review — NUM-005
-Current phase: ALG-002／003／004／006／007／008, NUM-003／004 and SRCH-001 are Closed; NUM-005 is next
+Source revision: current main plus the isolated NUM-005 closure commit
+Active task: CP-BR ownership second review — ALG-010
+Current phase: ALG-002／003／004／006／007／008, NUM-003／004／005 and SRCH-001 are Closed; ALG-010 is next
 Collaboration mode: Co-Build architecture review
 Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
-Completed: NUM-004 second review confirms L4 _resolve_adc_input_pmf_config() as the sole ADC-input grid-family owner; required correction is documentation-only scope clarification.
-NUM-004 boundary: owner selects cfg.num.adc_input_pmf_grid and constructs the ADC-domain runtime PMF config. Stage 2 _build_pre_dte_psd() and Stage 5 calculate_post_ffe_imp() are the two production consumers.
+Completed: NUM-005 second review confirms L4 _resolve_final_com_pmf_config() as the sole final-domain grid-family owner; required correction is documentation-only scope clarification.
+NUM-005 boundary: Stage 6 calculate_COM_DFE() is the complete direct consumer. Stage 7 gaussian_addition directly rebuilds p_G_an on the resolved final dy, while scaled_total_pdf indirectly inherits the Stage 6 PMFs and performs no new regrid.
 Shared kernel: L5 COMPMFGridControl.resolve_dy() implements override/relative/capped-relative arithmetic for both NUM-004 and NUM-005 but owns neither domain identity.
 Independent future idea: adaptive Stage 1 short/long response-grid classification is recorded in future_ideas.md and isolated in commit a9ab622. It has no branch ID and must not be coupled to NUM-003.
-In progress: NUM-005 second ownership review has not started source mapping.
+In progress: ALG-010 second ownership review has not started source mapping.
 Paused: NUM-006 remains paused. Prior ADC-only/global-PMF owner proposals remain undecided.
 Blocked: none.
-Next recommended action: map NUM-005 final-PMF-grid resolution, DFE/MLSD consumers, status evidence, and independence from NUM-004/006.
+Next recommended action: map ALG-010 floating tap/group selector reads, solver blocks, outputs, and non-owner callers.
 Next action owner: Codex performs read-only source/consumer review and presents required changes before implementation.
 Post-review cleanup: after every second-review branch is complete, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
-Stop point: do not modify NUM-005 until its owner/scope conclusion is discussed or explicitly approved; do not resume NUM-006 until all second-review branches are complete.
-NUM-004 evidence: static source audit found the ADC family read only in _resolve_adc_input_pmf_config() and direct calls only from _build_pre_dte_psd()/calculate_post_ffe_imp(); current focused 9 passed. Production path is unchanged, so golden was not rerun.
+Stop point: do not modify ALG-010 until its owner/scope conclusion is discussed or explicitly approved; do not resume NUM-006 until all second-review branches are complete.
+NUM-005 evidence: static source audit found the final family read only in _resolve_final_com_pmf_config() and direct calls only from calculate_COM_DFE()/calculate_COM_MLSD(). Stage 7 source confirms direct gaussian_addition and indirect scaled_total_pdf consumption; current focused tests are 9 passed. Production path is unchanged, so golden was not rerun.
 Evidence links: docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/call_tree.md;
-                docs/models/178A/stages/pre_dte.md;
-                docs/models/178A/stages/post_ffe.md;
+                docs/models/178A/stages/com_dfe.md;
+                docs/models/178A/stages/com_mlsd.md;
                 docs/models/178A/config_tree.md
-Dirty-state summary: NUM-004 authoritative documentation is ready for isolated commit.
+Dirty-state summary: NUM-005 authoritative documentation is ready for isolated commit.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成

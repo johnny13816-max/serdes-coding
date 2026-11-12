@@ -63,6 +63,7 @@ Final COM does not use the ADC-input grid family or active run's
 _resolve_final_com_pmf_config(...)
 ├── resolve final_pmf_grid.rule with final-domain As
 ├── apply final_pmf_grid.dy_override when provided
+├── delegate spacing arithmetic to COMPMFGridControl.resolve_dy()
 └── override keep_mass=1.0
 ```
 
@@ -70,6 +71,12 @@ This boundary prevents ADC-input resolution and run-level mass truncation from
 changing final COM. A positive final override directly supplies `dy`; otherwise
 the final family selects relative-only or relative-with-cap. Tap threshold and
 Gaussian span still come from `COMPMFConfig`.
+
+This L4 resolver is the NUM-005 sole domain owner and Stage 6 execution point.
+`calculate_COM_DFE()` is its direct consumer: every component PMF and
+`p_combined` are constructed on the resolved spacing, so NUM-005 is not a final
+post-combination regrid. The L5 `resolve_dy()` operation is shared with NUM-004
+and does not own final-domain identity.
 
 The stage reads the resolved `cfg.alg` and `cfg.num` of its `COM` instance.
 The adapter selects the run mode before construction, so this method neither

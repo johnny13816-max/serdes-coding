@@ -184,14 +184,18 @@ This file records only the surrounding pipeline flow.
 
 ```text
 calculate_COM_DFE(imp_status, dte_status)
-├── resolve final-COM PMF runtime config
+├── _resolve_final_com_pmf_config(...) [NUM-005 L4 owner / execution point 1]
+│   └── COMPMFGridControl.resolve_dy() [shared L5 kernel]
 ├── build component PMFs from stored post-FFE results
 ├── combine PMFs
 └── return COMPMFStatus
 
 calculate_COM_MLSD()
 ├── require completed impairment, DTE, and DFE PMF status
-├── solve_g_an(...)
+├── _resolve_final_com_pmf_config(...) [same NUM-005 owner / execution point 2]
+├── gaussian_addition → solve_g_an(...)
+│   └── evaluate_delta_com_an() rebuilds p_G_an on resolved final dy [direct]
+├── scaled_total_pdf → reuse/scale Stage 6 PMFs [NUM-005 indirect]
 ├── build_mlsd_noise(...) -> COMMLSDNoiseStatus
 ├── calculate_der_mlsd(p_an, R_ni, ...) -> DER_MLSD, der_by_j
 ├── assemble complete COMMLSDStatus using Eq. 178A-47
@@ -199,6 +203,9 @@ calculate_COM_MLSD()
 ```
 
 `calculate_COM()` is a compatibility alias for `calculate_COM_DFE()`.
+NUM-005 does not apply a final post-combination regrid. Stage 6 constructs its
+component PMFs on the resolved grid; Stage 7 either rebuilds the Gaussian PMF on
+that grid or inherits the already gridded Stage 6 PMFs.
 
 ## Local file-backed search
 

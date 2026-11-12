@@ -20,10 +20,10 @@ L3 CTLE pulse-realization functional block ownership。NUM-003 也已完成二�
 實作修正，確認 Stage 2／Stage 7 各有一個 PSD-sum owner。SRCH-001 已完成
 ownership 收斂，Stage 3 L2 `COM.calculate_sampling_phase()` 是唯一 selector
 owner。ALG-008 也已完成二次審查，確認 Stage 2 L3 `_build_pre_dte_psd()`
-是 sole owner。NUM-004 已確認 L4 `_resolve_adc_input_pmf_config()` 是
-ADC-input grid-family sole owner，Stage 2／5 共用該 owner，L5
-`COMPMFGridControl.resolve_dy()` 僅為 shared kernel；二次審查移至 NUM-005。NUM-006
-保持暫停。RC-004
+是 sole owner。NUM-004／005 已確認各自的 L4 domain resolver 是 sole owner；
+L5 `COMPMFGridControl.resolve_dy()` 僅為 shared kernel。NUM-005 的 Stage 6
+consumer 是直接完整使用；Stage 7 依 added-noise flow 直接使用 final grid 或
+間接沿用 Stage 6 PMFs。二次審查移至 ALG-010，NUM-006 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -37,7 +37,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — NUM-005** | NUM-004 已關閉；L4 `_resolve_adc_input_pmf_config()` 是 sole owner，Stage 2／5 是 consumers，L5 `resolve_dy()` 是與 NUM-005 共用的 non-domain-owning kernel | 重新確認 NUM-005 final PMF grid 的 owner、consumers 與 branch parameters |
+| CP-BR — 178A branch ownership second review | **Active — ALG-010** | NUM-005 已關閉；L4 `_resolve_final_com_pmf_config()` 是 sole owner，Stage 6 是 direct consumer，Stage 7 有 direct／indirect consumers，L5 `resolve_dy()` 是 non-domain-owning kernel | 重新確認 ALG-010 floating tap/group selection 的 owner 與 selector 收斂 |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
@@ -62,6 +62,7 @@ reporting、C2M migration 或 release 工作。
 | ALG-003 — PDF→PMF discretization | **Closed 2026-11-11**。L5 `Pmf1D.gaussian()`／`uniform()` owner set；model helpers 只注入 concrete method。TC-025 將 `pmf_sample` Gaussian support 收斂至固定 ±8σ。Focused `47 passed`、Python 3.7 export validation passed、固定 SiCoPR golden `1 passed`，既有 tolerances 與三個 digests 全數通過。Implementation `e65f644`、權威文件 `c804e3c`。 |
 | ALG-004 — Scalar-PMF scaling | **Closed 2026-11-11**。L5 `Pmf1D.scale_x()` sole owner；Stage 7 `_build_scaled_total_pdf_added_noise()`／`calculate_der_mlsd()` 是 direct injectors。`interpolate_ordinates` 支援 signed scale 並保持同一 `abs(scale)` output grid；FIR 固定 `mass_deposit`，不屬 ALG-004。Focused `49 passed, 2 subtests passed`、Python 3.7 export passed、固定 golden `1 passed`。Implementation／docs `114e7bf`。 |
 | NUM-004（legacy E-003）— ADC-input PMF grid | **二次 ownership review Closed 2026-11-12**。L4 `_resolve_adc_input_pmf_config()` 是 sole domain owner，明確選取 `cfg.num.adc_input_pmf_grid`；Stage 2 `_build_pre_dte_psd()` 與 Stage 5 `calculate_post_ffe_imp()` 是兩個 consumers。L5 `COMPMFGridControl.resolve_dy()` 是與 NUM-005 共用且不擁有 domain identity 的 numerical kernel。Static audit 確認唯一 family read 與兩個 call sites；current focused `9 passed`。Production path 未變，因此未重跑 golden。 |
+| NUM-005（legacy B-013）— Final-domain PMF grid | **二次 ownership review Closed 2026-11-12**。L4 `_resolve_final_com_pmf_config()` 是 sole domain owner；Stage 6 `calculate_COM_DFE()` 直接以 resolved dy 建立所有 component／combined PMFs。Stage 7 `gaussian_addition` 直接以同一 dy 重建 `p_G_an`，`scaled_total_pdf` 則間接沿用 Stage 6 PMFs。L5 `COMPMFGridControl.resolve_dy()` 是 non-domain-owning shared kernel。Static audit 確認唯一 family read 與兩個 call sites；current focused `9 passed`。Production path 未變，因此未重跑 golden。 |
 | ALG-001（legacy B-019）— Missing-DC completion | 四種 methods 收斂至單一 owner；`continuous_tf`／`bilinear_iir` 共用 completed H21，reference profile 選 `mag_phase_trend_to_dc`。Focused `59 passed`、Python 3.7 export passed、SiCoPR golden `1 passed`；`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 intermediate digests 不變。Commit `7c256b2` 已推送。 |
 | ALG-011（legacy B-004）— RX FFE record realization | Stage 5 sole owner；`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift`；victim、all XT、DDJ、ISI 共用 response grid。NUM-003 不改變 ALG-011 response；Stage 7 只消費已解析 response 並獨立建立 MLSD PSD record。Python 3.7 validator passed；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。Commit `565ccba` 已推送。 |
 | NUM-002（legacy B-014）— Gaussian support | Retired as non-branch。178A 固定 internal 8σ；focused `48 passed`、workbook scans 0、SiCoPR golden `1 passed`；COM_DFE 與 final COM 不變。Evidence 見 `num002_gaussian_support.md`。 |

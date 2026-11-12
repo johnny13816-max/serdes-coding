@@ -214,7 +214,10 @@ both delegate the common spacing formula to the non-domain-owning L5 kernel
 `COMPMFGridControl.resolve_dy()`. Raw/effective/profile provenance is exported. An override must be finite and
 positive and has priority over both derived rules. The ADC-input family covers
 pre-DTE and selected-phase ADC-input PMFs only; the final family covers final
-DFE/MLSD PMFs only. The legacy shared `dy_rel_As`, `dy_abs_max`,
+DFE component／combined PMFs and the Stage 7 added-noise PMF only. Stage 7's
+Gaussian-replacement flow consumes the resolved final grid directly; its
+`scaled_total_pdf` flow inherits the Stage 6 PMFs rather than performing a new
+regrid. The legacy shared `dy_rel_As`, `dy_abs_max`,
 `run_config.*.pmf_grid_quality`, and `run_config.*.pmf_dy_override` remain
 read-compatible but are not emitted by new templates.
 
