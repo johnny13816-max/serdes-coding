@@ -10,8 +10,9 @@ v1.0 release 狀態見
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
 branch review；93A、reporting、C2M migration 與 release 項目仍維持暫停。
 規則維護 RC-20261106-002 已結案。CFG-178A A--F 已完成並整合；CP-BR 目前依
-使用者指定順序執行 ownership 二次審查：先重新確認曾完成一次審查的 branches，
-再繼續尚未完成一次審查的項目。ALG-003 已完成二次審查並關閉；TC-025 將
+已關閉項目保留既有 closure evidence。由 ALG-010 起，使用者不再採信一次／二次
+審查標籤；所有剩餘項目一律依 algorithm-review 完整初次流程，重新確認 eligibility、
+選項、scope、owner、consumers 與 validation。ALG-003 已完成二次審查並關閉；TC-025 將
 Gaussian `pmf_sample` 收斂至固定 ±8σ support。ALG-002 也已完成 owner
 convergence、驗證與 isolated integration。ALG-004 signed-scale contract、實作、
 驗證與 remote integration 已完成並關閉；ALG-006 也已完成二次 ownership
@@ -23,7 +24,8 @@ owner。ALG-008 也已完成二次審查，確認 Stage 2 L3 `_build_pre_dte_psd
 是 sole owner。NUM-004／005 已確認各自的 L4 domain resolver 是 sole owner；
 L5 `COMPMFGridControl.resolve_dy()` 僅為 shared kernel。NUM-005 的 Stage 6
 consumer 是直接完整使用；Stage 7 依 added-noise flow 直接使用 final grid 或
-間接沿用 Stage 6 PMFs。二次審查移至 ALG-010，NUM-006 保持暫停。RC-004
+間接沿用 Stage 6 PMFs。完整初次審查由 ALG-010 開始；NUM-006 與 ALG-011–017
+同樣不得沿用舊有 approved／owner 結論。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -37,7 +39,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — ALG-010** | NUM-005 已關閉；L4 `_resolve_final_com_pmf_config()` 是 sole owner，Stage 6 是 direct consumer，Stage 7 有 direct／indirect consumers，L5 `resolve_dy()` 是 non-domain-owning kernel | 重新確認 ALG-010 floating tap/group selection 的 owner 與 selector 收斂 |
+| CP-BR — 178A complete branch review | **Active — ALG-010 initial review** | 已關閉項目不重開；ALG-010、NUM-006、ALG-011–017 全部從 eligibility 開始，不採信歷史 approved／owner 標籤 | 完整審查 ALG-010 floating tap/group selector、選項、owner、consumers、tie behavior 與 validation |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |

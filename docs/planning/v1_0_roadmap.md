@@ -53,9 +53,10 @@ Stage 1。ALG-006 Out-of-measured transfer 已於 2026-11-07 關閉：保留
 realization 與 ALG-008 pre-DTE ADC clipping convention 均已完成。ALG-008 由
 Stage 2 L3 `_build_pre_dte_psd()` 單一 owner 執行；D3.2 確認 full-jitter／`P_qc/2`
 project method，MATLAB 4.17 RJ-only／`P_qc` 保留為 reference-only 對照。
-ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF；ownership
-二次審查下一個項目是 ALG-010 floating tap/group selection。NUM-006 `pmf_keep_mass`
-retained-mass control 維持暫停。93A、reporting、
+ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF。由 ALG-010
+floating tap/group selection 起，所有剩餘項目一律依 algorithm-review 進行完整初次
+審查，不採信歷史一次／二次或 approved 標籤；NUM-006 `pmf_keep_mass` 也在此 queue。
+93A、reporting、
 C2M migration 與 public release 維持暫停。
 
 ## 與其他狀態文件的分工
