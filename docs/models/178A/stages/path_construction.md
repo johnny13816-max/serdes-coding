@@ -1,4 +1,4 @@
-# 178A path-construction stage
+# 178A Stage 1 — Path realization
 
 > **Review state:** the software boundary, configuration ownership, data flow, status output, and failure behavior below are confirmed from current source. The individual S-parameter and filter equations have not been independently revalidated by this documentation change.
 

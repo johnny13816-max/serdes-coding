@@ -1,27 +1,28 @@
-# 178A domain function-set documentation
+# 178A Stage 1–7 domain function-set documentation
 
 This directory owns the stable input/output, dataclass and status-lifecycle
 contract for each 178A domain function set. Functional blocks are documented
 inside their owning domain; small private helpers remain in source docstrings.
 
-The primary semantic hierarchy is `COM model → domain function set → functional
-block → operation/helper`. Numbered stages are no longer used as an ownership
-coordinate because Sampling search repeatedly invokes both the Pre-DTE model
-and DTE solver. Runtime order and loops are documented separately in
+The primary semantic hierarchy is `COM model → Stage-numbered domain/control
+function set → functional block → operation/helper`. Stage 1–7 are retained as
+runtime-sequence and navigation labels, but they are not ownership coordinates:
+Stage 3 Sampling search repeatedly invokes Stage 2 Pre-DTE and Stage 4 DTE.
+Runtime order and loops are documented separately in
 [`call_tree.md`](../call_tree.md).
 
 ## Domain function sets and owned dataclasses
 
-- [Path realization](path_construction.md) → `COMPath`／`status.paths`.
-- [Pre-DTE model](pre_dte.md) → `COMPreDTEEqChannelStatus` and
+- [Stage 1 — Path realization](path_construction.md) → `COMPath`／`status.paths`.
+- [Stage 2 — Pre-DTE model](pre_dte.md) → `COMPreDTEEqChannelStatus` and
   `COMImpStageStatus(pre_dte)`.
-- [Sampling search](sampling_phase.md) → `COMRunStatus` and selected-bundle
+- [Stage 3 — Sampling search](sampling_phase.md) → `COMRunStatus` and selected-bundle
   control; it owns no physical model dataclass.
-- [DTE solver](mmse_dte.md) → `COMDTEStatus`.
-- [Post-FFE model](post_ffe.md) → `COMPostFFEEqChannelStatus` and
+- [Stage 4 — DTE solver](mmse_dte.md) → `COMDTEStatus`.
+- [Stage 5 — Post-FFE model](post_ffe.md) → `COMPostFFEEqChannelStatus` and
   `COMImpStageStatus(post_ffe)`.
-- [DFE COM model](com_dfe.md) → `COMPMFStatus`.
-- [MLSD model](com_mlsd.md) → `COMMLSDStatus`.
+- [Stage 6 — DFE COM model](com_dfe.md) → `COMPMFStatus`.
+- [Stage 7 — MLSD model](com_mlsd.md) → `COMMLSDStatus`.
 
 Reporting and search are downstream orchestration layers documented in [Reporting architecture](../../../architecture/reporting_architecture.md), [Search execution](../../../operations/search_execution.md), and the model [Call tree](../call_tree.md).
 

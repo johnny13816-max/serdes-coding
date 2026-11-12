@@ -1,4 +1,4 @@
-# 178A DTE solver function set
+# 178A Stage 4 — DTE solver function set
 
 > **Review state:** ALG-010 completed its full initial review on 2026-11-12. The three floating strategies, callable owner, injector, executors and `N_wg=0` bypass are covered by focused tests. The MMSE equations and numerical results have not been independently revalidated by this documentation-only ownership closure.
 
@@ -47,8 +47,8 @@ choose initial phases
 └── coarse_fine -> every pos_coarse_stride phase
 
 for each phase in the shared root phase-batch loop
-├── Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
-└── DTE solver: calculate_MMSE_DTE(...)
+├── Stage 2 — Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
+└── Stage 4 — DTE solver: calculate_MMSE_DTE(...)
 
 if coarse_fine
 ├── identify current best valid coarse phase

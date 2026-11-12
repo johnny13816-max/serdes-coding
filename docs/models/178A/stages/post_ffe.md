@@ -1,4 +1,4 @@
-# 178A Stage 5: post-FFE impairment
+# 178A Stage 5 — Post-FFE model
 
 > **Review state:** selected-phase response construction, status ownership, reporting-PSD separation, downstream COM inputs, and current automated checks are confirmed from source. Governing equations and reference-case accuracy have not been independently revalidated by this documentation change.
 

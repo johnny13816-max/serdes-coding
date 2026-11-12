@@ -1,4 +1,4 @@
-# 178A Pre-DTE model function set
+# 178A Stage 2 — Pre-DTE model function set
 
 > **Review state:** the common/per-phase domain boundary, cache lifecycle,
 > runtime-policy inputs, produced dataclasses and current component data flow
@@ -57,7 +57,7 @@ remains part of the Pre-DTE model function set.
 
 ```text
 COM                                                    [Root: model]
-└── Pre-DTE model function set                         [L1 domain]
+└── Stage 2 — Pre-DTE model function set               [L1 domain]
     ├── calculate_pre_dte_imp_common()                 [L2 common preparation]
     │   └── signal variance                            [L3/L4]
     ├── prepare_pre_dte_phase_inputs()                 [L2 shared phase inputs]

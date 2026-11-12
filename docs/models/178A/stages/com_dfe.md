@@ -1,4 +1,4 @@
-# 178A DFE COM stage
+# 178A Stage 6 — DFE COM model
 
 > **Review state:** final-PMF configuration override, component ownership, quantization handoff, status output, and report/test dependencies are confirmed from source. The governing COM equations and numerical accuracy have not been independently revalidated by this documentation change.
 

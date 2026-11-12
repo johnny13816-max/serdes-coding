@@ -1,4 +1,4 @@
-# 178A MLSD COM stage
+# 178A Stage 7 — MLSD model
 
 > **Review state:** TC-023 已完成 Eq. 178A-49 索引修正及 reference realization。
 > Akinwale reference profile 的最終 COM 差 `-0.0148476782 dB`，通過 0.05 dB

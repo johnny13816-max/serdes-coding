@@ -1,13 +1,14 @@
-# 178A Sampling search function set
+# 178A Stage 3 — Sampling search function set
 
 > **Review state:** SRCH-001 ownership was corrected on 2026-11-13 after the
-> numbered-stage model was retired as the primary ownership coordinate.
+> Stage numbers were retained as runtime/navigation labels but retired as the
+> primary ownership coordinate.
 > The semantic owner is the Sampling search function set; the concrete callable
 > owner is the phase-search loop in `COM._run_once()`.
 
 ## Purpose
 
-Sampling search is a control function set, not a physical/numerical model. It:
+Stage 3 Sampling search is a control function set, not a physical/numerical model. It:
 
 - resolves `each_phase` or `coarse_fine` plus `pos_coarse_stride`;
 - determines phase visit order;
@@ -21,22 +22,26 @@ operations remain directly visible in the root runtime flow.
 ## Runtime flow and domain boundaries
 
 ```text
-COM._run_once() phase-search loop                [SRCH-001 concrete owner]
+Stage 3 — COM._run_once() phase-search loop      [SRCH-001 concrete owner]
 ├── read pos_sweep_method / pos_coarse_stride   [sole selector read]
 ├── _initial_pos_sweep_indices(...)             [schedule helper; non-owner]
 ├── while one phase batch remains
 │   └── for pos in phase batch
-│       ├── Pre-DTE model
+│       ├── Stage 2 — Pre-DTE model
 │       │   └── calculate_pre_dte_imp_at_pos(...)
-│       ├── DTE solver
+│       ├── Stage 4 — DTE solver
 │       │   └── calculate_MMSE_DTE(...)
-│       └── Sampling search control
+│       └── Stage 3 — Sampling search control
 │           ├── record MSE or cursor error
 │           └── retain strict-minimum complete bundle
 ├── coarse_fine only
 │   └── _fine_pos_sweep_indices(...)            [schedule helper; non-owner]
 └── _assign_selected_phase(...)                 [commit validator; non-owner]
 ```
+
+Stage numbering describes the runtime domains, not a single-pass linear call
+order: the Stage 3 controller repeatedly invokes Stage 2 and Stage 4. This
+caller relationship does not transfer ownership between those function sets.
 
 One shared phase-batch loop executes both the initial and optional fine batch.
 Coarse/fine changes only the next batch of positions; it does not duplicate or

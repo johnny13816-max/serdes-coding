@@ -1595,7 +1595,7 @@ class COM:
                 elapsed_s = perf_counter() - started
                 print(f"[178A single-run +{elapsed_s:8.2f} s] {message}", flush=True)
 
-        # Path realization
+        # Stage 1 — Path realization
         report("build_all_paths: start")
         paths = self.build_all_paths()
         self._assign_paths(paths)
@@ -1605,12 +1605,12 @@ class COM:
         h_XTs = [path.pulse.ir for path in xtalk_paths]
         report(f"build_all_paths: done ({len(paths)} paths)")
 
-        # Pre-DTE model: calculate phase-independent receiver impairment cache.
+        # Stage 2 — Pre-DTE model: calculate phase-independent receiver impairment cache.
         report("pre_dte_imp_common: start")
         pre_dte_imp_common = self.calculate_pre_dte_imp_common(victim=victim)
         report("pre_dte_imp_common: done")
 
-        # Pre-DTE model: select each full-length XT path phase once.
+        # Stage 2 — Pre-DTE model: select each full-length XT path phase once.
         # NUM-003 is deliberately absent from this full-response preparation.
         report("pre_dte_phase_inputs: start")
         pre_dte_imp_common, h_XTs_dsamp = self.prepare_pre_dte_phase_inputs(
@@ -1619,7 +1619,7 @@ class COM:
         )
         report("pre_dte_phase_inputs: done")
 
-        # Sampling search owns only visit order, result/error records, strict
+        # Stage 3 — Sampling search owns only visit order, result/error records, strict
         # minimum-MSE selection, and the selected complete-bundle lifecycle.
         # The Pre-DTE model and DTE solver remain explicit in this root flow.
         method = self.cfg.srch.pos_sweep_method
@@ -1652,7 +1652,7 @@ class COM:
                 try:
                     report(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
 
-                    # Pre-DTE model: build the complete input for this phase.
+                    # Stage 2 — Pre-DTE model: build the complete input for this phase.
                     eq_ch, imp_pre = self.calculate_pre_dte_imp_at_pos(
                         victim=victim,
                         pos=pos,
@@ -1660,7 +1660,7 @@ class COM:
                         h_XTs_dsamp=h_XTs_dsamp,
                     )
 
-                    # DTE solver: evaluate the same phase and publish its MSE.
+                    # Stage 4 — DTE solver: evaluate the same phase and publish its MSE.
                     dte_status = self.calculate_MMSE_DTE(
                         victim=victim,
                         eq_ch=eq_ch,
@@ -1714,6 +1714,7 @@ class COM:
             report("single-run complete (target=mse)")
             return self._require_status()
 
+        # Stage 5 — Post-FFE model
         report("post_ffe_imp: start")
         eq_ch_post, imp_status = self.calculate_post_ffe_imp(
             dte_status=best_dte,
@@ -1728,6 +1729,7 @@ class COM:
         if not isinstance(merged_imp_status, COMImpairmentStatus):
             raise RuntimeError("Merged 178A impairment status is not available after post-FFE impairment.")
 
+        # Stage 6 — DFE COM model
         if exe_cfg.target in {"dfe", "mlsd", "all_enabled"}:
             report("calculate_COM_DFE: start")
             selected_eq_ch = self._require_status().eq_ch
@@ -1738,6 +1740,7 @@ class COM:
             ))
             report("calculate_COM_DFE: done")
 
+        # Stage 7 — MLSD model
         if mlsd_requested:
             report("calculate_COM_MLSD: start")
             self.calculate_COM_MLSD()

@@ -83,7 +83,7 @@ scalar config before calling the same public method.
 ```text
 COM._run_once()
 ├── initialize COMStatus and target checks
-├── build_all_paths()
+├── Stage 1 — build_all_paths()
 │   └── com_178a.path_stage
 │       ├── _build_channel_under_test(cfg.src, cfg.channel)
 │       │   ├── each source binding loads and validates its artifact
@@ -102,25 +102,25 @@ COM._run_once()
 │               │   └── bilinear_iir: measured TF -> finite record -> IIR + unit pulse
 │               └── victim only: _realize_ctle_pulse(include_txffe=False)
 │                   └── path.pulse_no_txffe
-├── Pre-DTE model: phase-independent preparation
+├── Stage 2 — Pre-DTE model: phase-independent preparation
 │   ├── calculate_pre_dte_imp_common(victim) -> sigma_X cache
 │   └── prepare_pre_dte_phase_inputs(...)
 │       ├── select each XT path phase from the full oversampled response
 │       └── emit full one-sample/UI eq_ch_XT records
-├── Sampling search loop in _run_once()                  [SRCH-001 owner]
+├── Stage 3 — Sampling search loop in _run_once()        [SRCH-001 owner]
 │   ├── resolve method / stride once                     [sole selector read]
 │   ├── initialize COMRunStatus
 │   ├── _initial_pos_sweep_indices(...)
 │   ├── while one initial/fine phase batch remains
 │   │   └── for each requested phase
-│   │       ├── Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
+│   │       ├── Stage 2 — Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
 │   │       │   ├── build complete per-phase eq_ch responses
 │   │       │   └── _build_pre_dte_psd(...)
 │   │       │       ├── resolve NUM-003 record_cfg
 │   │       │       ├── resolve ALG-008 clipping noise / CDF tail
 │   │       │       ├── resolve NUM-004 ADC-input PMF grid
 │   │       │       └── build/sum PSDs → R_n
-│   │       ├── DTE solver: calculate_MMSE_DTE(...)
+│   │       ├── Stage 4 — DTE solver: calculate_MMSE_DTE(...)
 │   │       │   ├── COM_MMSE_DTE(...).run(...)
 │   │       │   └── build H_rxffe from selected w_lim representation
 │   │       └── record MSE/error and retain strict-minimum complete bundle
@@ -130,23 +130,23 @@ COM._run_once()
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
-    │   ├── Post-FFE model: calculate_post_ffe_imp(...)
+    │   ├── Stage 5 — Post-FFE model: calculate_post_ffe_imp(...)
     │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
     │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
     │   │   ├── _resolve_adc_input_pmf_config() for NUM-004 selected-phase material
     │   │   └── transform pre-DTE PSDs on their existing record (NUM-003 non-owner)
     │   ├── _assign_post_ffe(...) once, including resolved response/PSD grids
-    │   ├── calculate_COM_DFE(...)
+    │   ├── Stage 6 — calculate_COM_DFE(...)
     │   └── return DFE COM status
     ├── mlsd
-    │   ├── calculate_post_ffe_imp(...)
-    │   ├── calculate_COM_DFE(...)
-    │   ├── calculate_COM_MLSD()
+    │   ├── Stage 5 — calculate_post_ffe_imp(...)
+    │   ├── Stage 6 — calculate_COM_DFE(...)
+    │   ├── Stage 7 — calculate_COM_MLSD()
     │   └── return DFE plus MLSD status
     └── all_enabled
-        ├── calculate_post_ffe_imp(...)
-        ├── calculate_COM_DFE(...)
-        ├── calculate_COM_MLSD() when cfg.mlsd.enable is true
+        ├── Stage 5 — calculate_post_ffe_imp(...)
+        ├── Stage 6 — calculate_COM_DFE(...)
+        ├── Stage 7 — calculate_COM_MLSD() when cfg.mlsd.enable is true
         └── return requested completed status
 ```
 
@@ -157,11 +157,11 @@ MLSD 的 `build_mlsd_noise()` 是第二個 NUM-003 owner：它從完整 pre/post
 
 A `COMMainCursorError` rejects only that phase in the root Sampling-search loop.
 Other exceptions leave `_run_once()` and preserve any status already assigned,
-as described in the status lifecycle. Numbered stages are not the ownership
-coordinate; domain function sets own their dataclasses while this call tree
-records runtime order and feedback loops.
+as described in the status lifecycle. Stage 1–7 are retained as runtime and
+navigation labels, not ownership coordinates; domain function sets own their
+dataclasses while this call tree records runtime order and feedback loops.
 
-## DTE solver call boundary
+## Stage 4 DTE solver call boundary
 
 ```text
 calculate_MMSE_DTE(...)
@@ -191,14 +191,14 @@ are centralized in the
 This file records only the surrounding pipeline flow.
 
 ```text
-calculate_COM_DFE(imp_status, dte_status)
+Stage 6 — calculate_COM_DFE(imp_status, dte_status)
 ├── _resolve_final_com_pmf_config(...) [NUM-005 L4 owner / execution point 1]
 │   └── COMPMFGridControl.resolve_dy() [shared L5 kernel]
 ├── build component PMFs from stored post-FFE results
 ├── combine PMFs
 └── return COMPMFStatus
 
-calculate_COM_MLSD()
+Stage 7 — calculate_COM_MLSD()
 ├── require completed impairment, DTE, and DFE PMF status
 ├── _resolve_final_com_pmf_config(...) [same NUM-005 owner / execution point 2]
 ├── gaussian_addition → solve_g_an(...)
