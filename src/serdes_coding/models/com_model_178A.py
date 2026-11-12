@@ -14,7 +14,7 @@ from itertools import combinations, product
 from pathlib import Path
 import sys
 from time import perf_counter
-from typing import Any, Literal, Optional, Sequence
+from typing import Any, Callable, Literal, Optional, Sequence
 import numpy as np
 
 try:
@@ -1619,71 +1619,13 @@ class COM:
         )
         report("sampling_phase_common: done")
 
-        # ===========================
-        # pos sweeping
-        # ===========================
-        run_status = COMRunStatus(
-            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
-            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
-            mse_by_pos=[None] * self.per_ui,
-            main_cursor_error_by_pos=[None] * self.per_ui,
+        best_eq_ch, best_imp_pre, best_dte = self.calculate_sampling_phase(
+            victim=victim,
+            common=pre_dte_imp_common,
+            h_XTs_dsamp=h_XTs_dsamp,
+            report=report,
         )
-        self._assign_run(run_status)
-        best_dte: Optional[COMDTEStatus] = None
-        best_eq_ch: Optional[COMEqChannelStatus] = None
-        best_imp_pre: Optional[COMImpairmentStatus] = None
-
-        def evaluate_pos_indices(pos_indices: list[int], phase_label: str) -> None:
-            nonlocal best_dte, best_eq_ch, best_imp_pre
-            for pos in pos_indices:
-                pos_started = perf_counter()
-                try:
-                    report(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
-                    eq_ch, imp_pre, dte_status = self.calculate_pos_candidate(
-                        victim=victim,
-                        pos=pos,
-                        common=pre_dte_imp_common,
-                        h_XTs_dsamp=h_XTs_dsamp,
-                    )
-                except COMMainCursorError as error:
-                    run_status.main_cursor_error_by_pos[pos] = str(error)
-                    report(f"{phase_label} pos {pos + 1}/{self.per_ui}: skipped (main cursor error)")
-                    continue
-
-                run_status.mse_by_pos[pos] = float(dte_status.mse)
-                is_best = best_dte is None or dte_status.mse < best_dte.mse
-                if is_best:
-                    best_dte = dte_status
-                    best_eq_ch = eq_ch
-                    best_imp_pre = imp_pre
-                report(
-                    f"{phase_label} pos {pos + 1}/{self.per_ui}: done in "
-                    f"{perf_counter() - pos_started:.2f} s; mse={dte_status.mse:.6e}"
-                    f"{' (best)' if is_best else ''}"
-                )
-
-        coarse_pos_indices = self._initial_pos_sweep_indices()
-        run_status.coarse_pos = list(coarse_pos_indices)
-        report(f"pos sweep ({self.cfg.srch.pos_sweep_method}): {coarse_pos_indices}")
-        initial_label = "phase" if self.cfg.srch.pos_sweep_method == "each_phase" else "coarse"
-        evaluate_pos_indices(coarse_pos_indices, initial_label)
-
-        if self.cfg.srch.pos_sweep_method == "coarse_fine":
-            if best_dte is None:
-                raise RuntimeError("Coarse phase sweep did not produce any valid sampling phase candidate.")
-            fine_pos_indices = self._fine_pos_sweep_indices(
-                coarse_best_pos=best_dte.pos,
-                evaluated_indices=set(coarse_pos_indices),
-            )
-            run_status.fine_pos = list(fine_pos_indices)
-            report(f"pos sweep fine around pos={best_dte.pos}: {fine_pos_indices}")
-            evaluate_pos_indices(fine_pos_indices, "fine")
-
-        if best_dte is None or best_eq_ch is None or best_imp_pre is None:
-            raise RuntimeError("COM did not produce any valid sampling phase candidate.")
-
         self._assign_selected_phase(best_eq_ch, best_imp_pre, best_dte)
-        report(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
 
         if exe_cfg.target == "mse":
             report("single-run complete (target=mse)")
@@ -2155,27 +2097,120 @@ class COM:
         )
         return eq_ch, imp_pre, dte_status
 
-    def _initial_pos_sweep_indices(self) -> list[int]:
+    def calculate_sampling_phase(
+        self,
+        victim: COMPath,
+        common: COMImpairmentStatus,
+        h_XTs_dsamp: list[np.ndarray],
+        report: Optional[Callable[[str], None]] = None,
+    ) -> tuple[COMEqChannelStatus, COMImpairmentStatus, COMDTEStatus]:
+        """Own SRCH-001 scheduling and return the minimum-MSE phase bundle."""
+        method = self.cfg.srch.pos_sweep_method
+        coarse_stride = self.cfg.srch.pos_coarse_stride
+        emit = report if report is not None else lambda _message: None
+        run_status = COMRunStatus(
+            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
+            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
+            mse_by_pos=[None] * self.per_ui,
+            main_cursor_error_by_pos=[None] * self.per_ui,
+        )
+        self._assign_run(run_status)
+        best_dte: Optional[COMDTEStatus] = None
+        best_eq_ch: Optional[COMEqChannelStatus] = None
+        best_imp_pre: Optional[COMImpairmentStatus] = None
+
+        def evaluate_pos_indices(pos_indices: list[int], phase_label: str) -> None:
+            nonlocal best_dte, best_eq_ch, best_imp_pre
+            for pos in pos_indices:
+                pos_started = perf_counter()
+                try:
+                    emit(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
+                    eq_ch, imp_pre, dte_status = self.calculate_pos_candidate(
+                        victim=victim,
+                        pos=pos,
+                        common=common,
+                        h_XTs_dsamp=h_XTs_dsamp,
+                    )
+                except COMMainCursorError as error:
+                    run_status.main_cursor_error_by_pos[pos] = str(error)
+                    emit(
+                        f"{phase_label} pos {pos + 1}/{self.per_ui}: "
+                        "skipped (main cursor error)"
+                    )
+                    continue
+
+                run_status.mse_by_pos[pos] = float(dte_status.mse)
+                is_best = best_dte is None or dte_status.mse < best_dte.mse
+                if is_best:
+                    best_dte = dte_status
+                    best_eq_ch = eq_ch
+                    best_imp_pre = imp_pre
+                emit(
+                    f"{phase_label} pos {pos + 1}/{self.per_ui}: done in "
+                    f"{perf_counter() - pos_started:.2f} s; mse={dte_status.mse:.6e}"
+                    f"{' (best)' if is_best else ''}"
+                )
+
+        initial_pos_indices = self._initial_pos_sweep_indices(
+            per_ui=self.per_ui,
+            method=method,
+            coarse_stride=coarse_stride,
+        )
+        run_status.coarse_pos = list(initial_pos_indices)
+        emit(f"pos sweep ({method}): {initial_pos_indices}")
+        initial_label = "phase" if method == "each_phase" else "coarse"
+        evaluate_pos_indices(initial_pos_indices, initial_label)
+
+        if method == "coarse_fine":
+            if best_dte is None:
+                raise RuntimeError(
+                    "Coarse phase sweep did not produce any valid sampling phase candidate."
+                )
+            fine_pos_indices = self._fine_pos_sweep_indices(
+                per_ui=self.per_ui,
+                coarse_stride=coarse_stride,
+                coarse_best_pos=best_dte.pos,
+                evaluated_indices=set(initial_pos_indices),
+            )
+            run_status.fine_pos = list(fine_pos_indices)
+            emit(f"pos sweep fine around pos={best_dte.pos}: {fine_pos_indices}")
+            evaluate_pos_indices(fine_pos_indices, "fine")
+
+        if best_dte is None or best_eq_ch is None or best_imp_pre is None:
+            raise RuntimeError("COM did not produce any valid sampling phase candidate.")
+        emit(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
+        return best_eq_ch, best_imp_pre, best_dte
+
+    @staticmethod
+    def _initial_pos_sweep_indices(
+        *,
+        per_ui: int,
+        method: Literal["each_phase", "coarse_fine"],
+        coarse_stride: int,
+    ) -> list[int]:
         """Return the first phase set for exhaustive or coarse-fine sampling."""
-        srch_cfg = self.cfg.srch
-        if srch_cfg.pos_sweep_method == "each_phase":
-            return list(range(self.per_ui))
-        if srch_cfg.pos_coarse_stride > self.per_ui:
+        if method == "each_phase":
+            return list(range(per_ui))
+        if method != "coarse_fine":
+            raise ValueError(f"Unsupported sampling-position sweep method: {method!r}.")
+        if coarse_stride > per_ui:
             raise ValueError(
                 "COMSearchConfig.pos_coarse_stride must not exceed LinkConfig.per_ui."
             )
-        return list(range(0, self.per_ui, srch_cfg.pos_coarse_stride))
+        return list(range(0, per_ui, coarse_stride))
 
+    @staticmethod
     def _fine_pos_sweep_indices(
-        self,
         *,
+        per_ui: int,
+        coarse_stride: int,
         coarse_best_pos: int,
         evaluated_indices: set[int],
     ) -> list[int]:
         """Return unvisited integer phases in the circular fine window."""
-        radius = (self.cfg.srch.pos_coarse_stride + 1) // 2
+        radius = (coarse_stride + 1) // 2
         window = [
-            (coarse_best_pos + offset) % self.per_ui
+            (coarse_best_pos + offset) % per_ui
             for offset in range(-radius, radius + 1)
         ]
         return [pos for pos in window if pos not in evaluated_indices]

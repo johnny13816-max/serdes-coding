@@ -17,8 +17,9 @@ convergence、驗證與 isolated integration。ALG-004 signed-scale contract、�
 驗證與 remote integration 已完成並關閉；ALG-006 也已完成二次 ownership
 審查，確認 `resample_tf()` 為 L5 owner。ALG-007 也已完成二次審查，確認
 L3 CTLE pulse-realization functional block ownership。NUM-003 也已完成二次審查與
-實作修正，確認 Stage 2／Stage 7 各有一個 PSD-sum owner；二次審查移至
-SRCH-001。NUM-006
+實作修正，確認 Stage 2／Stage 7 各有一個 PSD-sum owner。SRCH-001 已完成
+ownership 收斂，Stage 3 L2 `COM.calculate_sampling_phase()` 是唯一 selector
+owner；二次審查移至 ALG-008。NUM-006
 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
@@ -33,7 +34,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — SRCH-001** | NUM-003 已關閉；兩個 semantic owners 是 Stage 2 `COM._build_pre_dte_psd()` 與 Stage 7 `COM.build_mlsd_noise()`；Stage 3 phase orchestration與 Stage 5 reporting transform 都是 non-owner | 重新確認 SRCH-001 sampling-phase schedule 的 owner、consumers 與 branch parameters |
+| CP-BR — 178A branch ownership second review | **Active — ALG-008** | SRCH-001 已關閉；Stage 3 L2 `COM.calculate_sampling_phase()` 是 sole owner，`_run_once()` 與單點 candidate／Stage 4 solver 都是 non-owner | 重新確認 ALG-008 pre-DTE ADC clipping convention 的 owner、consumers 與 branch parameters |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
@@ -43,6 +44,7 @@ reporting、C2M migration 或 release 工作。
 
 | Boundary | Evidence |
 | --- | --- |
+| SRCH-001 — Sampling-phase schedule | **二次 ownership review Closed 2026-11-12**。Stage 3 L2 `COM.calculate_sampling_phase()` 是 sole selector owner；解析 `each_phase`／`coarse_fine` 與 stride、維護 visit order／`COMRunStatus`、保留 strict-minimum-MSE complete bundle。`_run_once()` 只 orchestration/commit；index helpers 只接收 concrete choice；`calculate_pos_candidate()`／Stage 4 solver 是 non-owner。Focused `53 passed`；SiCoPR golden `1 passed`，selected phase 5、MSE `0.0061912610245255335`、COM_DFE `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 與三個 digests 不變。 |
 | ARC-178A-001 — standalone 178A COM roots | `cc5339e` |
 | ARC-178A-002 — semantic dataclass text | `149bbd6` |
 | ARC-178A-003 — shared reporting orchestration | `e5b0b2b` |

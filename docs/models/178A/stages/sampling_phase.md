@@ -1,9 +1,9 @@
 # 178A Stage 3: sampling-phase evaluation
 
-> **Review state:** implemented ownership and behavior-preservation contract.
-> Phase scheduling, MSE comparison, selected-candidate retention, and atomic
-> commit are covered by focused tests. Branch algorithms remain subject to
-> their individual CP-BR review.
+> **Review state:** SRCH-001 二次 ownership review 已於 2026-11-12 關閉。
+> Stage 3 L2 `COM.calculate_sampling_phase()` 是唯一 branch owner；phase
+> scheduling、MSE comparison、selected-candidate retention 與 atomic commit
+> 皆有 focused tests。
 
 ## Purpose
 
@@ -27,17 +27,16 @@ COM._run_once()                                      [L0: stage set]
 └── Stage 3: sampling-phase evaluation               [L1]
     ├── XT phase / common impairment preparation     [L2]
     │   └── _select_xtalk_path_phase()               [L3/L4; full response]
-    ├── phase-set construction                       [L2]
-    │   ├── _initial_pos_sweep_indices()             [L3/L4]
-    │   └── _fine_pos_sweep_indices()                [L3/L4]
-    ├── one-phase candidate construction             [L2]
-    │   └── calculate_pos_candidate()                [L3]
-    │       ├── calculate_pre_dte_imp_at_pos()       [L4]
-    │       └── calculate_MMSE_DTE()                 [L4: Stage 4 handoff]
-    ├── minimum-MSE selection                        [L2]
-    │   └── strict candidate.mse comparison          [L3/L4]
-    └── selected-phase commit                        [L2]
-        └── _assign_selected_phase()                 [L3/L4]
+    ├── calculate_sampling_phase()                   [L2: SRCH-001 owner]
+    │   ├── resolve method + stride                  [sole selector read]
+    │   ├── _initial_pos_sweep_indices(...)          [L4; concrete choice]
+    │   ├── _fine_pos_sweep_indices(...)             [L4; concrete choice]
+    │   ├── calculate_pos_candidate()                [L3; non-owner]
+    │   │   ├── calculate_pre_dte_imp_at_pos()       [L4]
+    │   │   └── calculate_MMSE_DTE()                 [L4: Stage 4 handoff]
+    │   ├── strict candidate.mse comparison          [L3]
+    │   └── update COMRunStatus + return best bundle [L3]
+    └── _assign_selected_phase()                     [L2 commit; non-owner]
 ```
 
 ## Candidate contract
@@ -62,6 +61,19 @@ The loop retains only the current minimum-MSE complete bundle. Exact ties keep
 the earlier evaluated candidate. `COMRunStatus.mse_by_pos` and
 `main_cursor_error_by_pos` retain per-phase summaries; non-selected full
 candidate objects are not persisted.
+
+## SRCH-001 owner boundary
+
+`calculate_sampling_phase()` alone reads `srch.pos_sweep_method` and
+`srch.pos_coarse_stride`. It resolves the selected schedule, evaluates the
+visited phases, records coarse/fine phase lists and per-phase outcomes, and
+returns one internally consistent minimum-MSE bundle. `_run_once()` only
+orchestrates the stage call and commits that bundle. The index helpers receive
+`method`／`coarse_stride`／`per_ui` as concrete arguments and do not access
+project config.
+
+`prepare_sampling_phase_common()` performs the independent XT worst-energy
+phase preparation before this owner and is not part of SRCH-001.
 
 ## Atomic commit
 

@@ -10,6 +10,7 @@ from serdes_coding.models.com_model_178A import (
     COMEqChannelStatus,
     COMImpairmentStatus,
     COMImpStageStatus,
+    COMMainCursorError,
     COMPostFFEEqChannelStatus,
     COMPreDTEEqChannelStatus,
     COMStatus,
@@ -96,3 +97,89 @@ def test_post_ffe_status_requires_one_shared_response_grid() -> None:
             h_w=victim,
             h_XTs_w=[xtalk],
         )
+
+
+def test_sampling_phase_owner_resolves_coarse_fine_and_keeps_complete_bundle() -> None:
+    model = COM.__new__(COM)
+    model.cfg = SimpleNamespace(
+        link=SimpleNamespace(per_ui=8),
+        srch=SimpleNamespace(pos_sweep_method="coarse_fine", pos_coarse_stride=4),
+        num=SimpleNamespace(pmf_grid_quality="fine", pmf_keep_mass=0.99),
+    )
+    model.status = COMStatus()
+    mse_by_pos = {0: 5.0, 4: 1.0, 2: 3.0, 3: 0.5, 5: 2.0, 6: 4.0}
+    visited = []
+
+    def calculate_candidate(*, victim, pos, common, h_XTs_dsamp):
+        del victim, common, h_XTs_dsamp
+        visited.append(pos)
+        return (
+            SimpleNamespace(source_pos=pos),
+            SimpleNamespace(source_pos=pos),
+            SimpleNamespace(pos=pos, mse=mse_by_pos[pos]),
+        )
+
+    model.calculate_pos_candidate = calculate_candidate
+    eq_ch, imp, dte = model.calculate_sampling_phase(
+        victim=SimpleNamespace(),
+        common=SimpleNamespace(),
+        h_XTs_dsamp=[],
+    )
+
+    assert visited == [0, 4, 2, 3, 5, 6]
+    assert (eq_ch.source_pos, imp.source_pos, dte.pos) == (3, 3, 3)
+    assert model.status.run.coarse_pos == [0, 4]
+    assert model.status.run.fine_pos == [2, 3, 5, 6]
+    assert model.status.run.mse_by_pos == [5.0, None, 3.0, 0.5, 1.0, 2.0, 4.0, None]
+
+
+def test_sampling_phase_index_helpers_receive_concrete_choice() -> None:
+    assert COM._initial_pos_sweep_indices(
+        per_ui=8, method="each_phase", coarse_stride=4
+    ) == list(range(8))
+    assert COM._initial_pos_sweep_indices(
+        per_ui=8, method="coarse_fine", coarse_stride=4
+    ) == [0, 4]
+    assert COM._fine_pos_sweep_indices(
+        per_ui=8,
+        coarse_stride=4,
+        coarse_best_pos=0,
+        evaluated_indices={0, 4},
+    ) == [6, 7, 1, 2]
+
+    with pytest.raises(ValueError, match="must not exceed"):
+        COM._initial_pos_sweep_indices(
+            per_ui=8, method="coarse_fine", coarse_stride=9
+        )
+
+
+def test_sampling_phase_owner_skips_cursor_error_and_keeps_earlier_tie() -> None:
+    model = COM.__new__(COM)
+    model.cfg = SimpleNamespace(
+        link=SimpleNamespace(per_ui=4),
+        srch=SimpleNamespace(pos_sweep_method="each_phase", pos_coarse_stride=2),
+        num=SimpleNamespace(pmf_grid_quality="fine", pmf_keep_mass=0.99),
+    )
+    model.status = COMStatus()
+
+    def calculate_candidate(*, victim, pos, common, h_XTs_dsamp):
+        del victim, common, h_XTs_dsamp
+        if pos == 1:
+            raise COMMainCursorError("invalid cursor")
+        mse = {0: 1.0, 2: 1.0, 3: 2.0}[pos]
+        return (
+            SimpleNamespace(source_pos=pos),
+            SimpleNamespace(source_pos=pos),
+            SimpleNamespace(pos=pos, mse=mse),
+        )
+
+    model.calculate_pos_candidate = calculate_candidate
+    eq_ch, imp, dte = model.calculate_sampling_phase(
+        victim=SimpleNamespace(), common=SimpleNamespace(), h_XTs_dsamp=[]
+    )
+
+    assert (eq_ch.source_pos, imp.source_pos, dte.pos) == (0, 0, 0)
+    assert model.status.run.main_cursor_error_by_pos == [
+        None, "invalid cursor", None, None
+    ]
+    assert model.status.run.mse_by_pos == [1.0, None, 1.0, 2.0]

@@ -49,6 +49,7 @@ def test_178a_com_owns_one_resolved_run_without_stage_forwarding():
     for method_name in (
         "calculate_pre_dte_imp_at_pos",
         "calculate_pos_candidate",
+        "calculate_sampling_phase",
         "_initial_pos_sweep_indices",
         "_fine_pos_sweep_indices",
         "calculate_MMSE_DTE",
@@ -57,6 +58,23 @@ def test_178a_com_owns_one_resolved_run_without_stage_forwarding():
         "calculate_COM_MLSD",
     ):
         assert "run_cfg" not in signature(getattr(COM, method_name)).parameters
+
+
+def test_178a_srch001_has_one_production_owner():
+    tree = ast.parse(getsource(COM))
+    owners = set()
+    selector_fields = {"pos_sweep_method", "pos_coarse_stride"}
+    class_node = tree.body[0]
+    for function in (
+        node for node in class_node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        if any(
+            isinstance(node, ast.Attribute) and node.attr in selector_fields
+            for node in ast.walk(function)
+        ):
+            owners.add(function.name)
+    assert owners == {"calculate_sampling_phase"}
 
 
 def test_178a_runtime_domains_are_canonical_and_legacy_names_are_absent(reference_cfg):

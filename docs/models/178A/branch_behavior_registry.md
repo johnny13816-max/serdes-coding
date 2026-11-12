@@ -75,7 +75,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **Closed 2026-11-11** |
 | `NUM-003` | approved branch | Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()` | **Closed 2026-11-12** |
-| `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **目前登錄 L3** `calculate_pre_dte_imp()` phase-scheduling block | 待二次審查 |
+| `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L2** `COM.calculate_sampling_phase()` | **Closed 2026-11-12** |
 | `ALG-008` | approved branch | Stage 3 per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **目前登錄 L3** `calculate_pre_dte_imp_at_pos()` clipping block | 待二次審查 |
 | `NUM-004` | approved branch | Stage 3 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As_with_cap`；`dy_override=10e-6 V` | **目前登錄 L4** `_resolve_adc_input_pmf_config()` | 待二次審查 |
 | `NUM-005` | approved branch | Stage 6 final PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As`；`dy_override=None` | **目前登錄 L4** `_resolve_final_com_pmf_config()` | 待二次審查 |
@@ -104,7 +104,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
 | `ALG-007` | CTLE pulse method-specific shared state，以及 victim／NEXT／FEXT `pulse` 與 victim `pulse_no_txffe` 的完整 CTLE realization | TX FFE、continuous `H_all`、ALG-006 transfer extension、Stage 3 TX-noise sampling policy |
 | `NUM-003` | 在 pre-DTE／pre-MLSD PSD 真正加總的 owner 內，先把各完整 eq-channel response realization 成 `full` 或固定 `num_trunc_ui` record，再建 PSD、加總並形成 autocorrelation；固定長度模式對過長 response 截尾、對過短 response 補零 | Stage 1 path response、完整 `eq_ch` status、Stage 3 phase orchestration、Stage 4 RX FFE tap solve、Stage 5 PSD reporting transform、ALG-011 post-FFE response realization／grid |
-| `SRCH-001` | 要評估的 phase schedule | 每個 visited phase 使用的 Stage 4 solver 與公式 |
+| `SRCH-001` | 要評估的 phase schedule、coarse/fine visit order、最低 MSE phase bundle 與 per-phase run status | `calculate_pos_candidate()` 的單點演算法、每個 visited phase 使用的 Stage 4 solver／公式、XT independent phase preparation |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
 | `NUM-004` | pre-DTE 與 selected-phase ADC-input PMF grid | Stage 6 final PMF grid |
 | `NUM-005` | final DFE/MLSD PMF grid | Stage 3 ADC-input PMF grid |
@@ -152,14 +152,20 @@ COM model
 │     ├─ realize S_rn/S_xn/S_tn/S_jn/S_qn on that record
 │     └─ sum S_total and form R_n                             [one atomic owner boundary]
 ├─ L0 Stage 3 — sampling phase and ADC input
-│  ├─ calculate_pre_dte_imp() phase schedule                 [SRCH-001 owner]
+│  ├─ calculate_sampling_phase()                             [SRCH-001 L2 owner]
+│  │  ├─ resolve pos_sweep_method / pos_coarse_stride        [sole selector read]
+│  │  ├─ _initial_pos_sweep_indices(...)                     [concrete-choice helper]
+│  │  ├─ _fine_pos_sweep_indices(...)                        [concrete-choice helper]
+│  │  ├─ calculate_pos_candidate(...) × visited phase        [single-phase evaluator / non-owner]
+│  │  ├─ strict minimum-MSE complete-bundle retention
+│  │  └─ COMRunStatus coarse/fine/MSE/error records
 │  ├─ calculate_pre_dte_imp_at_pos()
 │  │  ├─ clipping PSD/tail selection                         [ALG-008 owner]
 │  │  ├─ _resolve_adc_input_pmf_config()                     [NUM-004 owner]
 │  │  └─ PMF retained-mass consumer                          [NUM-006 pending owner/scope]
 │  ├─ _calculate_tx_noise_eq_ch()
 │  │  └─ victim.pulse_no_txffe                               [ALG-006/007 upstream-folded consumer]
-│  └─ selected phase → Stage 4 solver                        [SRCH-001 consumer]
+│  └─ calculate_MMSE_DTE()                                   [SRCH-001 consumer; fixed solver]
 ├─ L0 Stage 4 — MMSE DTE
 │  ├─ COM_MMSE_DTE.run() floating tap/group solve            [ALG-010 owner]
 │  └─ COMDTEStatus.H_rxffe                                   [bound to pre-DTE record after solve; non-owner]

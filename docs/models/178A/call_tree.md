@@ -104,24 +104,26 @@ COM._run_once()
 │                   └── path.pulse_no_txffe
 ├── Stage 2: calculate_pre_dte_imp_common(victim)
 │   └── return phase-independent sigma_X cache
-├── initialize COMRunStatus
 ├── Stage 3: sampling-phase evaluation
 │   ├── prepare_sampling_phase_common(...)
 │   │   ├── select each XT path phase from the full oversampled response
 │   │   └── emit full one-sample/UI eq_ch_XT records
-│   ├── choose initial phase indices
-│   ├── evaluate each requested phase
-│   │   └── calculate_pos_candidate(...)
-│   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
-│   │       │   ├── build complete per-phase eq_ch responses
-│   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
-│   │       │       ├── resolve NUM-003 record_cfg
-│   │       │       └── build/sum PSDs → R_n
-│   │       └── Stage 4: calculate_MMSE_DTE(...)
-│   │           ├── COM_MMSE_DTE(...).run(...)
-│   │           └── build H_rxffe from selected w_lim representation
-│   ├── optionally choose and evaluate fine phase indices
-│   ├── retain the current minimum-MSE complete candidate bundle
+│   ├── calculate_sampling_phase(...)                    [SRCH-001 L2 owner]
+│   │   ├── resolve method / stride once
+│   │   ├── initialize COMRunStatus
+│   │   ├── choose initial phase indices
+│   │   ├── evaluate each requested phase
+│   │   │   └── calculate_pos_candidate(...)
+│   │   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
+│   │   │       │   ├── build complete per-phase eq_ch responses
+│   │   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
+│   │   │       │       ├── resolve NUM-003 record_cfg
+│   │   │       │       └── build/sum PSDs → R_n
+│   │   │       └── Stage 4: calculate_MMSE_DTE(...)
+│   │   │           ├── COM_MMSE_DTE(...).run(...)
+│   │   │           └── build H_rxffe from selected w_lim representation
+│   │   ├── optionally choose and evaluate fine phase indices
+│   │   └── retain minimum-MSE bundle + COMRunStatus records
 │   └── _assign_selected_phase(eq_ch, imp, dte) once
 └── branch by cfg.exe.target
     ├── mse
