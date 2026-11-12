@@ -71,7 +71,7 @@ A failure does not roll the root status back. Fields assigned by completed stage
 | `_assign_paths(paths)` | replaces `status.paths` |
 | `_assign_run(run_status)` | replaces `status.run` |
 | `_assign_selected_phase(eq_ch, imp, dte)` | validates one phase identity and atomically publishes the selected pre-DTE equivalent channel, impairment, and completed DTE |
-| `_assign_post_ffe(phase_index, eq_ch_post, imp_post)` | validates selected phase identity and atomically adds both Stage 5 outputs without replacing pre-DTE or DTE data |
+| `_assign_post_ffe(phase_index, eq_ch_post, imp_post)` | validates selected phase identity and atomically adds both Post-FFE outputs without replacing pre-DTE or DTE data |
 | `_assign_pmf(pmf_status)` | replaces `status.pmf` |
 | `_assign_mlsd(mlsd_status)` | replaces `status.mlsd` |
 
@@ -115,7 +115,7 @@ from configuration.
 
 `pulse_no_txffe` 只在 victim path 有值；NEXT／FEXT 為 `None`。它是與
 `pulse` 同一 Stage 1 owner 建立的 full-rate response，兩者只差是否包含 TX FFE。
-Stage 3 從它抽樣 `h_tn`；`COMPreDTEEqChannelStatus.h_tn` 仍保存選定 phase 的
+Pre-DTE model 從它抽樣 `h_tn`；`COMPreDTEEqChannelStatus.h_tn` 仍保存選定 phase 的
 sampled response，因此兩者位於不同 lifecycle/status branches，不重複責任。
 
 ## Run status
@@ -149,7 +149,7 @@ sampled response，因此兩者位於不同 lifecycle/status branches，不重�
 | `H_all`, `Rnn_all` | arrays on the full solver domain | solver diagnostic |
 | `H`, `R_nn`, `H_b` | arrays on the selected solver domain | solver diagnostic |
 | `w`, `b` | unlimited coefficient arrays | limiter/report diagnostic |
-| `H_rxffe` | dimensionless `SampledResponse` | Stage 4 representation of the selected `w_lim` on the noise grid |
+| `H_rxffe` | dimensionless `SampledResponse` | DTE representation of the selected `w_lim` on the noise grid |
 
 The compatibility property `dfe_coeff` returns `b_lim` for shared report code.
 
@@ -159,17 +159,17 @@ The compatibility property `dfe_coeff` returns `b_lim` for shared report code.
 
 `COMImpStageStatus` contains `record_cfg`, `psd` and `adc_input`.
 Equivalent-channel responses are owned by root `COMStatus.eq_ch`; RX FFE tap
-ownership belongs to `COMDTEStatus`, while Stage 5 response realization belongs
+ownership belongs to `COMDTEStatus`, while Post-FFE response realization belongs
 to `COMPostFFEEqChannelStatus`.
 
 | Root field | Producer | Replacement behavior |
 |---|---|---|
 | `pre_dte` | selected output from `calculate_pre_dte_imp_at_pos()` | assigned after phase selection |
 | `post_ffe` | `calculate_post_ffe_imp()` | added after DTE selection |
-| `status.eq_ch` | selected Stage 3 candidate | pre-DTE fields are preserved; Stage 5 adds only `post_ffe` |
-| `status.dte.H_rxffe` | Stage 4 | completed before candidate selection/commit |
+| `status.eq_ch` | selected Pre-DTE candidate | pre-DTE fields are preserved; Post-FFE model adds only `post_ffe` |
+| `status.dte.H_rxffe` | DTE solver | completed before candidate selection/commit |
 
-Stage 3/4 selection retains only the current minimum-MSE candidate's complete
+Sampling search retains only the current minimum-MSE Pre-DTE/DTE candidate's complete
 `eq_ch`／`imp`／`dte` bundle. Other phases retain only `COMRunStatus` summaries.
 The selected bundle is committed once, so mixed-phase root status is illegal.
 
@@ -205,10 +205,10 @@ Every `S_*` field is a `SampledPSD` and therefore carries its own `theta`, `fb`,
 | `COMPreDTEEqChannelStatus` | `h_dsamp`, `h_tn`, `h_J`, `h_XTs_dsamp` | `SampledResponse` or list thereof |
 | `COMPostFFEEqChannelStatus` | `record_realization`, `response_cfg`, `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | ALG-011 provenance/grid plus `SampledResponse` or list thereof |
 
-All Stage 5 responses retain the exact `response_cfg` resolved by ALG-011 and
+All Post-FFE responses retain the exact `response_cfg` resolved by ALG-011 and
 own their impulse/transfer representation. `COMImpStageStatus.record_cfg`
-records the concrete grid of that stage's PSD output. Stage 5 reporting reuses
-the pre-DTE record; Stage 7 reconstructs its own MLSD PSD record from complete
+records the concrete grid of that domain's PSD output. Post-FFE reporting reuses
+the pre-DTE record; MLSD reconstructs its own PSD record from complete
 eq-channel responses and stores it in `COMMLSDNoiseStatus.record_cfg`.
 
 ### `COMAdcInputPMF`

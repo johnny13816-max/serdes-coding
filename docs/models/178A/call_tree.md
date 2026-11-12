@@ -39,7 +39,7 @@ RUN_MODE
 profile，並展開為 `cfg.alg/num/srch/exe`；model 不判斷 selector。
 有效方法、profile 名稱及 raw/effective override 隨 config snapshot 輸出。
 `COM.__init__()` 不解析 NUM-003，也不建立共享 impairment-record context。
-NUM-003 只在 Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD 即將加總時，由各自
+NUM-003 只在 Pre-DTE 與 pre-MLSD PSD 即將加總時，由各自
 owner 解析；channel／pulse 與完整 `eq_ch` 一律保留原本的 `COMConfig.link` 表示。
 
 ## Manual file entry
@@ -102,36 +102,35 @@ COM._run_once()
 │               │   └── bilinear_iir: measured TF -> finite record -> IIR + unit pulse
 │               └── victim only: _realize_ctle_pulse(include_txffe=False)
 │                   └── path.pulse_no_txffe
-├── Stage 2: calculate_pre_dte_imp_common(victim)
-│   └── return phase-independent sigma_X cache
-├── Stage 3: sampling-phase evaluation
-│   ├── prepare_sampling_phase_common(...)
-│   │   ├── select each XT path phase from the full oversampled response
-│   │   └── emit full one-sample/UI eq_ch_XT records
-│   ├── calculate_sampling_phase(...)                    [SRCH-001 L2 owner]
-│   │   ├── resolve method / stride once
-│   │   ├── initialize COMRunStatus
-│   │   ├── choose initial phase indices
-│   │   ├── evaluate each requested phase
-│   │   │   └── calculate_pos_candidate(...)
-│   │   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
-│   │   │       │   ├── build complete per-phase eq_ch responses
-│   │   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
-│   │   │       │       ├── resolve NUM-003 record_cfg
-│   │   │       │       ├── resolve ALG-008 clipping noise / CDF tail
-│   │   │       │       ├── resolve NUM-004 ADC-input PMF grid
-│   │   │       │       └── build/sum PSDs → R_n
-│   │   │       └── Stage 4: calculate_MMSE_DTE(...)
-│   │   │           ├── COM_MMSE_DTE(...).run(...)
-│   │   │           └── build H_rxffe from selected w_lim representation
-│   │   ├── optionally choose and evaluate fine phase indices
-│   │   └── retain minimum-MSE bundle + COMRunStatus records
+├── Pre-DTE model: phase-independent preparation
+│   ├── calculate_pre_dte_imp_common(victim) -> sigma_X cache
+│   └── prepare_pre_dte_phase_inputs(...)
+│       ├── select each XT path phase from the full oversampled response
+│       └── emit full one-sample/UI eq_ch_XT records
+├── Sampling search loop in _run_once()                  [SRCH-001 owner]
+│   ├── resolve method / stride once                     [sole selector read]
+│   ├── initialize COMRunStatus
+│   ├── _initial_pos_sweep_indices(...)
+│   ├── while one initial/fine phase batch remains
+│   │   └── for each requested phase
+│   │       ├── Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
+│   │       │   ├── build complete per-phase eq_ch responses
+│   │       │   └── _build_pre_dte_psd(...)
+│   │       │       ├── resolve NUM-003 record_cfg
+│   │       │       ├── resolve ALG-008 clipping noise / CDF tail
+│   │       │       ├── resolve NUM-004 ADC-input PMF grid
+│   │       │       └── build/sum PSDs → R_n
+│   │       ├── DTE solver: calculate_MMSE_DTE(...)
+│   │       │   ├── COM_MMSE_DTE(...).run(...)
+│   │       │   └── build H_rxffe from selected w_lim representation
+│   │       └── record MSE/error and retain strict-minimum complete bundle
+│   ├── coarse_fine only: _fine_pos_sweep_indices(...)
 │   └── _assign_selected_phase(eq_ch, imp, dte) once
 └── branch by cfg.exe.target
     ├── mse
     │   └── return selected pre-DTE/DTE status
     ├── dfe
-    │   ├── Stage 5: calculate_post_ffe_imp(...)
+    │   ├── Post-FFE model: calculate_post_ffe_imp(...)
     │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
     │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
     │   │   ├── _resolve_adc_input_pmf_config() for NUM-004 selected-phase material
@@ -151,12 +150,16 @@ COM._run_once()
         └── return requested completed status
 ```
 
-Stage 7 的 `build_mlsd_noise()` 是第二個 NUM-003 owner：它從完整 pre/post-FFE
+MLSD 的 `build_mlsd_noise()` 是第二個 NUM-003 owner：它從完整 pre/post-FFE
 `eq_ch` response 直接建立 MLSD 專用 component PSD；只在該函數內解析 record、
-加總 `S_ni` 並形成 `R_ni`。Stage 5 的 reporting PSD 不作為 MLSD PSD source，
+加總 `S_ni` 並形成 `R_ni`。Post-FFE reporting PSD 不作為 MLSD PSD source，
 完整 `h_ISI` 也不會預先截短。MLSD 不擁有另一個 RX FFE realization selector。
 
-A `COMMainCursorError` rejects only that phase in the sampling loop. Other exceptions leave `_run_once()` and preserve any status already assigned, as described in the status lifecycle.
+A `COMMainCursorError` rejects only that phase in the root Sampling-search loop.
+Other exceptions leave `_run_once()` and preserve any status already assigned,
+as described in the status lifecycle. Numbered stages are not the ownership
+coordinate; domain function sets own their dataclasses while this call tree
+records runtime order and feedback loops.
 
 ## DTE solver call boundary
 
@@ -200,7 +203,7 @@ calculate_COM_MLSD()
 ├── _resolve_final_com_pmf_config(...) [same NUM-005 owner / execution point 2]
 ├── gaussian_addition → solve_g_an(...)
 │   └── evaluate_delta_com_an() rebuilds p_G_an on resolved final dy [direct]
-├── scaled_total_pdf → reuse/scale Stage 6 PMFs [NUM-005 indirect]
+├── scaled_total_pdf → reuse/scale DFE PMFs [NUM-005 indirect]
 ├── build_mlsd_noise(...) -> COMMLSDNoiseStatus
 ├── calculate_der_mlsd(p_an, R_ni, ...) -> DER_MLSD, der_by_j
 ├── assemble complete COMMLSDStatus using Eq. 178A-47
@@ -208,9 +211,9 @@ calculate_COM_MLSD()
 ```
 
 `calculate_COM()` is a compatibility alias for `calculate_COM_DFE()`.
-NUM-005 does not apply a final post-combination regrid. Stage 6 constructs its
-component PMFs on the resolved grid; Stage 7 either rebuilds the Gaussian PMF on
-that grid or inherits the already gridded Stage 6 PMFs.
+NUM-005 does not apply a final post-combination regrid. The DFE COM model
+constructs its component PMFs on the resolved grid; MLSD either rebuilds the
+Gaussian PMF on that grid or inherits the already gridded DFE PMFs.
 
 ## Local file-backed search
 

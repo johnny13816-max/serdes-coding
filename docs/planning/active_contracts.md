@@ -18,9 +18,11 @@ convergence、驗證與 isolated integration。ALG-004 signed-scale contract、�
 驗證與 remote integration 已完成並關閉；ALG-006 也已完成二次 ownership
 審查，確認 `resample_tf()` 為 L5 owner。ALG-007 也已完成二次審查，確認
 L3 CTLE pulse-realization functional block ownership。NUM-003 也已完成二次審查與
-實作修正，確認 Stage 2／Stage 7 各有一個 PSD-sum owner。SRCH-001 已完成
-ownership 收斂，Stage 3 L2 `COM.calculate_sampling_phase()` 是唯一 selector
-owner。ALG-008 也已完成二次審查，確認 Stage 2 L3 `_build_pre_dte_psd()`
+實作修正，確認 Pre-DTE／MLSD model 各有一個 PSD-sum owner。SRCH-001 已依
+domain function-set 架構完成 ownership correction：Sampling search 是 semantic
+owner，`COM._run_once()` phase-search loop 是 concrete owner；Pre-DTE 與 DTE
+operations 在 root runtime flow 中保持可見。ALG-008 也已完成二次審查，確認
+Pre-DTE model L3 `_build_pre_dte_psd()`
 是 sole owner。NUM-004／005 已確認各自的 L4 domain resolver 是 sole owner；
 L5 `COMPMFGridControl.resolve_dy()` 僅為 shared kernel。NUM-005 的 Stage 6
 consumer 是直接完整使用；Stage 7 依 added-noise flow 直接使用 final grid 或
@@ -52,7 +54,7 @@ reporting、C2M migration 或 release 工作。
 | Boundary | Evidence |
 | --- | --- |
 | ALG-010 — Floating FFE strategy | **完整初次審查 Closed 2026-11-12**。保留 `heuristic`／`simplified`／`spec-defined`；L3 `COM_MMSE_DTE` 是 semantic owner，`COM_MMSE_DTE.run()` 是 concrete callable owner。`COM.calculate_MMSE_DTE()` 只注入 `cfg.alg.floating_mode`；三個 strategy helpers 是 executors。Focused `7 passed` 覆蓋唯一 operational selector read、每個 selector 的唯一 dispatch 與三種 mode 的 `N_wg=0` bypass，並檢查 coherent `COMDTEStatus`；與既有 policy tests 合跑 `42 passed`。Production path 不變，未重跑 golden，也不宣稱 equation/spec equivalence。 |
-| SRCH-001 — Sampling-phase schedule | **二次 ownership review Closed 2026-11-12**。Stage 3 L2 `COM.calculate_sampling_phase()` 是 sole selector owner；解析 `each_phase`／`coarse_fine` 與 stride、維護 visit order／`COMRunStatus`、保留 strict-minimum-MSE complete bundle。`_run_once()` 只 orchestration/commit；index helpers 只接收 concrete choice；`calculate_pos_candidate()`／Stage 4 solver 是 non-owner。Focused `53 passed`；SiCoPR golden `1 passed`，selected phase 5、MSE `0.0061912610245255335`、COM_DFE `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 與三個 digests 不變。 |
+| SRCH-001 — Sampling-phase schedule | **Ownership corrected 2026-11-13**。Numbered stage 不再作為 ownership coordinate。Sampling search function set 是 semantic owner，`COM._run_once()` 內不可拆分的 phase-search loop 是 concrete owner：唯一讀取 method/stride、共用 initial/fine batch loop、維護 `COMRunStatus`、處理 cursor rejection、保留 strict-minimum complete bundle 並 commit。`calculate_pos_candidate()`／`calculate_sampling_phase()` wrappers 已移除；Pre-DTE model 與 DTE solver 直接顯示在 root flow。Focused/policy `49 passed`；fixed SiCoPR golden `1 passed`；production numerical formulas 未修改。 |
 | ARC-178A-001 — standalone 178A COM roots | `cc5339e` |
 | ARC-178A-002 — semantic dataclass text | `149bbd6` |
 | ARC-178A-003 — shared reporting orchestration | `e5b0b2b` |

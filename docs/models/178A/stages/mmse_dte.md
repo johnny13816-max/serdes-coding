@@ -1,18 +1,18 @@
-# 178A Stage 4: MMSE-DTE
+# 178A DTE solver function set
 
 > **Review state:** ALG-010 completed its full initial review on 2026-11-12. The three floating strategies, callable owner, injector, executors and `N_wg=0` bypass are covered by focused tests. The MMSE equations and numerical results have not been independently revalidated by this documentation-only ownership closure.
 
 ## Purpose and ownership
 
-This stage solves one sampling-phase candidate's limited discrete-time equalizer.
+This domain function set solves one sampling-phase candidate's limited discrete-time equalizer.
 
 Responsibility is deliberately split:
 
-- Stage 3 owns phase scheduling, per-phase orchestration, rejection recording, minimum-MSE selection, and atomic selected-candidate commit;
+- the Sampling-search control block in `_run_once()` owns phase scheduling, rejection recording, minimum-MSE selection, and atomic selected-candidate commit;
 - L3 `COM_MMSE_DTE` is ALG-010's semantic owner; `COM_MMSE_DTE.run()` is its concrete callable owner and controls floating-strategy dispatch plus the complete placement solve/result lifecycle.
-- `calculate_MMSE_DTE()` injects the resolved `cfg.alg.floating_mode` and finalizes the Stage 4 result by representing `w_lim` as `H_rxffe` on the candidate noise grid; it is not an ALG-010 owner.
+- `calculate_MMSE_DTE()` injects the resolved `cfg.alg.floating_mode` and finalizes the DTE result by representing `w_lim` as `H_rxffe` on the candidate noise grid; it is not an ALG-010 owner.
 
-The stage does not build pre-DTE PSDs, construct residual post-FFE responses, build final PMFs, or calculate COM.
+The DTE solver does not build pre-DTE PSDs, construct residual post-FFE responses, build final PMFs, or calculate COM.
 
 ## Governing references
 
@@ -21,9 +21,6 @@ Current solver docstrings identify Annex 178A Eq. 178A-31 through Eq. 178A-35 fo
 ## Entries and outputs
 
 ```text
-calculate_pos_candidate(...)
-    -> (candidate_eq_ch, candidate_impairment, candidate_dte)
-
 calculate_MMSE_DTE(victim, eq_ch, imp_pre, pos)
     -> COMDTEStatus
 
@@ -49,10 +46,9 @@ choose initial phases
 ├── each_phase -> every integer phase
 └── coarse_fine -> every pos_coarse_stride phase
 
-for each initial phase
-└── calculate_pos_candidate(...)
-    ├── calculate_pre_dte_imp_at_pos(...)
-    └── calculate_MMSE_DTE(...)
+for each phase in the shared root phase-batch loop
+├── Pre-DTE model: calculate_pre_dte_imp_at_pos(...)
+└── DTE solver: calculate_MMSE_DTE(...)
 
 if coarse_fine
 ├── identify current best valid coarse phase
@@ -188,11 +184,11 @@ The detailed equations require separate specification validation. This contract 
 | `H`, `R_nn`, `H_b` | selected-domain matrices | solver diagnostics |
 | `w` | `(N_max,)`, dimensionless | unlimited FFE scattered into a full zero-filled vector |
 | `b` | `(N_b,)`, dimensionless | unlimited DFE coefficients |
-| `H_rxffe` | `SampledResponse`, dimensionless | Stage 4 representation of the complete `w_lim` on the candidate noise grid |
+| `H_rxffe` | `SampledResponse`, dimensionless | DTE representation of the complete `w_lim` on the candidate noise grid |
 
 The `dfe_coeff` compatibility property returns `b_lim`. `H_rxffe` belongs to
 the DTE result because it is completely determined once `w_lim` and the
-candidate grid are known. Residual ISI remains a Stage 5 result.
+candidate grid are known. Residual ISI remains a Post-FFE model result.
 
 ## Failure conditions
 

@@ -6,13 +6,16 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-12 Asia/Taipei
+Generated at: 2026-11-13 Asia/Taipei
 Source branch: main
-Source revision: current main plus the isolated ALG-010 closure
+Source revision: current main includes the isolated SRCH-001 runtime-flow correction
 Active task: CP-BR complete initial branch review — NUM-006
 Current phase: prior Closed items stay closed; every remaining item is reviewed from eligibility without relying on first/second-review labels
 Collaboration mode: Co-Build architecture review
-Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
+Approved boundary: numbered stages are retired as the primary ownership coordinate. Use COM root runtime flow separately from L1 domain/control function sets, then functional blocks and operations/helpers. Dataclass/physical goal defines domain ownership; loop/caller relationships do not transfer ownership.
+Completed: SRCH-001 ownership correction moves the sole method/stride read and complete search lifecycle into the visible phase-search loop in COM._run_once(). Sampling search is semantic owner; the root loop is concrete owner because extraction would hide Pre-DTE/DTE domains or create a callback-only wrapper.
+SRCH-001 structure: one shared initial/fine phase-batch loop directly calls calculate_pre_dte_imp_at_pos() and calculate_MMSE_DTE(); calculate_pos_candidate()/calculate_sampling_phase() were removed. prepare_pre_dte_phase_inputs() belongs to the Pre-DTE model.
+SRCH-001 evidence: focused/policy 49 passed and fixed SiCoPR golden 1 passed; static ownership audit finds only _run_once reads the selector fields. Numerical formulas and branch choices are unchanged.
 Completed: ALG-010 full initial review retains heuristic/simplified/spec-defined; L3 COM_MMSE_DTE is semantic owner and COM_MMSE_DTE.run() is the concrete callable owner. Production code required no change.
 ALG-010 boundary: COM.calculate_MMSE_DTE() only injects cfg.alg.floating_mode; the three strategy helpers are executors. The owner controls dispatch and the complete placement solve/limit/MSE/status lifecycle. Equal-score tie-break was explicitly outside this closure.
 ALG-010 evidence: focused 7 passed covers the sole operational selector read, unique dispatch for all three strategies, N_wg=0 bypass under all modes, and coherent COMDTEStatus; combined policy run is 42 passed. Production numerical path is unchanged, so golden was not rerun and no equation/spec-equivalence claim is made.
@@ -28,7 +31,7 @@ Evidence links: docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/stages/mmse_dte.md;
                 docs/validation/mmse_input_akinwale_178A.md;
                 docs/planning/active_contracts.md
-Dirty-state summary: ALG-010 focused tests and authoritative documentation are ready for isolated commit; no production code is changed.
+Dirty-state summary: clean after the isolated SRCH-001 runtime-flow correction commit.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成

@@ -117,7 +117,8 @@ boundary, candidate fields may be scalar or non-empty one-dimensional vectors.
 The outer runner normalizes axes and expands their Cartesian product. A product
 of one uses the single-run path; a larger product uses sweep/ranking/final
 orchestration. Every `COM` instance still receives one resolved scalar
-candidate. Stage 3 reads only its sampling-phase search controls.
+candidate. Only the Sampling-search control block in `_run_once()` reads its
+sampling-phase search controls.
 
 The grouped `COMRunProfiles` is adapter-internal: it reads the three workbook
 profiles before `run_mode` selects one profile and flattens its ALG/NUM/EXE

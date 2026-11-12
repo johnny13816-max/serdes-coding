@@ -14,7 +14,7 @@ from itertools import combinations, product
 from pathlib import Path
 import sys
 from time import perf_counter
-from typing import Any, Callable, Literal, Optional, Sequence
+from typing import Any, Literal, Optional, Sequence
 import numpy as np
 
 try:
@@ -1516,7 +1516,7 @@ class COM:
         self.status: Optional[COMStatus | COMSearchStatus] = None
 
     def _resolve_post_ffe_response_cfg(self) -> LinkConfig:
-        """Resolve the one time-domain response grid owned by Stage 5."""
+        """Resolve the one time-domain response grid owned by the Post-FFE model."""
         realization = self.cfg.alg.rxffe_record_realization
         if realization in {"linear_fixed_grid", "finite_record_circshift"}:
             return self.cfg.link
@@ -1595,7 +1595,7 @@ class COM:
                 elapsed_s = perf_counter() - started
                 print(f"[178A single-run +{elapsed_s:8.2f} s] {message}", flush=True)
 
-        # stage 1: build all paths
+        # Path realization
         report("build_all_paths: start")
         paths = self.build_all_paths()
         self._assign_paths(paths)
@@ -1605,26 +1605,109 @@ class COM:
         h_XTs = [path.pulse.ir for path in xtalk_paths]
         report(f"build_all_paths: done ({len(paths)} paths)")
 
-        # stage 2: calculate phase-independent receiver impairment cache
+        # Pre-DTE model: calculate phase-independent receiver impairment cache.
         report("pre_dte_imp_common: start")
         pre_dte_imp_common = self.calculate_pre_dte_imp_common(victim=victim)
         report("pre_dte_imp_common: done")
 
-        # stage 3 preparation: select each full-length XT path phase once.
-        # NUM-003 is deliberately absent from phase orchestration.
-        report("sampling_phase_common: start")
-        pre_dte_imp_common, h_XTs_dsamp = self.prepare_sampling_phase_common(
+        # Pre-DTE model: select each full-length XT path phase once.
+        # NUM-003 is deliberately absent from this full-response preparation.
+        report("pre_dte_phase_inputs: start")
+        pre_dte_imp_common, h_XTs_dsamp = self.prepare_pre_dte_phase_inputs(
             common=pre_dte_imp_common,
             h_XTs=h_XTs,
         )
-        report("sampling_phase_common: done")
+        report("pre_dte_phase_inputs: done")
 
-        best_eq_ch, best_imp_pre, best_dte = self.calculate_sampling_phase(
-            victim=victim,
-            common=pre_dte_imp_common,
-            h_XTs_dsamp=h_XTs_dsamp,
-            report=report,
+        # Sampling search owns only visit order, result/error records, strict
+        # minimum-MSE selection, and the selected complete-bundle lifecycle.
+        # The Pre-DTE model and DTE solver remain explicit in this root flow.
+        method = self.cfg.srch.pos_sweep_method
+        coarse_stride = self.cfg.srch.pos_coarse_stride
+        run_status = COMRunStatus(
+            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
+            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
+            mse_by_pos=[None] * self.per_ui,
+            main_cursor_error_by_pos=[None] * self.per_ui,
         )
+        self._assign_run(run_status)
+
+        best_dte: Optional[COMDTEStatus] = None
+        best_eq_ch: Optional[COMEqChannelStatus] = None
+        best_imp_pre: Optional[COMImpairmentStatus] = None
+
+        phase_batch = self._initial_pos_sweep_indices(
+            per_ui=self.per_ui,
+            method=method,
+            coarse_stride=coarse_stride,
+        )
+        run_status.coarse_pos = list(phase_batch)
+        phase_label = "phase" if method == "each_phase" else "coarse"
+        fine_batch_pending = method == "coarse_fine"
+        report(f"pos sweep ({method}): {phase_batch}")
+
+        while phase_batch:
+            for pos in phase_batch:
+                pos_started = perf_counter()
+                try:
+                    report(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
+
+                    # Pre-DTE model: build the complete input for this phase.
+                    eq_ch, imp_pre = self.calculate_pre_dte_imp_at_pos(
+                        victim=victim,
+                        pos=pos,
+                        common=pre_dte_imp_common,
+                        h_XTs_dsamp=h_XTs_dsamp,
+                    )
+
+                    # DTE solver: evaluate the same phase and publish its MSE.
+                    dte_status = self.calculate_MMSE_DTE(
+                        victim=victim,
+                        eq_ch=eq_ch,
+                        imp_pre=imp_pre,
+                        pos=pos,
+                    )
+                except COMMainCursorError as error:
+                    run_status.main_cursor_error_by_pos[pos] = str(error)
+                    report(
+                        f"{phase_label} pos {pos + 1}/{self.per_ui}: "
+                        "skipped (main cursor error)"
+                    )
+                    continue
+
+                run_status.mse_by_pos[pos] = float(dte_status.mse)
+                is_best = best_dte is None or dte_status.mse < best_dte.mse
+                if is_best:
+                    best_dte = dte_status
+                    best_eq_ch = eq_ch
+                    best_imp_pre = imp_pre
+                report(
+                    f"{phase_label} pos {pos + 1}/{self.per_ui}: done in "
+                    f"{perf_counter() - pos_started:.2f} s; mse={dte_status.mse:.6e}"
+                    f"{' (best)' if is_best else ''}"
+                )
+
+            if fine_batch_pending:
+                if best_dte is None:
+                    raise RuntimeError(
+                        "Coarse phase sweep did not produce any valid sampling phase candidate."
+                    )
+                phase_batch = self._fine_pos_sweep_indices(
+                    per_ui=self.per_ui,
+                    coarse_stride=coarse_stride,
+                    coarse_best_pos=best_dte.pos,
+                    evaluated_indices=set(run_status.coarse_pos),
+                )
+                run_status.fine_pos = list(phase_batch)
+                phase_label = "fine"
+                fine_batch_pending = False
+                report(f"pos sweep fine around pos={best_dte.pos}: {phase_batch}")
+            else:
+                phase_batch = []
+
+        if best_dte is None or best_eq_ch is None or best_imp_pre is None:
+            raise RuntimeError("COM did not produce any valid sampling phase candidate.")
+        report(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
         self._assign_selected_phase(best_eq_ch, best_imp_pre, best_dte)
 
         if exe_cfg.target == "mse":
@@ -1691,7 +1774,7 @@ class COM:
         if imp_status.pre_dte is None or imp_status.post_ffe is not None:
             raise ValueError("Selected phase commit requires pre-DTE impairment only.")
         if not isinstance(dte_status.H_rxffe, SampledResponse):
-            raise ValueError("Completed Stage 4 status must provide H_rxffe.")
+            raise ValueError("Completed DTE status must provide H_rxffe.")
         current = (
             COMStatus()
             if self.status is None or isinstance(self.status, COMSearchStatus)
@@ -1710,7 +1793,7 @@ class COM:
         eq_ch_post: COMPostFFEEqChannelStatus,
         imp_post: COMImpairmentStatus,
     ) -> None:
-        """Atomically add Stage 5 outputs without replacing selected-phase data."""
+        """Atomically add Post-FFE outputs without replacing selected-phase data."""
         current = self._require_status()
         if current.eq_ch is None or current.imp is None or current.dte is None:
             raise RuntimeError("Post-FFE commit requires a selected phase.")
@@ -1829,8 +1912,8 @@ class COM:
         Returns
         -------
         COMImpairmentStatus
-            Signal variance cached before Stage 3. PSD construction remains in
-            the Stage 2 impairment model and is deferred until the complete
+            Signal variance cached before Sampling search. PSD construction
+            remains in the Pre-DTE model and is deferred until the complete
             equivalent channel for one candidate phase is available.
         """
         L = self.cfg.L
@@ -1843,7 +1926,7 @@ class COM:
             ),
         )
 
-    def prepare_sampling_phase_common(
+    def prepare_pre_dte_phase_inputs(
         self,
         common: COMImpairmentStatus,
         h_XTs: list[np.ndarray],
@@ -2024,14 +2107,14 @@ class COM:
         ):
             raise ValueError(
                 "common must be the complete output of "
-                "prepare_sampling_phase_common()."
+                "prepare_pre_dte_phase_inputs()."
             )
         if not isinstance(h_XTs_dsamp, list) or any(
             np.asarray(h_xt_dsamp).ndim != 1 for h_xt_dsamp in h_XTs_dsamp
         ):
             raise ValueError(
                 "h_XTs_dsamp must be the list of one-dimensional sampled "
-                "crosstalk responses returned by prepare_sampling_phase_common()."
+                "crosstalk responses returned by prepare_pre_dte_phase_inputs()."
             )
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
         if len(h_dsamp) == 0:
@@ -2074,112 +2157,6 @@ class COM:
             pre_dte=pre_dte,
         )
         return eq_ch, imp_status
-
-    def calculate_pos_candidate(
-        self,
-        victim: COMPath,
-        pos: int,
-        common: COMImpairmentStatus,
-        h_XTs_dsamp: list[np.ndarray],
-    ) -> tuple[COMEqChannelStatus, COMImpairmentStatus, COMDTEStatus]:
-        """Calculate one sampling phase's pre-DTE impairment and MMSE-DTE result."""
-        eq_ch, imp_pre = self.calculate_pre_dte_imp_at_pos(
-            victim=victim,
-            pos=pos,
-            common=common,
-            h_XTs_dsamp=h_XTs_dsamp,
-        )
-        dte_status = self.calculate_MMSE_DTE(
-            victim=victim,
-            eq_ch=eq_ch,
-            imp_pre=imp_pre,
-            pos=pos,
-        )
-        return eq_ch, imp_pre, dte_status
-
-    def calculate_sampling_phase(
-        self,
-        victim: COMPath,
-        common: COMImpairmentStatus,
-        h_XTs_dsamp: list[np.ndarray],
-        report: Optional[Callable[[str], None]] = None,
-    ) -> tuple[COMEqChannelStatus, COMImpairmentStatus, COMDTEStatus]:
-        """Own SRCH-001 scheduling and return the minimum-MSE phase bundle."""
-        method = self.cfg.srch.pos_sweep_method
-        coarse_stride = self.cfg.srch.pos_coarse_stride
-        emit = report if report is not None else lambda _message: None
-        run_status = COMRunStatus(
-            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
-            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
-            mse_by_pos=[None] * self.per_ui,
-            main_cursor_error_by_pos=[None] * self.per_ui,
-        )
-        self._assign_run(run_status)
-        best_dte: Optional[COMDTEStatus] = None
-        best_eq_ch: Optional[COMEqChannelStatus] = None
-        best_imp_pre: Optional[COMImpairmentStatus] = None
-
-        def evaluate_pos_indices(pos_indices: list[int], phase_label: str) -> None:
-            nonlocal best_dte, best_eq_ch, best_imp_pre
-            for pos in pos_indices:
-                pos_started = perf_counter()
-                try:
-                    emit(f"{phase_label} pos {pos + 1}/{self.per_ui}: start")
-                    eq_ch, imp_pre, dte_status = self.calculate_pos_candidate(
-                        victim=victim,
-                        pos=pos,
-                        common=common,
-                        h_XTs_dsamp=h_XTs_dsamp,
-                    )
-                except COMMainCursorError as error:
-                    run_status.main_cursor_error_by_pos[pos] = str(error)
-                    emit(
-                        f"{phase_label} pos {pos + 1}/{self.per_ui}: "
-                        "skipped (main cursor error)"
-                    )
-                    continue
-
-                run_status.mse_by_pos[pos] = float(dte_status.mse)
-                is_best = best_dte is None or dte_status.mse < best_dte.mse
-                if is_best:
-                    best_dte = dte_status
-                    best_eq_ch = eq_ch
-                    best_imp_pre = imp_pre
-                emit(
-                    f"{phase_label} pos {pos + 1}/{self.per_ui}: done in "
-                    f"{perf_counter() - pos_started:.2f} s; mse={dte_status.mse:.6e}"
-                    f"{' (best)' if is_best else ''}"
-                )
-
-        initial_pos_indices = self._initial_pos_sweep_indices(
-            per_ui=self.per_ui,
-            method=method,
-            coarse_stride=coarse_stride,
-        )
-        run_status.coarse_pos = list(initial_pos_indices)
-        emit(f"pos sweep ({method}): {initial_pos_indices}")
-        initial_label = "phase" if method == "each_phase" else "coarse"
-        evaluate_pos_indices(initial_pos_indices, initial_label)
-
-        if method == "coarse_fine":
-            if best_dte is None:
-                raise RuntimeError(
-                    "Coarse phase sweep did not produce any valid sampling phase candidate."
-                )
-            fine_pos_indices = self._fine_pos_sweep_indices(
-                per_ui=self.per_ui,
-                coarse_stride=coarse_stride,
-                coarse_best_pos=best_dte.pos,
-                evaluated_indices=set(initial_pos_indices),
-            )
-            run_status.fine_pos = list(fine_pos_indices)
-            emit(f"pos sweep fine around pos={best_dte.pos}: {fine_pos_indices}")
-            evaluate_pos_indices(fine_pos_indices, "fine")
-
-        if best_dte is None or best_eq_ch is None or best_imp_pre is None:
-            raise RuntimeError("COM did not produce any valid sampling phase candidate.")
-        emit(f"pos sweep: selected pos={best_dte.pos}, mse={best_dte.mse:.6e}")
-        return best_eq_ch, best_imp_pre, best_dte
 
     @staticmethod
     def _initial_pos_sweep_indices(
@@ -2231,7 +2208,7 @@ class COM:
         """
         del victim
         if eq_ch.phase_index != pos or eq_ch.h_dsamp is None:
-            raise ValueError("Stage 4 requires pre-DTE eq_ch for the requested phase.")
+            raise ValueError("DTE solver requires pre-DTE eq_ch for the requested phase.")
         h_dsamp = eq_ch.h_dsamp.ir
         solver = COM_MMSE_DTE(
             self.cfg.dte,
@@ -2247,7 +2224,7 @@ class COM:
         pre_dte_stage = imp_pre.pre_dte
         eq_ch_imp_record_cfg = None if pre_dte_stage is None else pre_dte_stage.record_cfg
         if eq_ch_imp_record_cfg is None:
-            raise ValueError("Stage 4 requires the resolved pre-DTE PSD record grid.")
+            raise ValueError("DTE solver requires the resolved pre-DTE PSD record grid.")
         return replace(
             dte_status,
             H_rxffe=SampledResponse.from_ir(dte_status.w_lim, eq_ch_imp_record_cfg),
@@ -2280,15 +2257,15 @@ class COM:
         if not np.all(np.isfinite(w_lim_ndarray)):
             raise ValueError("COMDTEStatus.w_lim contains non-finite values.")
         if eq_ch.phase_index != dte_status.pos:
-            raise ValueError("Stage 5 eq_ch phase does not match DTE phase.")
+            raise ValueError("Post-FFE eq_ch phase does not match DTE phase.")
         if eq_ch.post_ffe is not None:
-            raise ValueError("Stage 5 requires pre-DTE eq_ch only.")
+            raise ValueError("Post-FFE model requires pre-DTE eq_ch only.")
         if not isinstance(dte_status.H_rxffe, SampledResponse):
-            raise ValueError("Stage 5 requires H_rxffe from completed Stage 4.")
+            raise ValueError("Post-FFE model requires H_rxffe from the completed DTE solver.")
         pre_stage = imp_pre.pre_dte
         eq_ch_imp_record_cfg = None if pre_stage is None else pre_stage.record_cfg
         if eq_ch_imp_record_cfg is None:
-            raise ValueError("Stage 5 requires the resolved pre-DTE PSD record grid.")
+            raise ValueError("Post-FFE model requires the resolved pre-DTE PSD record grid.")
         w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, eq_ch_imp_record_cfg)
         post_ffe_response_cfg = self._resolve_post_ffe_response_cfg()
 
@@ -2341,7 +2318,7 @@ class COM:
             "post_ffe DDJ",
         )
 
-        # Gaussian DFE-COM branch. Reuse the Stage 2 PSD record; Stage 5 does
+        # Gaussian DFE-COM branch. Reuse the Pre-DTE PSD record; Post-FFE does
         # not resolve or alter NUM-003. RJ-only jitter has the same equivalent
         # response as S_jn and differs only by its scalar variance.
         jitter_denominator = self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2
@@ -2384,7 +2361,7 @@ class COM:
                 pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
 
-        # Reporting PSDs are transformations of the selected Stage 2 PSDs on
+        # Reporting PSDs are transformations of the selected Pre-DTE PSDs on
         # their existing record. They do not form another NUM-003 owner.
         S_rn = imp_pre.S_rn.filtered_by(H_rxffe)
         S_xn = imp_pre.S_xn.filtered_by(H_rxffe)
@@ -2689,7 +2666,7 @@ class COM:
                     ),
                 )
             else:
-                # Selected-phase ADC-input convention: reuse the Stage 5
+                # Selected-phase ADC-input convention: reuse the Post-FFE
                 # clipping result. Tap accumulation is not an ALG-012 decision.
                 if adc_input_pmf.delta is None:
                     raise RuntimeError("Annex D3 final quantization requires ADC input delta.")

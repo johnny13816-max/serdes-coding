@@ -1,16 +1,20 @@
-# 178A Stage 2 common impairment and Stage 3 per-phase impairment builder
+# 178A Pre-DTE model function set
 
-> **Review state:** the two-part stage boundary, cache lifecycle, runtime-policy inputs, produced status fields, and current component data flow are confirmed from source. Specification equations and numerical equivalence have not been independently revalidated by this documentation change.
+> **Review state:** the common/per-phase domain boundary, cache lifecycle,
+> runtime-policy inputs, produced dataclasses and current component data flow
+> are confirmed from source. Specification equations and numerical equivalence
+> have not been independently revalidated by this architecture correction.
 
 ## Purpose and ownership
 
-This document owns the pre-DTE impairment algorithms. Stage 3 only orchestrates
-which phases invoke them; it does not own impairment construction or NUM-003.
+This document owns the complete pre-DTE impairment model. Sampling search only
+chooses which phases invoke it; caller/control relationship does not transfer
+ownership of impairment construction or NUM-003.
 
-It is split into:
+The function set is split into:
 
-1. Stage 2 performs the phase-independent common calculation once per concrete path/filter candidate;
-2. Stage 3 calls the phase-dependent builder for every phase selected by its execution policy.
+1. phase-independent preparation once per concrete path/filter candidate;
+2. phase-dependent evaluation for every position requested by Sampling search.
 
 It owns pre-DTE receiver noise, crosstalk, TX noise, jitter noise, optional ADC quantization noise, the combined sampled PSD/autocorrelation, and the sampled equivalent responses used by the DTE solver.
 
@@ -30,55 +34,53 @@ Current source identifies these Annex 178A references:
 
 This document records what the current program does and where each result is stored. It does not certify those formulas against the specification.
 
-## Stage entries
+## Public operation entries
 
 ```text
 calculate_pre_dte_imp_common(victim)
     -> common_imp: COMImpairmentStatus
 
-prepare_sampling_phase_common(common_imp, h_XTs)
+prepare_pre_dte_phase_inputs(common_imp, h_XTs)
     -> (common_imp: COMImpairmentStatus, h_XTs_dsamp: list[np.ndarray])
 
 calculate_pre_dte_imp_at_pos(victim, pos, common_imp, h_XTs_dsamp)
     -> (COMEqChannelStatus, COMImpairmentStatus)
 ```
 
-`calculate_pos_candidate()` is the Stage 3 candidate wrapper. It invokes the
-per-phase builder, then hands the matching `eq_ch` and impairment to Stage 4.
+`_run_once()` calls the per-phase builder and DTE solver explicitly. There is no
+cross-domain candidate wrapper.
 
 ## COM call-tree hierarchy
 
-The phase-dependent builder executes from the Stage 3 candidate loop, but its
-impairment block remains a Stage 2 semantic owner.
+The phase-dependent builder executes inside the root Sampling-search loop, but
+remains part of the Pre-DTE model function set.
 
 ```text
-COM                                                   [Root: model]
-└── _run_once()                                       [L0: stage set]
-    ├── Stage 2: common pre-DTE impairment            [L1]
-    │   └── calculate_pre_dte_imp_common()            [L2: common-cache set]
-    │       └── signal variance                       [L3/L4]
-    └── Stage 3: sampling-phase evaluation            [L1]
-        ├── prepare_sampling_phase_common()           [L2]
-        │   └── XT path phase selection               [L3]
-        │       └── _select_xtalk_path_phase()        [L4; full response]
-        └── calculate_pre_dte_imp_at_pos()            [L2: invokes Stage 2 model]
-            ├── sampled equivalent-channel formation  [L3]
-            │   └── SampledResponse.from_ir()         [L4]
-            ├── transmitter-noise construction        [L3]
-            │   └── _calculate_tx_noise_eq_ch()       [L4: full response]
-            ├── jitter-noise construction             [L3]
-            │   └── _calculate_tx_jitter_eq_ch()      [L4: full response]
-            └── _build_pre_dte_psd()                  [Stage 2 L3; NUM-003 / ALG-008 owner]
-                ├── resolve one record_cfg            [NUM-003]
-                ├── build S_rn/S_xn/S_tn/S_jn         [all on record_cfg]
-                ├── resolve clipping noise / tail     [ALG-008]
-                ├── build S_qn                        [fixed downstream executor]
-                └── sum S_total / form R_n            [atomic output]
+COM                                                    [Root: model]
+└── Pre-DTE model function set                         [L1 domain]
+    ├── calculate_pre_dte_imp_common()                 [L2 common preparation]
+    │   └── signal variance                            [L3/L4]
+    ├── prepare_pre_dte_phase_inputs()                 [L2 shared phase inputs]
+    │   └── _select_xtalk_path_phase()                 [L3/L4; full response]
+    └── calculate_pre_dte_imp_at_pos()                 [L2 per-phase operation]
+        ├── sampled equivalent-channel formation       [L3]
+        │   └── SampledResponse.from_ir()              [L4]
+        ├── transmitter-noise construction             [L3]
+        │   └── _calculate_tx_noise_eq_ch()            [L4: full response]
+        ├── jitter-noise construction                  [L3]
+        │   └── _calculate_tx_jitter_eq_ch()           [L4: full response]
+        └── _build_pre_dte_psd()                       [L3; NUM-003 / ALG-008 owner]
+            ├── resolve one record_cfg                 [NUM-003]
+            ├── build S_rn/S_xn/S_tn/S_jn              [all on record_cfg]
+            ├── resolve clipping noise / tail          [ALG-008]
+            ├── build S_qn                             [fixed downstream executor]
+            └── sum S_total / form R_n                 [atomic output]
 ```
 
-Stage 2 returns a phase-independent `COMImpairmentStatus` used only as a local
-cache. Stage 3 builds a candidate `COMEqChannelStatus` plus candidate
-`COMImpairmentStatus`; Stage 4 consumes their `h_dsamp`, `R_n`, and `sigma_X`.
+Common preparation returns a phase-independent `COMImpairmentStatus` used only
+as a local cache. Per-phase evaluation builds candidate `COMEqChannelStatus`
+plus `COMImpairmentStatus`; the DTE solver consumes their `h_dsamp`, `R_n`, and
+`sigma_X`.
 
 ### Branch references
 
@@ -95,9 +97,9 @@ availability handling, not a branch behavior.
 
 ```text
 once per concrete candidate
-├── Stage 2: calculate_pre_dte_imp_common(...)
+├── calculate_pre_dte_imp_common(...)
 │   └── sigma_X common cache
-└── Stage 3 preparation: prepare_sampling_phase_common(...)
+└── prepare_pre_dte_phase_inputs(...)
     └── S_xn + full one-sample/UI h_XTs_dsamp
 
 for every requested victim pos
@@ -118,7 +120,7 @@ The common return values are run-local cache objects. They are not a separate `C
 |---|---|---|
 | `COMConfig.link` | sampled grid and `per_ui` | response sampling |
 | `COMConfig.L` | PAM order | normalized symbol standard deviation |
-| `h_XTs` | full oversampled aggressor pulse arrays | Stage 3 per-path phase selection and full sampled eq-channel records |
+| `h_XTs` | full oversampled aggressor pulse arrays | Pre-DTE per-path phase selection and full sampled eq-channel records |
 
 The `victim` argument is accepted by the current public method but is not read inside the common calculation.
 
@@ -142,14 +144,14 @@ The exact workbook mappings are defined in [Configuration tree](../config_tree.m
 calculate_pre_dte_imp_common(...)
 └── derive and return sigma_X from the configured PAM order
 
-prepare_sampling_phase_common(...)
+prepare_pre_dte_phase_inputs(...)
 └── for each aggressor
     ├── select phase from the full oversampled response
     └── retain the full one-sample/UI eq-channel response
 ```
 
 The aggressor phase selection is independent of the victim `pos` loop. It is
-owned by Stage 3 preparation and cannot be changed by NUM-003 truncation.
+owned by Pre-DTE preparation and cannot be changed by NUM-003 truncation.
 
 The common `COMPSDStatus` populates only `sigma_X`. Every PSD remains absent
 until `_build_pre_dte_psd()` receives the complete per-phase `eq_ch` material.
@@ -233,7 +235,7 @@ pre-DTE clipping、離散訊號最近落格及 Gaussian reference sampling 寫�
 
 For `full_jitter_half_tail`, clipping uses the full-jitter `S_ga=S_rn+S_xn+S_tn+S_jn` and left-tail `P_qc/2`, matching D3.2 Eq. (178A-29) through Eq. (178A-31). `rj_only_full_tail_reference` uses random-jitter-only `S_jn_RJ` **only for the clipping Gaussian sigma** and left-tail `P_qc`. Both modes keep the full `S_jn` in `S_total=S_ga+S_qn` and therefore in MMSE `R_n`. `COMAdcInputPMF.clipping_convention` records the clipping convention separately from the fixed exact-PMF `method`. The later final-COM ADC PMF calculation remains independently owned.
 
-ALG-008 的 sole callable owner 是 Stage 2 L3 `_build_pre_dte_psd()`。它讀取
+ALG-008 的 sole callable owner 是 Pre-DTE L3 `_build_pre_dte_psd()`。它讀取
 `pre_dte_adc_clipping_convention`、完成 clipping PSD/tail dispatch、呼叫固定的
 exact-PMF／quantization helpers，並將共同的 `S_ga` 與 `S_qn` 組成 `S_total/R_n`。
 `calculate_pre_dte_imp_at_pos()` 只建立 per-phase equivalent responses 並呼叫

@@ -47,9 +47,8 @@ def test_178a_branch_registry_covers_runtime_domain_fields():
 def test_178a_com_owns_one_resolved_run_without_stage_forwarding():
     assert set(signature(COM.run).parameters) == {"self", "progress"}
     for method_name in (
+        "prepare_pre_dte_phase_inputs",
         "calculate_pre_dte_imp_at_pos",
-        "calculate_pos_candidate",
-        "calculate_sampling_phase",
         "_initial_pos_sweep_indices",
         "_fine_pos_sweep_indices",
         "calculate_MMSE_DTE",
@@ -74,7 +73,7 @@ def test_178a_srch001_has_one_production_owner():
             for node in ast.walk(function)
         ):
             owners.add(function.name)
-    assert owners == {"calculate_sampling_phase"}
+    assert owners == {"_run_once"}
 
 
 def test_178a_runtime_domains_are_canonical_and_legacy_names_are_absent(reference_cfg):
@@ -267,14 +266,14 @@ def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
     victim = paths[0]
     h_XTs = [path.pulse.ir for path in paths[1:]]
     common = truncated_model.calculate_pre_dte_imp_common(victim)
-    common, h_XTs_dsamp = truncated_model.prepare_sampling_phase_common(common, h_XTs)
+    common, h_XTs_dsamp = truncated_model.prepare_pre_dte_phase_inputs(common, h_XTs)
     truncated_eq, truncated_imp = truncated_model.calculate_pre_dte_imp_at_pos(
         victim, 5, common, h_XTs_dsamp
     )
 
     full_model = COM(replace(reference_cfg, num=COMNumericalControlConfig()))
     full_common = full_model.calculate_pre_dte_imp_common(victim)
-    full_common, full_h_XTs_dsamp = full_model.prepare_sampling_phase_common(
+    full_common, full_h_XTs_dsamp = full_model.prepare_pre_dte_phase_inputs(
         full_common, h_XTs
     )
     full_eq, full_imp = full_model.calculate_pre_dte_imp_at_pos(
@@ -309,7 +308,7 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     victim, xtalks = paths[0], paths[1:]
     model = COM(reference_cfg)
     common = model.calculate_pre_dte_imp_common(victim)
-    common, h_xt_dsamp = model.prepare_sampling_phase_common(
+    common, h_xt_dsamp = model.prepare_pre_dte_phase_inputs(
         common, [path.pulse.ir for path in xtalks]
     )
     num_cfg = replace(

@@ -1,4 +1,4 @@
-"""Stage 3-5 selected-phase ownership and atomic commit checks."""
+"""Sampling-search, selected-phase ownership and atomic commit checks."""
 
 from types import SimpleNamespace
 
@@ -28,6 +28,46 @@ def _selected_phase(pos: int = 3):
     imp = COMImpairmentStatus(pre_dte=COMImpStageStatus())
     dte = SimpleNamespace(pos=pos, H_rxffe=response)
     return eq_ch, imp, dte
+
+
+def _sampling_search_model(*, per_ui, method, stride, mse_by_pos, rejected=()):
+    model = COM.__new__(COM)
+    model.cfg = SimpleNamespace(
+        exe=SimpleNamespace(target="mse"),
+        mlsd=SimpleNamespace(enable=False),
+        dte=SimpleNamespace(N_b=1),
+        link=SimpleNamespace(per_ui=per_ui),
+        srch=SimpleNamespace(pos_sweep_method=method, pos_coarse_stride=stride),
+        num=SimpleNamespace(pmf_grid_quality="fine", pmf_keep_mass=0.99),
+    )
+    model.status = None
+    victim = SimpleNamespace(pulse=SimpleNamespace(ir=np.array([1.0])))
+    visited = []
+
+    model.build_all_paths = lambda: [victim]
+    model._validate_victim_time_alignment = lambda _victim: None
+    model.calculate_pre_dte_imp_common = lambda *, victim: SimpleNamespace()
+    model.prepare_pre_dte_phase_inputs = (
+        lambda *, common, h_XTs: (common, [])
+    )
+
+    def calculate_pre_dte(*, victim, pos, common, h_XTs_dsamp):
+        del victim, common, h_XTs_dsamp
+        visited.append(pos)
+        eq_ch, imp, _ = _selected_phase(pos)
+        return eq_ch, imp
+
+    def calculate_dte(*, victim, eq_ch, imp_pre, pos):
+        del victim, eq_ch, imp_pre
+        if pos in rejected:
+            raise COMMainCursorError("invalid cursor")
+        _, _, dte = _selected_phase(pos)
+        dte.mse = mse_by_pos[pos]
+        return dte
+
+    model.calculate_pre_dte_imp_at_pos = calculate_pre_dte
+    model.calculate_MMSE_DTE = calculate_dte
+    return model, visited
 
 
 def test_selected_phase_mismatch_does_not_partially_update_status() -> None:
@@ -100,37 +140,20 @@ def test_post_ffe_status_requires_one_shared_response_grid() -> None:
 
 
 def test_sampling_phase_owner_resolves_coarse_fine_and_keeps_complete_bundle() -> None:
-    model = COM.__new__(COM)
-    model.cfg = SimpleNamespace(
-        link=SimpleNamespace(per_ui=8),
-        srch=SimpleNamespace(pos_sweep_method="coarse_fine", pos_coarse_stride=4),
-        num=SimpleNamespace(pmf_grid_quality="fine", pmf_keep_mass=0.99),
-    )
-    model.status = COMStatus()
     mse_by_pos = {0: 5.0, 4: 1.0, 2: 3.0, 3: 0.5, 5: 2.0, 6: 4.0}
-    visited = []
-
-    def calculate_candidate(*, victim, pos, common, h_XTs_dsamp):
-        del victim, common, h_XTs_dsamp
-        visited.append(pos)
-        return (
-            SimpleNamespace(source_pos=pos),
-            SimpleNamespace(source_pos=pos),
-            SimpleNamespace(pos=pos, mse=mse_by_pos[pos]),
-        )
-
-    model.calculate_pos_candidate = calculate_candidate
-    eq_ch, imp, dte = model.calculate_sampling_phase(
-        victim=SimpleNamespace(),
-        common=SimpleNamespace(),
-        h_XTs_dsamp=[],
+    model, visited = _sampling_search_model(
+        per_ui=8,
+        method="coarse_fine",
+        stride=4,
+        mse_by_pos=mse_by_pos,
     )
+    status = model._run_once()
 
     assert visited == [0, 4, 2, 3, 5, 6]
-    assert (eq_ch.source_pos, imp.source_pos, dte.pos) == (3, 3, 3)
-    assert model.status.run.coarse_pos == [0, 4]
-    assert model.status.run.fine_pos == [2, 3, 5, 6]
-    assert model.status.run.mse_by_pos == [5.0, None, 3.0, 0.5, 1.0, 2.0, 4.0, None]
+    assert (status.eq_ch.phase_index, status.dte.pos) == (3, 3)
+    assert status.run.coarse_pos == [0, 4]
+    assert status.run.fine_pos == [2, 3, 5, 6]
+    assert status.run.mse_by_pos == [5.0, None, 3.0, 0.5, 1.0, 2.0, 4.0, None]
 
 
 def test_sampling_phase_index_helpers_receive_concrete_choice() -> None:
@@ -154,32 +177,18 @@ def test_sampling_phase_index_helpers_receive_concrete_choice() -> None:
 
 
 def test_sampling_phase_owner_skips_cursor_error_and_keeps_earlier_tie() -> None:
-    model = COM.__new__(COM)
-    model.cfg = SimpleNamespace(
-        link=SimpleNamespace(per_ui=4),
-        srch=SimpleNamespace(pos_sweep_method="each_phase", pos_coarse_stride=2),
-        num=SimpleNamespace(pmf_grid_quality="fine", pmf_keep_mass=0.99),
+    model, visited = _sampling_search_model(
+        per_ui=4,
+        method="each_phase",
+        stride=2,
+        mse_by_pos={0: 1.0, 2: 1.0, 3: 2.0},
+        rejected={1},
     )
-    model.status = COMStatus()
+    status = model._run_once()
 
-    def calculate_candidate(*, victim, pos, common, h_XTs_dsamp):
-        del victim, common, h_XTs_dsamp
-        if pos == 1:
-            raise COMMainCursorError("invalid cursor")
-        mse = {0: 1.0, 2: 1.0, 3: 2.0}[pos]
-        return (
-            SimpleNamespace(source_pos=pos),
-            SimpleNamespace(source_pos=pos),
-            SimpleNamespace(pos=pos, mse=mse),
-        )
-
-    model.calculate_pos_candidate = calculate_candidate
-    eq_ch, imp, dte = model.calculate_sampling_phase(
-        victim=SimpleNamespace(), common=SimpleNamespace(), h_XTs_dsamp=[]
-    )
-
-    assert (eq_ch.source_pos, imp.source_pos, dte.pos) == (0, 0, 0)
-    assert model.status.run.main_cursor_error_by_pos == [
+    assert visited == [0, 1, 2, 3]
+    assert (status.eq_ch.phase_index, status.dte.pos) == (0, 0)
+    assert status.run.main_cursor_error_by_pos == [
         None, "invalid cursor", None, None
     ]
-    assert model.status.run.mse_by_pos == [1.0, None, 1.0, 2.0]
+    assert status.run.mse_by_pos == [1.0, None, 1.0, 2.0]
