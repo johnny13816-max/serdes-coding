@@ -8,29 +8,27 @@
 Handoff state: ACTIVE
 Generated at: 2026-11-12 Asia/Taipei
 Source branch: main
-Source revision: current main plus the isolated remaining-review classification correction
-Active task: CP-BR complete initial branch review — ALG-010
+Source revision: current main plus the isolated ALG-010 closure
+Active task: CP-BR complete initial branch review — NUM-006
 Current phase: prior Closed items stay closed; every remaining item is reviewed from eligibility without relying on first/second-review labels
 Collaboration mode: Co-Build architecture review
 Approved boundary: coding layers are COM root, L0 stage set, L1 stage, L2 function set, L3 functional block, L4 model auxiliary, L5 generic utility/kernel. A branch owner is the lowest layer that unavoidably must know the selected behavior; ownership is not fixed at L3.
-Completed: NUM-005 second review confirms L4 _resolve_final_com_pmf_config() as the sole final-domain grid-family owner; required correction is documentation-only scope clarification.
-NUM-005 boundary: Stage 6 calculate_COM_DFE() is the complete direct consumer. Stage 7 gaussian_addition directly rebuilds p_G_an on the resolved final dy, while scaled_total_pdf indirectly inherits the Stage 6 PMFs and performs no new regrid.
-Shared kernel: L5 COMPMFGridControl.resolve_dy() implements override/relative/capped-relative arithmetic for both NUM-004 and NUM-005 but owns neither domain identity.
+Completed: ALG-010 full initial review retains heuristic/simplified/spec-defined; L3 COM_MMSE_DTE is semantic owner and COM_MMSE_DTE.run() is the concrete callable owner. Production code required no change.
+ALG-010 boundary: COM.calculate_MMSE_DTE() only injects cfg.alg.floating_mode; the three strategy helpers are executors. The owner controls dispatch and the complete placement solve/limit/MSE/status lifecycle. Equal-score tie-break was explicitly outside this closure.
+ALG-010 evidence: focused 7 passed covers the sole operational selector read, unique dispatch for all three strategies, N_wg=0 bypass under all modes, and coherent COMDTEStatus; combined policy run is 42 passed. Production numerical path is unchanged, so golden was not rerun and no equation/spec-equivalence claim is made.
 Independent future idea: adaptive Stage 1 short/long response-grid classification is recorded in future_ideas.md and isolated in commit a9ab622. It has no branch ID and must not be coupled to NUM-003.
-In progress: ALG-010 initial review has begun provenance and source mapping; branch eligibility, options, owner, tie behavior, validation and closure remain undecided.
-Queued: NUM-006 and ALG-011–017 also require the same complete initial-review process; their historical approved/owner labels are not authoritative.
+In progress: NUM-006 is next and has not begun technical review.
+Queued: ALG-011–017 also require the same complete initial-review process; their historical approved/owner labels are not authoritative.
 Blocked: none.
-Next recommended action: decide ALG-010 branch eligibility and intended three-option behavior before approving owner or implementation changes.
+Next recommended action: begin NUM-006 from eligibility and map every production consumer of cfg.num.pmf_keep_mass before discussing ownership.
 Next action owner: Codex performs read-only source/consumer review and presents required changes before implementation.
 Post-review cleanup: after every remaining complete initial review is closed, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
-Stop point: do not modify ALG-010 until its eligibility, options, owner and validation contract are discussed and explicitly approved.
-Process correction evidence: no traceable ALG-010 first-review closure exists. Legacy E-005 was reused for both an RX FFE tap-layout mapping defect and floating-mode inventory, so it cannot establish prior approval.
-NUM-005 evidence: static source audit found the final family read only in _resolve_final_com_pmf_config() and direct calls only from calculate_COM_DFE()/calculate_COM_MLSD(). Stage 7 source confirms direct gaussian_addition and indirect scaled_total_pdf consumption; current focused tests are 9 passed. Production path is unchanged, so golden was not rerun.
+Stop point: NUM-006 remains read-only until eligibility, scope, options, owner and validation contract are discussed and explicitly approved.
 Evidence links: docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/stages/mmse_dte.md;
                 docs/validation/mmse_input_akinwale_178A.md;
                 docs/planning/active_contracts.md
-Dirty-state summary: remaining-review classification and queue wording are ready for isolated commit; no production code is changed.
+Dirty-state summary: ALG-010 focused tests and authoritative documentation are ready for isolated commit; no production code is changed.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成

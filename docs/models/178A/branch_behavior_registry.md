@@ -82,7 +82,7 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-006` | pending candidate | Stage 3 ADC-input PMF convergence | `num.pmf_keep_mass`：project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **未決定** | 待完整初次審查；不宣稱 branch owner |
-| `ALG-010` | unreviewed existing selector | Stage 4 MMSE DTE | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **provisional L3** `COM_MMSE_DTE.run()` floating-tap/group block | 待完整初次審查 |
+| `ALG-010` | approved branch | Stage 4 MMSE DTE | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
 | `ALG-011` | unreviewed existing selector | Stage 5 post-FFE impairment | `alg.rxffe_record_realization`：`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | `finite_record_circshift` | **provisional L3** `_apply_rxffe_response()` | 待完整初次審查 |
 | `ALG-012` | unreviewed existing selector；evidence pending | Stage 6 final-COM clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
 | `ALG-013` | unreviewed existing selector | Stage 6 final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
@@ -111,7 +111,7 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `NUM-004` | Stage 2 pre-DTE 與 Stage 5 selected-phase ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
 | `NUM-005` | Stage 6 final DFE component／combined PMFs 與 Stage 7 added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Stage 7 Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 Stage 6 PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、Stage 7 PSD record grid |
 | `NUM-006` | pending：ADC-input PMF retained-mass／convergence effect | branch eligibility、consumer scope 與 owner 尚未核准 |
-| `ALG-010` | floating tap/group selection and solve flow | fixed-tap limiter definition |
+| `ALG-010` | floating tap/group selection strategy；owner 依 resolved selector dispatch，並控制該 placement 的完整 solve／limit／MSE／`COMDTEStatus` lifecycle | fixed-tap limiter definition、MMSE/KKT equations、coefficient limits、phase search、equal-score tie-break implementation |
 | `ALG-011` | victim、all XT、DDJ 的 post-FFE response record/grid | RX FFE taps、MMSE solve、pre-FFE responses、NUM-003 record length |
 | `ALG-012` | final-COM clipping voltage convention | final-quantization main-tap accumulation issue |
 | `ALG-013` | final ADC quantization PMF projection/support | pre-DTE ADC PMF；reference option 對 ALG-012 有相依但不合併 owner |
@@ -174,7 +174,13 @@ COM model
 │  │  └─ victim.pulse_no_txffe                               [ALG-006/007 upstream-folded consumer]
 │  └─ calculate_MMSE_DTE()                                   [SRCH-001 consumer; fixed solver]
 ├─ L0 Stage 4 — MMSE DTE
-│  ├─ COM_MMSE_DTE.run() floating tap/group solve            [ALG-010 provisional owner]
+│  ├─ calculate_MMSE_DTE()                                   [ALG-010 selector injector; non-owner]
+│  │  └─ inject cfg.alg.floating_mode
+│  ├─ COM_MMSE_DTE.run() floating tap/group solve            [ALG-010 L3 concrete owner]
+│  │  ├─ _select_floating_tap_by_isi()                        [heuristic executor; non-owner]
+│  │  ├─ _select_floating_tap_onetime()                       [simplified executor; non-owner]
+│  │  ├─ _calculate_float_ffe_178A()                          [spec-defined executor; non-owner]
+│  │  └─ solve／limit／MSE／COMDTEStatus lifecycle
 │  └─ COMDTEStatus.H_rxffe                                   [bound to pre-DTE record after solve; non-owner]
 ├─ L0 Stage 5 — post-FFE impairment
 │  ├─ _apply_rxffe_response()                                [ALG-011 provisional owner]
@@ -304,6 +310,16 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | Preserved boundary | `mass_deposit` 才委派 ALG-002 placement；`interpolate_ordinates` 不讀 projection choice。`fir_filter()` 固定使用 `mass_deposit`，不是 ALG-004 consumer。ALG-003、grid、retained mass、config/profile 與 93A 不變。 |
 | Validation | Focused PMF／MLSD／profile tests `49 passed, 2 subtests passed`；Python 3.7 export validation passed；fixed SiCoPR golden `1 passed`，既有 MSE／COM_DFE／final-COM tolerance 與三個 intermediate digests 全數通過。 |
 
+### `ALG-010` 完整初次審查證據
+
+| Item | Record |
+|---|---|
+| Status | **Closed 2026-11-12**。保留 `heuristic`／`simplified`／`spec-defined` 三種 floating tap/group strategies；production code 不需修改。 |
+| Owner / injector | L3 `COM_MMSE_DTE` 是 semantic owner，`COM_MMSE_DTE.run()` 是 concrete callable owner；`COM.calculate_MMSE_DTE()` 只注入 resolved `cfg.alg.floating_mode`，不是 owner。三個 strategy helpers 是 executor，不能各自宣稱 ownership。 |
+| Complete operation | Owner 內完成 selector dispatch、placement 所需 solve、limiter/refinement、MSE 與 coherent `COMDTEStatus` publication；`N_wg=0` 固定繞過三個 floating strategies。 |
+| Preserved boundary | 不改 strategy 算法、equal-score tie-break、MMSE/KKT equations、coefficient limits、phase search、profile/default 或 golden tolerance。 |
+| Validation | `tests/test_com_model_178A_floating_mode.py` focused `7 passed`：static audit 確認 operational selector read 只在 `run()`；三種 selector 各命中唯一 executor，且三種 mode 在 `N_wg=0` 均不進入 floating selector；每次都驗證完整 status shape、finite MSE 與 solver-level `H_rxffe=None`。與既有 policy tests 合跑 `42 passed`（workspace basetemp；792 個既有 skrf deprecation warnings）。Production numerical path 未變，因此不重跑 golden，也不建立 reference-equivalence claim。 |
+
 ## 實作入口與驗證證據
 
 | 範圍 | 主要實作入口 | 主要驗證 |
@@ -313,6 +329,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse()`；`COMPath.pulse_no_txffe` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；Stage 6/7 consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
 | Eq-channel impairment record／MMSE inputs | Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()`；Stage 3 `_select_xtalk_path_phase()` 明確是 non-owner | policy ownership test、`tests/test_com_model_178A_mlsd_noise.py`、SiCoPR golden |
+| Floating FFE strategy | L3 `COM_MMSE_DTE.run()`；`COM.calculate_MMSE_DTE()` 只注入 `cfg.alg.floating_mode` | `tests/test_com_model_178A_floating_mode.py` |
 | PMF branches | `_build_pmf_interference_178A()`、`_build_pmf_G()`、ADC/final PMF builders | `tests/test_pmf_reference_methods.py`、policy tests |
 | MLSD branches | `solve_g_an()`、`build_mlsd_noise()`、`calculate_der_mlsd()`、`calculate_COM_MLSD()` | `tests/test_com_model_178A_mlsd_flow.py`、`test_com_model_178A_mlsd_noise.py`、`test_com_model_178A_mlsd_eq47.py` |
 | Fixed-grid cascade | `utilities/link.py::LinkSegment.cascade_ir()`、`SampledResponse.cascade_ir()` | `tests/test_fixed_grid_contract.py` |

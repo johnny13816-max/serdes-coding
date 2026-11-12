@@ -162,10 +162,15 @@ A `COMMainCursorError` rejects only that phase in the sampling loop. Other excep
 
 ```text
 calculate_MMSE_DTE(...)
-└── COM_MMSE_DTE.run(...)
+├── inject cfg.alg.floating_mode                         [ALG-010 injector; non-owner]
+└── COM_MMSE_DTE.run(...)                                [ALG-010 L3 concrete owner]
     ├── validate input
     ├── build full solver matrices
-    ├── select tap placement according to floating_mode
+    ├── dispatch floating_mode
+    │   ├── heuristic → _select_floating_tap_by_isi()    [executor; non-owner]
+    │   ├── simplified → _select_floating_tap_onetime()  [executor; non-owner]
+    │   └── spec-defined → _calculate_float_ffe_178A()   [executor; non-owner]
+    ├── N_wg=0 → bypass floating selection
     ├── solve selected system
     ├── apply coefficient limits and refinement
     ├── calculate candidate MSE
@@ -173,7 +178,7 @@ calculate_MMSE_DTE(...)
     └── validate equalized main cursor
 ```
 
-The detailed numerical meaning of these operations belongs in the reviewed DTE stage document. This tree only fixes ownership: `COM_MMSE_DTE` owns the candidate solver and returns one `COMDTEStatus`; `_run_once()` owns phase comparison and selection.
+The detailed numerical meaning of these operations belongs in the reviewed DTE stage document. This tree fixes ALG-010 ownership: semantic owner `COM_MMSE_DTE`, concrete callable owner `COM_MMSE_DTE.run()`. `calculate_MMSE_DTE()` is the selector injector, strategy helpers are executors, and `_run_once()` owns phase comparison and selection; none of those three roles creates another ALG-010 owner.
 
 ## DFE COM and MLSD branches
 

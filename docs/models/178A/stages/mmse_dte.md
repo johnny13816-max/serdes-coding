@@ -1,6 +1,6 @@
 # 178A Stage 4: MMSE-DTE
 
-> **Review state:** phase-sweep ownership, solver call boundaries, floating-tap variants, limiter flow, status output, and current selection behavior are confirmed from source. The MMSE equations and numerical results have not been independently revalidated by this documentation change.
+> **Review state:** ALG-010 completed its full initial review on 2026-11-12. The three floating strategies, callable owner, injector, executors and `N_wg=0` bypass are covered by focused tests. The MMSE equations and numerical results have not been independently revalidated by this documentation-only ownership closure.
 
 ## Purpose and ownership
 
@@ -9,8 +9,8 @@ This stage solves one sampling-phase candidate's limited discrete-time equalizer
 Responsibility is deliberately split:
 
 - Stage 3 owns phase scheduling, per-phase orchestration, rejection recording, minimum-MSE selection, and atomic selected-candidate commit;
-- `COM_MMSE_DTE` owns the MMSE problem for one phase, including floating FFE placement, coefficient solving, limiting/refinement, MSE calculation, and `COMDTEStatus` construction.
-- `calculate_MMSE_DTE()` finalizes the Stage 4 result by representing `w_lim` as `H_rxffe` on the candidate noise grid.
+- L3 `COM_MMSE_DTE` is ALG-010's semantic owner; `COM_MMSE_DTE.run()` is its concrete callable owner and controls floating-strategy dispatch plus the complete placement solve/result lifecycle.
+- `calculate_MMSE_DTE()` injects the resolved `cfg.alg.floating_mode` and finalizes the Stage 4 result by representing `w_lim` as `H_rxffe` on the candidate noise grid; it is not an ALG-010 owner.
 
 The stage does not build pre-DTE PSDs, construct residual post-FFE responses, build final PMFs, or calculate COM.
 
@@ -98,7 +98,7 @@ A phase with `COMMainCursorError` keeps `mse_by_pos[pos]` as `None` and stores t
 | `pos` | phase orchestrator | integer in `[0, per_ui)` |
 | `per_ui` | `LinkConfig` | positive |
 | `COMDTEConfig` | fixed config | tap counts, placement domain, and coefficient limits |
-| `COMAlgorithmPolicyConfig.floating_mode` | algorithm policy | floating-group algorithm |
+| `cfg.alg.floating_mode` | resolved algorithm policy | floating-group algorithm injected by `calculate_MMSE_DTE()` |
 
 The workbook mapping and intrinsic/policy classification are defined in [Configuration tree](../config_tree.md).
 
@@ -129,10 +129,10 @@ COM_MMSE_DTE.run(...)
 │   ├── H_all
 │   └── Rnn_all
 ├── choose FFE placement
-│   ├── no floating groups
-│   ├── heuristic
-│   ├── simplified
-│   └── spec-defined
+│   ├── no floating groups -> bypass selector
+│   ├── heuristic -> _select_floating_tap_by_isi()
+│   ├── simplified -> _select_floating_tap_onetime()
+│   └── spec-defined -> _calculate_float_ffe_178A()
 ├── for each placement being evaluated
 │   ├── build_mmse_pruned_matrice(...)
 │   ├── solve_mmse_kkt_system()
@@ -155,6 +155,8 @@ All modes retain fixed indices `0 .. N_fix - 1`. Floating groups must fit comple
 | `spec-defined` | enumerate every legal non-overlapping group placement and compare final limited MSE | one complete solve per legal placement, then one repeated solve for the selected placement to align solver diagnostics |
 
 The two reduced modes choose groups sequentially by descending score; neither evaluates every legal placement's final limited MSE. The `spec-defined` mode is exhaustive over the legal placement set implemented by the code.
+
+The three private strategy helpers execute concrete algorithms but do not own the branch. Equal-score tie-break is an implementation detail outside the approved ALG-010 review boundary and was not changed or newly specified by this closure.
 
 `pruned_index` is always an ascending vector with fixed taps first and selected floating taps afterward.
 
@@ -225,13 +227,15 @@ Search ranks 178A sweep candidates by lower `COMDTEStatus.mse`. Reporting consum
 
 ## Validation evidence and tolerance
 
-There is currently no dedicated automated unit test for phase scheduling, floating placement, limiter/refinement, or the complete `COM_MMSE_DTE` result. Existing single-run/search execution exercises the code but does not establish equation-level numerical equivalence.
+`tests/test_com_model_178A_floating_mode.py` is the dedicated ALG-010 ownership/dispatch test. Its seven focused cases statically confine the operational selector read to `run()`, execute the real MMSE solver, verify that each configured strategy reaches exactly its corresponding executor, verify that `N_wg=0` bypasses all floating executors under every configured mode, and check coherent `COMDTEStatus` shapes plus finite MSE.
+
+This evidence closes selector ownership and dispatch only. It does not establish equation-level numerical equivalence, limiter correctness, specification equivalence, or a numerical tolerance against a reference. Production code did not change, so no golden run was required for this closure.
 
 Required validation remains:
 
 1. fixed-tap-only solve against a small independently calculated system;
 2. legal placement enumeration for one, two, and three floating groups;
-3. deterministic heuristic and simplified group selection;
+3. deterministic equal-score and exact-placement behavior for heuristic and simplified selection;
 4. exhaustive mode selecting the minimum final limited MSE;
 5. limiter activation cases for first/rest FFE and DFE bounds;
 6. full-vector zero-fill and `pruned_index` consistency;
