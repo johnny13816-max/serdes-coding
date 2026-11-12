@@ -207,8 +207,9 @@ Every `S_*` field is a `SampledPSD` and therefore carries its own `theta`, `fb`,
 
 All Stage 5 responses retain the exact `response_cfg` resolved by ALG-011 and
 own their impulse/transfer representation. `COMImpStageStatus.record_cfg`
-records the independently resolved NUM-003 PSD/correlation grid. Reporting and
-Stage 7 consume these stored objects instead of reconstructing a grid from config.
+records the concrete grid of that stage's PSD output. Stage 5 reporting reuses
+the pre-DTE record; Stage 7 reconstructs its own MLSD PSD record from complete
+eq-channel responses and stores it in `COMMLSDNoiseStatus.record_cfg`.
 
 ### `COMAdcInputPMF`
 

@@ -1,4 +1,4 @@
-"""Equation-level checks for the Annex 178A MLSD input noise spectrum."""
+"""Equation-level checks for the Annex 178A MLSD PSD owner."""
 
 from __future__ import annotations
 
@@ -9,15 +9,16 @@ import numpy as np
 
 from serdes_coding.models.com_model_178A import (
     COM,
+    COMAdcInputPMF,
     COMAddedNoiseStatus,
+    COMAlgorithmPolicyConfig,
     COMEqChannelStatus,
+    COMImpStageStatus,
+    COMImpairmentStatus,
+    COMNumericalControlConfig,
     COMPostFFEEqChannelStatus,
     COMPreDTEEqChannelStatus,
-    COMImpairmentStatus,
-    COMImpStageStatus,
-    COMNumericalControlConfig,
     COMPSDStatus,
-    COMAlgorithmPolicyConfig,
 )
 from serdes_coding.utilities.link import LinkConfig, SampledResponse
 from serdes_coding.utilities.pmf import Pmf1D
@@ -28,69 +29,79 @@ class TestMLSDNoise178A(unittest.TestCase):
     def setUp(self) -> None:
         self.fb = 8.0
         self.grid = LinkConfig.from_Nfft(self.fb, 1, 16)
-        self.S_n = SampledPSD.from_constant(self.grid.theta, 0.4 / self.fb, self.fb, cfg=self.grid)
-        self.S_qn = SampledPSD.from_constant(self.grid.theta, 0.04 / self.fb, self.fb, cfg=self.grid)
-        self.H_rxffe = SampledResponse.from_ir(np.array([1.0, 0.5]), self.grid)
-        self.h_ISI = SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), self.grid)
         self.sigma_X = 0.3
+        self.h_rxffe = SampledResponse.from_ir(np.array([1.0, 0.5]), self.grid)
+        self.h_isi = SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), self.grid)
         self.eq_ch = COMEqChannelStatus(
             phase_index=0,
-            pre_dte=COMPreDTEEqChannelStatus(),
-            post_ffe=COMPostFFEEqChannelStatus(h_ISI=self.h_ISI),
+            pre_dte=COMPreDTEEqChannelStatus(
+                h_dsamp=SampledResponse.from_ir(np.array([1.0, 0.2]), self.grid),
+                h_XTs_dsamp=[SampledResponse.from_ir(np.array([0.1, -0.05]), self.grid)],
+                h_tn=SampledResponse.from_ir(np.array([0.2, 0.1]), self.grid),
+                h_J=SampledResponse.from_ir(np.array([0.3, -0.1]), self.grid),
+            ),
+            post_ffe=COMPostFFEEqChannelStatus(
+                response_cfg=self.grid,
+                h_ISI=self.h_isi,
+            ),
         )
-        self.dte = SimpleNamespace(H_rxffe=self.H_rxffe)
         self.imp = COMImpairmentStatus(
             pre_dte=COMImpStageStatus(
-                psd=COMPSDStatus(S_total=self.S_n, S_qn=self.S_qn, sigma_X=self.sigma_X)
-            ),
-            # Give reporting a deliberately different receiver PSD. Eq. 178A-54
-            # must still use the complete pre-FFE S_n.
-            post_ffe=COMImpStageStatus(
-                psd=COMPSDStatus(
-                    S_rn=SampledPSD.from_constant(self.grid.theta, 0.01, self.fb, cfg=self.grid)
-                )
+                record_cfg=self.grid,
+                psd=COMPSDStatus(sigma_X=self.sigma_X),
+                adc_input=COMAdcInputPMF(delta=0.2, method="pmf_exact"),
             ),
         )
-        self.S_an = SampledPSD.from_constant(self.grid.theta, 0.02 / self.fb, self.fb, cfg=self.grid)
+        arbitrary_s_an = SampledPSD.from_constant(
+            self.grid.theta, 0.02 / self.fb, self.fb, cfg=self.grid
+        )
         self.added_noise = COMAddedNoiseStatus(
-            g_an=0.0,
-            S_an=self.S_an,
+            g_an=0.5,
+            S_an=arbitrary_s_an,
             sigma_an=0.0,
             p_an=Pmf1D.gaussian(mu=0.0, sigma=0.1, dx=0.01, n_sigma=4),
             delta_com_an_temp=0.0,
         )
+        self.dte = SimpleNamespace(
+            H_rxffe=self.h_rxffe,
+            w_lim=np.array([1.0, 0.5]),
+        )
         self.model = COM.__new__(COM)
         self.model.cfg = SimpleNamespace(
+            link=self.grid,
             alg=COMAlgorithmPolicyConfig(),
             num=COMNumericalControlConfig(),
             dte=SimpleNamespace(d_w=0),
+            imp=SimpleNamespace(
+                eta_0=0.0,
+                SNR_TX=20.0,
+                A_DD=0.1,
+                sigma_RJ=0.02,
+            ),
+            filter=SimpleNamespace(
+                fr=4.0,
+                g_1=0.0,
+                g_2=0.0,
+                f_z1=1.0,
+                f_z2=2.0,
+                f_p1=1.0,
+                f_p2=2.0,
+                f_p3=3.0,
+            ),
         )
-        self.model._eq_ch_imp_record_cfg = self.grid
 
-    def test_eq54_source_folding_and_parseval(self) -> None:
+    def test_eq54_uses_one_full_record_and_preserves_parseval(self) -> None:
         result = self.model.build_mlsd_noise(
             self.imp, self.eq_ch, self.dte, self.added_noise
         )
-
-        # Eq. 178A-54 specifies a two-sided density. Only interior rFFT bins
-        # double when represented by SampledPSD's one-sided samples.
-        expected_isi = (
-            self.sigma_X**2 / self.fb * self.h_ISI.magnitude_squared()
-        )
-        expected_isi[1:-1] *= 2.0
-        np.testing.assert_allclose(result.S_isi.psd, expected_isi, rtol=1e-12, atol=1e-15)
-        expected_isi_variance = self.sigma_X**2 * np.sum(self.h_ISI.ir**2)
+        self.assertIs(result.record_cfg, self.grid)
+        self.assertIs(result.S_isi.cfg, self.grid)
+        self.assertIs(result.S_ni.cfg, self.grid)
+        expected_isi_variance = self.sigma_X**2 * np.sum(self.h_isi.ir**2)
         self.assertAlmostEqual(result.sigma_isi**2, expected_isi_variance, places=14)
-        self.assertAlmostEqual(result.S_isi.to_autocorrelation()[0], expected_isi_variance, places=14)
-
-        expected_n = self.S_n.psd * self.H_rxffe.magnitude_squared()
         np.testing.assert_allclose(
-            result.S_ni.psd,
-            expected_n + self.S_an.psd + expected_isi,
-            rtol=1e-12,
-            atol=1e-15,
+            result.R_ni, result.S_ni.to_autocorrelation(), rtol=1e-12, atol=1e-15
         )
-        np.testing.assert_allclose(result.R_ni, result.S_ni.to_autocorrelation(), rtol=1e-12, atol=1e-15)
 
     def test_reference_quantization_stays_white_with_main_tap_gain(self) -> None:
         self.model.cfg.alg = COMAlgorithmPolicyConfig(
@@ -99,61 +110,50 @@ class TestMLSDNoise178A(unittest.TestCase):
         result = self.model.build_mlsd_noise(
             self.imp, self.eq_ch, self.dte, self.added_noise
         )
+        density = (self.imp.pre_dte.adc_input.delta**2 / 12.0) / self.fb
+        expected = SampledPSD.from_constant(
+            self.grid.theta, density, self.fb, cfg=self.grid
+        ).psd * self.h_rxffe.ir[0] ** 2
+        np.testing.assert_allclose(result.S_qn.psd, expected, rtol=1e-12, atol=1e-15)
 
-        expected_non_qn = (
-            (self.S_n.psd - self.S_qn.psd)
-            * self.H_rxffe.magnitude_squared()
+    def test_added_noise_uses_g_an_not_stored_s_an_grid(self) -> None:
+        baseline = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
         )
-        expected_qn = self.S_qn.psd * self.H_rxffe.ir[0] ** 2
-        expected_isi = (
-            self.sigma_X**2 / self.fb * self.h_ISI.magnitude_squared()
-        )
-        expected_isi[1:-1] *= 2.0
-        np.testing.assert_allclose(result.S_qn.psd, expected_qn, rtol=1e-12, atol=1e-15)
-        np.testing.assert_allclose(
-            result.S_ni.psd,
-            expected_non_qn + expected_qn + self.S_an.psd + expected_isi,
-            rtol=1e-12,
-            atol=1e-15,
-        )
-
-    def test_pre_ffe_source_must_cover_post_ffe_grid(self) -> None:
-        shifted = SampledPSD(
-            theta=self.S_n.theta[1:],
-            psd=self.S_n.psd[1:],
-            fb=self.fb,
-        )
-        self.imp.pre_dte.psd.S_total = shifted
-        with self.assertRaisesRegex(ValueError, "pre-FFE S_n must share"):
-            self.model.build_mlsd_noise(
-                self.imp, self.eq_ch, self.dte, self.added_noise
-            )
-
-    def test_added_noise_must_share_post_ffe_grid(self) -> None:
         other_grid = LinkConfig.from_Nfft(self.fb, 1, 8)
-        self.added_noise.S_an = SampledPSD.from_constant(other_grid.theta, 0.02 / self.fb, self.fb)
-        with self.assertRaisesRegex(ValueError, "added_noise.S_an must share"):
-            self.model.build_mlsd_noise(
-                self.imp, self.eq_ch, self.dte, self.added_noise
-            )
+        self.added_noise.S_an = SampledPSD.from_constant(
+            other_grid.theta, 123.0, self.fb, cfg=other_grid
+        )
+        repeated = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        np.testing.assert_array_equal(repeated.S_ni.psd, baseline.S_ni.psd)
 
-    def test_mlsd_consumes_the_resolved_expanded_post_ffe_record(self) -> None:
+    def test_full_mlsd_uses_expanded_post_ffe_response_grid(self) -> None:
         expanded = LinkConfig.from_Nfft(self.fb, 1, 18)
-        h_isi = SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), expanded)
         self.eq_ch.post_ffe = COMPostFFEEqChannelStatus(
             record_realization="linear_expanded_grid",
             response_cfg=expanded,
-            h_ISI=h_isi,
+            h_ISI=SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), expanded),
         )
-        self.imp.post_ffe.record_cfg = expanded
-
         result = self.model.build_mlsd_noise(
             self.imp, self.eq_ch, self.dte, self.added_noise
         )
-
         self.assertIs(result.record_cfg, expanded)
         self.assertIs(result.S_isi.cfg, expanded)
         self.assertIs(result.S_ni.cfg, expanded)
+
+    def test_truncated_mlsd_changes_only_psd_record(self) -> None:
+        self.model.cfg.num = COMNumericalControlConfig(
+            eq_ch_imp_len="truncated", num_trunc_ui=8
+        )
+        original_h_isi = self.eq_ch.post_ffe.h_ISI.ir.copy()
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        self.assertEqual(result.record_cfg.sampled_nfft, 8)
+        self.assertEqual(result.R_ni.shape, (8,))
+        np.testing.assert_array_equal(self.eq_ch.post_ffe.h_ISI.ir, original_h_isi)
 
 
 if __name__ == "__main__":

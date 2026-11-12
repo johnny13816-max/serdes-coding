@@ -1,5 +1,6 @@
+import ast
 from dataclasses import fields, replace
-from inspect import signature
+from inspect import getsource, signature
 from pathlib import Path
 from shutil import copy2
 
@@ -189,16 +190,41 @@ def test_178a_eq_ch_imp_length_contract_and_reference_profile(reference_cfg):
     assert reference_cfg.num.eq_ch_imp_len == "truncated"
     assert reference_cfg.num.num_trunc_ui == 4096
     model = COM(reference_cfg)
-    assert model._eq_ch_imp_record_cfg.sampled_nfft == 4096
-    assert model._eq_ch_imp_record_cfg is not reference_cfg.link
-    assert COM(replace(reference_cfg, num=COMNumericalControlConfig()))._eq_ch_imp_record_cfg is reference_cfg.link
+    assert callable(model._build_pre_dte_psd)
+    assert callable(model.build_mlsd_noise)
+    for retired_name in (
+        "_eq_ch_imp_record_cfg",
+        "_resolve_eq_ch_imp_record_cfg",
+        "_resolve_post_ffe_imp_record_cfg",
+        "_realize_eq_ch_imp_record",
+        "_build_eq_ch_imp_psd",
+        "_resample_psd_to_cfg",
+    ):
+        assert not hasattr(model, retired_name)
     with pytest.raises(ValueError, match="even num_trunc_ui"):
         COMNumericalControlConfig(eq_ch_imp_len="truncated", num_trunc_ui=4095)
     with pytest.raises(ValueError, match="num_trunc_ui=None"):
         COMNumericalControlConfig(eq_ch_imp_len="full", num_trunc_ui=4096)
 
 
-def test_178a_rxffe_record_realization_resolves_stage5_grid(reference_cfg):
+def test_178a_num003_has_exactly_two_production_owners():
+    tree = ast.parse(getsource(COM))
+    owners = set()
+    selector_fields = {"eq_ch_imp_len", "num_trunc_ui"}
+    class_node = tree.body[0]
+    for function in (
+        node for node in class_node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        if any(
+            isinstance(node, ast.Attribute) and node.attr in selector_fields
+            for node in ast.walk(function)
+        ):
+            owners.add(function.name)
+    assert owners == {"_build_pre_dte_psd", "build_mlsd_noise"}
+
+
+def test_178a_rxffe_record_realization_resolves_only_stage5_response_grid(reference_cfg):
     fixed_cfg = replace(reference_cfg, alg=COMAlgorithmPolicyConfig())
     fixed_model = COM(fixed_cfg)
     assert fixed_model._resolve_post_ffe_response_cfg() is fixed_cfg.link
@@ -214,40 +240,46 @@ def test_178a_rxffe_record_realization_resolves_stage5_grid(reference_cfg):
     if expected % 2:
         expected += 1
     assert expanded.sampled_nfft == expected
-    assert expanded_model._resolve_post_ffe_imp_record_cfg(expanded) is expanded
-
-    reference_model = COM(reference_cfg)
-    assert reference_model._resolve_post_ffe_response_cfg() is reference_cfg.link
-    assert (
-        reference_model._resolve_post_ffe_imp_record_cfg(reference_cfg.link)
-        is reference_model._eq_ch_imp_record_cfg
-    )
+    assert COM(reference_cfg)._resolve_post_ffe_response_cfg() is reference_cfg.link
 
 
 def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
-    response = np.arange(5000, dtype=float)
-    original = response.copy()
+    truncated_model = COM(reference_cfg)
+    paths = truncated_model.build_all_paths()
+    victim = paths[0]
+    h_XTs = [path.pulse.ir for path in paths[1:]]
+    common = truncated_model.calculate_pre_dte_imp_common(victim)
+    common, h_XTs_dsamp = truncated_model.prepare_sampling_phase_common(common, h_XTs)
+    truncated_eq, truncated_imp = truncated_model.calculate_pre_dte_imp_at_pos(
+        victim, 5, common, h_XTs_dsamp
+    )
 
     full_model = COM(replace(reference_cfg, num=COMNumericalControlConfig()))
-    full_record = full_model._realize_eq_ch_imp_record(
-        response, source_name="test response"
+    full_common = full_model.calculate_pre_dte_imp_common(victim)
+    full_common, full_h_XTs_dsamp = full_model.prepare_sampling_phase_common(
+        full_common, h_XTs
     )
-    assert full_record is response
+    full_eq, full_imp = full_model.calculate_pre_dte_imp_at_pos(
+        victim, 5, full_common, full_h_XTs_dsamp
+    )
 
-    truncated_model = COM(reference_cfg)
-    truncated_record = truncated_model._realize_eq_ch_imp_record(
-        response, source_name="test response"
-    )
-    assert truncated_record.shape == (4096,)
-    np.testing.assert_array_equal(truncated_record, response[:4096])
-    np.testing.assert_array_equal(response, original)
+    for lhs, rhs in (
+        (truncated_eq.pre_dte.h_dsamp.ir, full_eq.pre_dte.h_dsamp.ir),
+        (truncated_eq.pre_dte.h_tn.ir, full_eq.pre_dte.h_tn.ir),
+        (truncated_eq.pre_dte.h_J.ir, full_eq.pre_dte.h_J.ir),
+    ):
+        np.testing.assert_array_equal(lhs, rhs)
+    for lhs, rhs in zip(
+        truncated_eq.pre_dte.h_XTs_dsamp,
+        full_eq.pre_dte.h_XTs_dsamp,
+    ):
+        np.testing.assert_array_equal(lhs.ir, rhs.ir)
 
-    short = np.arange(8, dtype=float)
-    padded = truncated_model._realize_eq_ch_imp_record(
-        short, source_name="short response"
-    )
-    np.testing.assert_array_equal(padded[:8], short)
-    np.testing.assert_array_equal(padded[8:], 0.0)
+    assert truncated_imp.pre_dte.record_cfg.sampled_nfft == 4096
+    assert full_imp.pre_dte.record_cfg is reference_cfg.link
+    for stage in (truncated_imp.pre_dte, full_imp.pre_dte):
+        for name in ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total"):
+            assert getattr(stage.psd, name).cfg is stage.record_cfg
 
 
 def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(

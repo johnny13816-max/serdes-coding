@@ -1513,7 +1513,6 @@ class COM:
 
     def __init__(self, cfg: COMConfig):
         self.cfg = cfg
-        self._eq_ch_imp_record_cfg = self._resolve_eq_ch_imp_record_cfg()
         self.status: Optional[COMStatus | COMSearchStatus] = None
 
     def _resolve_post_ffe_response_cfg(self) -> LinkConfig:
@@ -1532,96 +1531,6 @@ class COM:
             fb=self.cfg.link.fb,
             per_ui=self.cfg.link.per_ui,
             Nfft=sampled_nfft * self.cfg.link.per_ui,
-        )
-
-    def _resolve_post_ffe_imp_record_cfg(
-        self, post_ffe_response_cfg: LinkConfig,
-    ) -> LinkConfig:
-        """Apply NUM-003 to the Stage 5/7 post-FFE numerical domain."""
-        if self.cfg.num.eq_ch_imp_len == "full":
-            return post_ffe_response_cfg
-        return self._eq_ch_imp_record_cfg
-
-    @staticmethod
-    def _resample_psd_to_cfg(
-        psd: SampledPSD, target_cfg: LinkConfig, *, source_name: str,
-    ) -> SampledPSD:
-        """Evaluate an existing sampled PSD on another grid with the same fb."""
-        if not np.isclose(psd.fb, target_cfg.fb):
-            raise ValueError(f"{source_name} must share the target fb.")
-        if psd.cfg is target_cfg:
-            return psd
-        if psd.cfg is None or not (
-            np.isclose(psd.theta[0], 0.0)
-            and np.isclose(psd.theta[-1], np.pi)
-        ):
-            raise ValueError(
-                f"{source_name} must share the target grid or provide a bound full-band grid."
-            )
-        values = np.interp(target_cfg.theta, psd.theta, psd.psd)
-        return SampledPSD(
-            theta=target_cfg.theta,
-            psd=values,
-            fb=target_cfg.fb,
-            cfg=target_cfg,
-        )
-
-    def _resolve_eq_ch_imp_record_cfg(self) -> LinkConfig:
-        """Resolve the single PSD/correlation record shared by NUM-003 consumers."""
-        if self.cfg.num.eq_ch_imp_len == "full":
-            return self.cfg.link
-        return LinkConfig.from_Nfft(
-            fb=self.cfg.link.fb,
-            per_ui=self.cfg.link.per_ui,
-            Nfft=int(self.cfg.num.num_trunc_ui) * self.cfg.link.per_ui,
-        )
-
-    def _realize_eq_ch_imp_record(
-        self,
-        response: np.ndarray,
-        *,
-        source_name: str,
-    ) -> np.ndarray:
-        """Apply NUM-003 to one full one-sample-per-UI impairment response."""
-        response = np.asarray(response, dtype=float)
-        if response.ndim != 1:
-            raise ValueError(f"{source_name} must be a one-dimensional response.")
-        if self.cfg.num.eq_ch_imp_len == "full":
-            return response
-        record = np.zeros(int(self.cfg.num.num_trunc_ui), dtype=float)
-        count = min(len(response), len(record))
-        record[:count] = response[:count]
-        return record
-
-    def _build_eq_ch_imp_psd(
-        self,
-        response: np.ndarray,
-        variance: float,
-        *,
-        source_name: str,
-        record_cfg: Optional[LinkConfig] = None,
-    ) -> SampledPSD:
-        """Build an impairment PSD through the one shared NUM-003 L3 facade."""
-        record_cfg = record_cfg or self._eq_ch_imp_record_cfg
-        if not np.isclose(record_cfg.fb, self._eq_ch_imp_record_cfg.fb):
-            raise ValueError(
-                f"{source_name} record config conflicts with COMNumericalControlConfig.eq_ch_imp_len."
-            )
-        if (
-            self.cfg.num.eq_ch_imp_len == "truncated"
-            and record_cfg.sampled_nfft != self._eq_ch_imp_record_cfg.sampled_nfft
-        ):
-            raise ValueError(
-                f"{source_name} record config conflicts with the configured truncated length."
-            )
-        record = self._realize_eq_ch_imp_record(
-            response,
-            source_name=source_name,
-        )
-        return _build_psd_from_DFT_response(
-            record,
-            record_cfg,
-            variance,
         )
 
     @staticmethod
@@ -1701,8 +1610,8 @@ class COM:
         pre_dte_imp_common = self.calculate_pre_dte_imp_common(victim=victim)
         report("pre_dte_imp_common: done")
 
-        # stage 3 preparation: select each full-length XT path phase once, then
-        # pass its one-sample-per-UI response through the shared NUM-003 L3 path.
+        # stage 3 preparation: select each full-length XT path phase once.
+        # NUM-003 is deliberately absent from phase orchestration.
         report("sampling_phase_common: start")
         pre_dte_imp_common, h_XTs_dsamp = self.prepare_sampling_phase_common(
             common=pre_dte_imp_common,
@@ -1969,7 +1878,7 @@ class COM:
         victim: COMPath,
     ) -> COMImpairmentStatus:
         """
-        Calculate pre-DTE impairment components that do not depend on phase.
+        Calculate phase-independent physical material for pre-DTE impairment.
 
         Parameters
         ----------
@@ -1978,28 +1887,17 @@ class COM:
         Returns
         -------
         COMImpairmentStatus
-            Receiver-noise PSD and signal variance cached before Stage 3.
-            XT phase selection belongs to Stage 3 preparation.
+            Signal variance cached before Stage 3. PSD construction remains in
+            the Stage 2 impairment model and is deferred until the complete
+            equivalent channel for one candidate phase is available.
         """
-        imp_cfg = self.cfg.imp
-        ft_cfg = self.cfg.filter
         L = self.cfg.L
 
         del victim
-        # input signal power
         sigma_X = np.sqrt((L**2 - 1) / (3 * (L - 1)**2))
-
-        # Receiver input noise PSD
-        S_rn = _build_psd_rx_noise(self._eq_ch_imp_record_cfg, imp_cfg, ft_cfg)
-        sigma_rn = S_rn.to_sigma()
-
         return COMImpairmentStatus(
             pre_dte=COMImpStageStatus(
-                psd=COMPSDStatus(
-                    sigma_X=sigma_X,
-                    S_rn=S_rn,
-                    sigma_rn=sigma_rn,
-                ),
+                psd=COMPSDStatus(sigma_X=sigma_X),
             ),
         )
 
@@ -2008,41 +1906,138 @@ class COM:
         common: COMImpairmentStatus,
         h_XTs: list[np.ndarray],
     ) -> tuple[COMImpairmentStatus, list[np.ndarray]]:
-        """Select full XT path phases once and build their shared Stage 3 PSD."""
+        """Select each full XT response phase without constructing a PSD."""
         common_stage = common.pre_dte
         common_psd = None if common_stage is None else common_stage.psd
-        if (
-            common_psd is None
-            or common_psd.sigma_X is None
-            or common_psd.S_rn is None
-        ):
+        if common_psd is None or common_psd.sigma_X is None:
             raise ValueError(
                 "common must be the complete output of calculate_pre_dte_imp_common()."
             )
         if any(np.asarray(h_xt).ndim != 1 for h_xt in h_XTs):
             raise ValueError("Each crosstalk pulse response must be one-dimensional.")
 
-        S_xn = _zero_sampled_psd(self._eq_ch_imp_record_cfg)
         h_XTs_dsamp: list[np.ndarray] = []
-        for path_index, h_XT in enumerate(h_XTs, start=1):
+        for h_XT in h_XTs:
             _, h_XT_dsamp = _select_xtalk_path_phase(h_XT, self.cfg.link.per_ui)
             h_XTs_dsamp.append(h_XT_dsamp)
-            S_xn = S_xn.add(
-                self._build_eq_ch_imp_psd(
-                    h_XT_dsamp,
-                    common_psd.sigma_X**2,
-                    source_name=f"XT{path_index} eq-channel",
-                )
+        return common, h_XTs_dsamp
+
+    def _build_pre_dte_psd(
+        self,
+        *,
+        eq_ch: COMPreDTEEqChannelStatus,
+        sigma_X: float,
+        tx_noise_variance: float,
+        jitter_variance: float,
+    ) -> COMImpStageStatus:
+        """Build the complete pre-DTE PSD on the one NUM-003 record grid.
+
+        Full equivalent-channel responses remain owned by ``eq_ch``. This is
+        the sole pre-DTE NUM-003 owner: it realizes every PSD component on one
+        concrete record before summation and autocorrelation construction.
+        """
+        if eq_ch.h_dsamp is None or eq_ch.h_tn is None or eq_ch.h_J is None:
+            raise ValueError("pre-DTE PSD construction requires complete eq_ch responses.")
+        if self.cfg.num.eq_ch_imp_len == "full":
+            record_cfg = self.cfg.link
+        else:
+            record_cfg = LinkConfig.from_Nfft(
+                fb=self.cfg.link.fb,
+                per_ui=self.cfg.link.per_ui,
+                Nfft=int(self.cfg.num.num_trunc_ui) * self.cfg.link.per_ui,
             )
 
-        updated_psd = replace(
-            common_psd,
-            S_xn=S_xn,
-            sigma_xn=S_xn.to_sigma(),
+        def build_response_psd(
+            response: np.ndarray, variance: float, *, source_name: str,
+        ) -> SampledPSD:
+            response = np.asarray(response, dtype=float)
+            if response.ndim != 1:
+                raise ValueError(f"{source_name} must be one-dimensional.")
+            if self.cfg.num.eq_ch_imp_len == "full":
+                record = response
+            else:
+                record = np.zeros(record_cfg.sampled_nfft, dtype=float)
+                count = min(len(response), len(record))
+                record[:count] = response[:count]
+            return _build_psd_from_DFT_response(record, record_cfg, variance)
+
+        S_rn = _build_psd_rx_noise(record_cfg, self.cfg.imp, self.cfg.filter)
+        S_xn = _zero_sampled_psd(record_cfg)
+        for path_index, response in enumerate(eq_ch.h_XTs_dsamp or [], start=1):
+            S_xn = S_xn.add(build_response_psd(
+                response.ir,
+                sigma_X**2,
+                source_name=f"XT{path_index} eq-channel",
+            ))
+        S_tn = build_response_psd(
+            eq_ch.h_tn.ir,
+            tx_noise_variance,
+            source_name="TX-noise eq-channel",
         )
-        return (
-            replace(common, pre_dte=replace(common_stage, psd=updated_psd)),
-            h_XTs_dsamp,
+        S_jn = build_response_psd(
+            eq_ch.h_J.ir,
+            jitter_variance,
+            source_name="jitter eq-channel",
+        )
+        S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
+
+        imp_cfg = self.cfg.imp
+        if self.cfg.alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference":
+            S_jn_clip = build_response_psd(
+                eq_ch.h_J.ir,
+                sigma_X**2 * imp_cfg.sigma_RJ**2,
+                source_name="RJ-only jitter eq-channel",
+            )
+            S_clip = S_rn.add(S_xn).add(S_tn).add(S_jn_clip)
+            cdf_tail = imp_cfg.P_qc
+        else:
+            S_clip = S_ga
+            cdf_tail = None
+
+        p_sig = _build_pmf_pam_L(self.cfg.L)
+        if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
+            S_qn = _zero_sampled_psd(record_cfg)
+            adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
+        else:
+            pmf_cfg = _resolve_adc_input_pmf_config(
+                self.cfg.pmf,
+                imp_cfg.R_LM / (self.cfg.L - 1),
+                self.cfg.num,
+            )
+            S_qn, adc_input_pmf = _build_psd_adc_qn(
+                p_sig=p_sig,
+                h_dsamp=eq_ch.h_dsamp.ir,
+                sigma_ga=S_clip.to_sigma(),
+                P_qc=imp_cfg.P_qc,
+                N_qb=imp_cfg.N_qb,
+                pmf_cfg=pmf_cfg,
+                link_cfg=record_cfg,
+                cdf_tail=cdf_tail,
+                pmf_projection_method=self.cfg.alg.pmf_projection_method,
+                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
+            )
+        adc_input_pmf.clipping_convention = self.cfg.alg.pre_dte_adc_clipping_convention
+
+        S_total = S_ga.add(S_qn)
+        return COMImpStageStatus(
+            record_cfg=record_cfg,
+            psd=COMPSDStatus(
+                sigma_X=sigma_X,
+                S_rn=S_rn,
+                sigma_rn=S_rn.to_sigma(),
+                S_xn=S_xn,
+                sigma_xn=S_xn.to_sigma(),
+                S_tn=S_tn,
+                sigma_tn=S_tn.to_sigma(),
+                S_jn=S_jn,
+                sigma_jn=S_jn.to_sigma(),
+                S_qn=S_qn,
+                sigma_qn=S_qn.to_sigma(),
+                S_total=S_total,
+                sigma_total=S_total.to_sigma(),
+                R_n=S_total.to_autocorrelation(),
+            ),
+            adc_input=adc_input_pmf,
         )
 
     def calculate_pre_dte_imp_at_pos(
@@ -2077,8 +2072,6 @@ class COM:
         """
         link_cfg = self.cfg.link
         imp_cfg = self.cfg.imp
-        ft_cfg = self.cfg.filter
-        L = self.cfg.L
         pos = int(pos)
         if pos < 0 or pos >= link_cfg.per_ui:
             raise ValueError("pos must be in [0, link_cfg.per_ui).")
@@ -2086,17 +2079,11 @@ class COM:
         if (
             common_psd is None
             or common_psd.sigma_X is None
-            or common_psd.S_rn is None
-            or common_psd.S_xn is None
         ):
             raise ValueError(
                 "common must be the complete output of "
                 "prepare_sampling_phase_common()."
             )
-        # The common stage owns the concrete PSD-record object. Reuse that
-        # exact reference so equivalent COMConfig copies can consume a cached
-        # common result without violating SampledPSD's shared-grid contract.
-        eq_ch_imp_record_cfg = common_psd.S_rn.cfg or self._eq_ch_imp_record_cfg
         if not isinstance(h_XTs_dsamp, list) or any(
             np.asarray(h_xt_dsamp).ndim != 1 for h_xt_dsamp in h_XTs_dsamp
         ):
@@ -2104,12 +2091,6 @@ class COM:
                 "h_XTs_dsamp must be the list of one-dimensional sampled "
                 "crosstalk responses returned by prepare_sampling_phase_common()."
             )
-        pmf_cfg = _resolve_adc_input_pmf_config(
-            self.cfg.pmf,
-            imp_cfg.R_LM / (L - 1),
-            self.cfg.num,
-        )
-        
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
         if len(h_dsamp) == 0:
             raise ValueError("Selected sampling phase produces an empty victim sequence.")
@@ -2118,29 +2099,13 @@ class COM:
             source_name="calculate_pre_dte_imp_at_pos.h_dsamp",
             pos=pos,
         )
-        h_dsamp_response = SampledResponse.from_ir(h_dsamp, link_cfg)
-        
-        # From common_psd
         sigma_X = common_psd.sigma_X
-        S_rn = common_psd.S_rn
-        S_xn = common_psd.S_xn
-
-        # Transmitter output-noise equivalent channel, then shared NUM-003 PSD.
         h_tn, tx_noise_variance = _calculate_tx_noise_eq_ch(
             victim,
             link_cfg,
             imp_cfg,
             pos,
         )
-        S_tn = self._build_eq_ch_imp_psd(
-            h_tn,
-            tx_noise_variance,
-            source_name="TX-noise eq-channel",
-            record_cfg=eq_ch_imp_record_cfg,
-        )
-        sigma_tn = S_tn.to_sigma()
-
-        # Jitter equivalent channel, then shared NUM-003 PSD.
         h_J, jitter_variance = _calculate_tx_jitter_eq_ch(
             victim,
             link_cfg,
@@ -2148,88 +2113,23 @@ class COM:
             pos,
             sigma_X,
         )
-        S_jn = self._build_eq_ch_imp_psd(
-            h_J,
-            jitter_variance,
-            source_name="jitter eq-channel",
-            record_cfg=eq_ch_imp_record_cfg,
-        )
-        sigma_jn = S_jn.to_sigma()
-
-        # quantization noise
-        p_sig = _build_pmf_pam_L(L)
-        # Keep the full Eq. (178A-21)/(178A-22) jitter term in the MMSE
-        # covariance. Only the ADC clipping input changes in the reference
-        # comparison branch.
-        S_ga = S_rn.add(S_xn).add(S_tn).add(S_jn)
-        if self.cfg.alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference":
-            S_jn_clip = self._build_eq_ch_imp_psd(
-                h_J,
-                sigma_X**2 * imp_cfg.sigma_RJ**2,
-                source_name="RJ-only jitter eq-channel",
-                record_cfg=eq_ch_imp_record_cfg,
-            )
-            S_clip = S_rn.add(S_xn).add(S_tn).add(S_jn_clip)
-            cdf_tail = imp_cfg.P_qc
-        else:
-            S_clip = S_ga
-            cdf_tail = None  # Preserve the Annex P_qc/2 default.
-        sigma_clip = S_clip.to_sigma()
-        if imp_cfg.N_qb is None or imp_cfg.P_qc is None:
-            S_qn = _zero_sampled_psd(eq_ch_imp_record_cfg)
-            adc_input_pmf = COMAdcInputPMF(p_sig=p_sig, method="disabled")
-        else:
-            S_qn, adc_input_pmf = _build_psd_adc_qn(
-                p_sig = p_sig, 
-                h_dsamp = h_dsamp,
-                sigma_ga = sigma_clip,
-                P_qc = imp_cfg.P_qc,
-                N_qb = imp_cfg.N_qb,
-                pmf_cfg = pmf_cfg, 
-                link_cfg = eq_ch_imp_record_cfg,
-                cdf_tail=cdf_tail,
-                pmf_projection_method=self.cfg.alg.pmf_projection_method,
-                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
-            )
-        adc_input_pmf.clipping_convention = self.cfg.alg.pre_dte_adc_clipping_convention
-        sigma_qn = S_qn.to_sigma()
-
-        # summation and IDFT
-        # 但如果 N_max 太接近 FFT 長度，或者 noise correlation 在長時間 lag 還沒衰減完，
-        # R_n 尾端的能量會 circular wrap 回前面，使得前幾個 lag 被污染。
-        S_total = S_ga.add(S_qn)
-        sigma_total = S_total.to_sigma()
-        R_n = S_total.to_autocorrelation()
-
         eq_ch = COMEqChannelStatus(
             phase_index=pos,
             pre_dte=COMPreDTEEqChannelStatus(
                 h_XTs_dsamp=[SampledResponse.from_ir(h_xt, link_cfg) for h_xt in h_XTs_dsamp],
-                h_dsamp=h_dsamp_response,
+                h_dsamp=SampledResponse.from_ir(h_dsamp, link_cfg),
                 h_tn=SampledResponse.from_ir(h_tn, link_cfg),
                 h_J=SampledResponse.from_ir(h_J, link_cfg),
             ),
         )
+        pre_dte = self._build_pre_dte_psd(
+            eq_ch=eq_ch.pre_dte,
+            sigma_X=sigma_X,
+            tx_noise_variance=tx_noise_variance,
+            jitter_variance=jitter_variance,
+        )
         imp_status = COMImpairmentStatus(
-            pre_dte=COMImpStageStatus(
-                psd=COMPSDStatus(
-                    sigma_X=sigma_X,
-                    S_rn=S_rn,
-                    sigma_rn=common_psd.sigma_rn,
-                    S_xn=S_xn,
-                    sigma_xn=common_psd.sigma_xn,
-                    S_tn=S_tn,
-                    sigma_tn=sigma_tn,
-                    S_jn=S_jn,
-                    sigma_jn=sigma_jn,
-                    S_qn=S_qn,
-                    sigma_qn=sigma_qn,
-                    S_total=S_total,
-                    sigma_total=sigma_total,
-                    R_n=R_n,
-                ),
-                adc_input=adc_input_pmf,
-            ),
+            pre_dte=pre_dte,
         )
         return eq_ch, imp_status
 
@@ -2309,7 +2209,10 @@ class COM:
             pos = pos,
             per_ui = self.per_ui,
         )
-        eq_ch_imp_record_cfg = imp_pre.S_rn.cfg or self._eq_ch_imp_record_cfg
+        pre_dte_stage = imp_pre.pre_dte
+        eq_ch_imp_record_cfg = None if pre_dte_stage is None else pre_dte_stage.record_cfg
+        if eq_ch_imp_record_cfg is None:
+            raise ValueError("Stage 4 requires the resolved pre-DTE PSD record grid.")
         return replace(
             dte_status,
             H_rxffe=SampledResponse.from_ir(dte_status.w_lim, eq_ch_imp_record_cfg),
@@ -2347,12 +2250,12 @@ class COM:
             raise ValueError("Stage 5 requires pre-DTE eq_ch only.")
         if not isinstance(dte_status.H_rxffe, SampledResponse):
             raise ValueError("Stage 5 requires H_rxffe from completed Stage 4.")
-        eq_ch_imp_record_cfg = imp_pre.S_rn.cfg or self._eq_ch_imp_record_cfg
+        pre_stage = imp_pre.pre_dte
+        eq_ch_imp_record_cfg = None if pre_stage is None else pre_stage.record_cfg
+        if eq_ch_imp_record_cfg is None:
+            raise ValueError("Stage 5 requires the resolved pre-DTE PSD record grid.")
         w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, eq_ch_imp_record_cfg)
         post_ffe_response_cfg = self._resolve_post_ffe_response_cfg()
-        post_ffe_imp_record_cfg = self._resolve_post_ffe_imp_record_cfg(
-            post_ffe_response_cfg
-        )
 
         h_w = _apply_rxffe_response(
             eq_ch.pre_dte.h_dsamp,
@@ -2361,7 +2264,7 @@ class COM:
             self.cfg.alg.rxffe_record_realization,
             "post_ffe victim",
         )
-        H_rxffe = SampledResponse.from_ir(w_lim_ndarray, post_ffe_imp_record_cfg)
+        H_rxffe = w_lim_pre
 
         h_XTs_w: list[SampledResponse] = []
         for path_index, h_XT_dsamp in enumerate(eq_ch.pre_dte.h_XTs_dsamp or [], start=1):
@@ -2403,14 +2306,20 @@ class COM:
             "post_ffe DDJ",
         )
 
-        # Gaussian DFE-COM branch.  Build RJ on the pre-DTE grid, combine the
-        # three Gaussian sources there, and filter once by the pre-grid FFE.
-        S_jn_RJ_pre = self._build_eq_ch_imp_psd(
-            eq_ch.pre_dte.h_J.ir,
-            imp_pre.sigma_X**2 * self.cfg.imp.sigma_RJ**2,
-            source_name="pre-FFE RJ-only jitter eq-channel",
-            record_cfg=eq_ch_imp_record_cfg,
-        )
+        # Gaussian DFE-COM branch. Reuse the Stage 2 PSD record; Stage 5 does
+        # not resolve or alter NUM-003. RJ-only jitter has the same equivalent
+        # response as S_jn and differs only by its scalar variance.
+        jitter_denominator = self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2
+        if jitter_denominator == 0.0:
+            S_jn_RJ_pre = _zero_sampled_psd(eq_ch_imp_record_cfg)
+        else:
+            rj_fraction = self.cfg.imp.sigma_RJ**2 / jitter_denominator
+            S_jn_RJ_pre = SampledPSD(
+                theta=imp_pre.S_jn.theta,
+                psd=imp_pre.S_jn.psd * rj_fraction,
+                fb=imp_pre.S_jn.fb,
+                cfg=eq_ch_imp_record_cfg,
+            )
         S_G_pre = imp_pre.S_rn.add(imp_pre.S_tn).add(S_jn_RJ_pre)
         sigma_gn_adc = S_G_pre.to_sigma()
         sigma_G = S_G_pre.filtered_by(w_lim_pre).to_sigma()
@@ -2440,46 +2349,13 @@ class COM:
                 pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
             )
 
-        # ALG-011 resolves the full Stage 5 response support. NUM-003 then
-        # resolves the PSD/correlation record used by Stage 5 and Stage 7.
-        S_rn_pre = self._resample_psd_to_cfg(
-            imp_pre.S_rn, post_ffe_imp_record_cfg, source_name="pre-FFE S_rn"
-        )
-        S_tn_pre = self._resample_psd_to_cfg(
-            imp_pre.S_tn, post_ffe_imp_record_cfg, source_name="pre-FFE S_tn"
-        )
-        S_rn = S_rn_pre.filtered_by(H_rxffe)
-        S_tn = S_tn_pre.filtered_by(H_rxffe)
-
-        S_xn = _zero_sampled_psd(post_ffe_imp_record_cfg)
-        for h_XT_w in h_XTs_w:
-            S_xn = S_xn.add(
-                self._build_eq_ch_imp_psd(
-                    h_XT_w.ir,
-                    imp_pre.sigma_X**2,
-                    source_name="post-FFE XT eq-channel",
-                    record_cfg=post_ffe_imp_record_cfg,
-                )
-            )
-
-        S_jn = self._build_eq_ch_imp_psd(
-            h_w_J.ir,
-            imp_pre.sigma_X**2
-            * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
-            source_name="post-FFE jitter eq-channel",
-            record_cfg=post_ffe_imp_record_cfg,
-        )
-
-        if adc_input_pmf.delta is None:
-            S_qn = _zero_sampled_psd(post_ffe_imp_record_cfg)
-        else:
-            S_qn_adc = SampledPSD.from_constant(
-                post_ffe_imp_record_cfg.theta,
-                (adc_input_pmf.delta**2 / 12.0) / post_ffe_imp_record_cfg.fb,
-                post_ffe_imp_record_cfg.fb,
-                cfg=post_ffe_imp_record_cfg,
-            )
-            S_qn = S_qn_adc.filtered_by(H_rxffe)
+        # Reporting PSDs are transformations of the selected Stage 2 PSDs on
+        # their existing record. They do not form another NUM-003 owner.
+        S_rn = imp_pre.S_rn.filtered_by(H_rxffe)
+        S_xn = imp_pre.S_xn.filtered_by(H_rxffe)
+        S_tn = imp_pre.S_tn.filtered_by(H_rxffe)
+        S_jn = imp_pre.S_jn.filtered_by(H_rxffe)
+        S_qn = imp_pre.S_qn.filtered_by(H_rxffe)
 
         S_total = S_rn.add(S_xn).add(S_tn).add(S_jn).add(S_qn)
 
@@ -2493,7 +2369,7 @@ class COM:
                 h_w_J=h_w_J,
             ),
             COMImpairmentStatus(post_ffe=COMImpStageStatus(
-                record_cfg=post_ffe_imp_record_cfg,
+                record_cfg=eq_ch_imp_record_cfg,
                 psd=COMPSDStatus(
                     As=As,
                     S_rn=S_rn,
@@ -2528,75 +2404,87 @@ class COM:
         Return them before DER summation without constructing the final MLSD status.
         """
         pre_dte = imp_status.pre_dte
-        if pre_dte is None or pre_dte.psd is None or pre_dte.psd.S_total is None:
+        if pre_dte is None or pre_dte.psd is None or pre_dte.adc_input is None:
             raise ValueError(
-                "build_mlsd_noise requires pre-FFE total noise PSD S_n."
+                "build_mlsd_noise requires completed pre-DTE impairment material."
             )
-        S_n = pre_dte.psd.S_total
-        H_rxffe_pre = dte_status.H_rxffe
-        if not isinstance(H_rxffe_pre, SampledResponse):
+        if eq_ch.pre_dte is None or eq_ch.post_ffe is None:
+            raise ValueError("build_mlsd_noise requires complete pre/post-FFE responses.")
+        if not isinstance(dte_status.H_rxffe, SampledResponse):
             raise TypeError("build_mlsd_noise requires H_rxffe to be a SampledResponse.")
-        h_ISI = eq_ch.h_ISI
-        if not isinstance(h_ISI, SampledResponse):
+        if not isinstance(eq_ch.post_ffe.h_ISI, SampledResponse):
             raise TypeError(
                 "build_mlsd_noise requires h_ISI to be a SampledResponse."
             )
         if not np.isfinite(imp_status.sigma_X) or imp_status.sigma_X < 0.0:
             raise ValueError("build_mlsd_noise requires finite non-negative sigma_X.")
 
-        post_stage = imp_status.post_ffe
-        if post_stage is None:
-            raise ValueError("build_mlsd_noise requires post-FFE impairment status.")
-        record_cfg = post_stage.record_cfg or H_rxffe_pre.cfg
-        if record_cfg is None:
-            raise ValueError("build_mlsd_noise requires a resolved post-FFE record grid.")
-        H_rxffe = SampledResponse.from_ir(H_rxffe_pre.ir, record_cfg)
-        S_n = self._resample_psd_to_cfg(
-            S_n, record_cfg, source_name="pre-FFE S_n"
-        )
-        S_an = self._resample_psd_to_cfg(
-            added_noise.S_an, record_cfg, source_name="added_noise.S_an"
-        )
-
-        if (
-            S_n.theta.shape != H_rxffe.theta.shape
-            or not np.isclose(S_n.fb, H_rxffe.fb)
-            or not np.allclose(S_n.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
-        ):
-            raise ValueError("pre-FFE S_n must share the H_rxffe theta grid and fb.")
-        for name, psd in (("added_noise.S_an", S_an),):
-            if (
-                psd.theta.shape != H_rxffe.theta.shape
-                or not np.isclose(psd.fb, H_rxffe.fb)
-                or not np.allclose(psd.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
-            ):
-                raise ValueError(
-                    f"{name} must share the H_rxffe theta grid and fb."
-                )
-        # Eq. (178A-54): S_n is the complete pre-FFE Eq. (178A-15) PSD.
-        # The run-level grid is shared, so no intermediate PSD regrid is needed.
-        # The Annex path filters every component, including S_qn, by the full
-        # RxFFE response.  The reference realization keeps S_qn white and
-        # applies only the RxFFE main-tap gain; all other components still use
-        # the complete response.
-        quantization_method = self.cfg.alg.mlsd_quantization_psd
-        source_qn = pre_dte.psd.S_qn
-        if source_qn is not None:
-            source_qn = self._resample_psd_to_cfg(
-                source_qn, record_cfg, source_name="pre-DTE S_qn"
+        if self.cfg.num.eq_ch_imp_len == "full":
+            record_cfg = eq_ch.post_ffe.response_cfg
+            if record_cfg is None:
+                raise ValueError("full MLSD PSD construction requires post-FFE response_cfg.")
+        else:
+            record_cfg = LinkConfig.from_Nfft(
+                fb=self.cfg.link.fb,
+                per_ui=self.cfg.link.per_ui,
+                Nfft=int(self.cfg.num.num_trunc_ui) * self.cfg.link.per_ui,
             )
+
+        def build_response_psd(
+            response: np.ndarray, variance: float, *, source_name: str,
+        ) -> SampledPSD:
+            response = np.asarray(response, dtype=float)
+            if response.ndim != 1:
+                raise ValueError(f"{source_name} must be one-dimensional.")
+            if self.cfg.num.eq_ch_imp_len == "full":
+                record = response
+            else:
+                record = np.zeros(record_cfg.sampled_nfft, dtype=float)
+                count = min(len(response), len(record))
+                record[:count] = response[:count]
+            return _build_psd_from_DFT_response(record, record_cfg, variance)
+
+        w_lim = np.asarray(dte_status.w_lim, dtype=float)
+        H_rxffe = SampledResponse.from_ir(w_lim, record_cfg)
+        sigma_X = float(imp_status.sigma_X)
+        S_rn_pre = _build_psd_rx_noise(record_cfg, self.cfg.imp, self.cfg.filter)
+        S_xn_pre = _zero_sampled_psd(record_cfg)
+        for path_index, response in enumerate(eq_ch.pre_dte.h_XTs_dsamp or [], start=1):
+            S_xn_pre = S_xn_pre.add(build_response_psd(
+                response.ir,
+                sigma_X**2,
+                source_name=f"MLSD XT{path_index} eq-channel",
+            ))
+        S_tn_pre = build_response_psd(
+            eq_ch.pre_dte.h_tn.ir,
+            10 ** (-self.cfg.imp.SNR_TX / 10),
+            source_name="MLSD TX-noise eq-channel",
+        )
+        S_jn_pre = build_response_psd(
+            eq_ch.pre_dte.h_J.ir,
+            sigma_X**2 * (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2),
+            source_name="MLSD jitter eq-channel",
+        )
+        delta = pre_dte.adc_input.delta
+        if delta is None:
+            source_qn = _zero_sampled_psd(record_cfg)
+        else:
+            source_qn = SampledPSD.from_constant(
+                record_cfg.theta,
+                (delta**2 / 12.0) / record_cfg.fb,
+                record_cfg.fb,
+                cfg=record_cfg,
+            )
+        S_n = S_rn_pre.add(S_xn_pre).add(S_tn_pre).add(S_jn_pre).add(source_qn)
+
+        # Eq. (178A-54): the Annex path filters every component by the complete
+        # RxFFE response. The reference realization keeps S_qn white and uses
+        # only the selected main-tap gain.
+        quantization_method = self.cfg.alg.mlsd_quantization_psd
         if quantization_method == "pre_dte_filtered":
             S_n_filtered = S_n.filtered_by(H_rxffe)
-            S_qn = source_qn.filtered_by(H_rxffe) if source_qn is not None else None
+            S_qn = source_qn.filtered_by(H_rxffe)
         elif quantization_method == "main_tap_white":
-            if source_qn is None:
-                raise ValueError("main_tap_white requires pre-DTE S_qn.")
-            if (
-                source_qn.theta.shape != H_rxffe.theta.shape
-                or not np.isclose(source_qn.fb, H_rxffe.fb)
-                or not np.allclose(source_qn.theta, H_rxffe.theta, rtol=1e-12, atol=1e-15)
-            ):
-                raise ValueError("pre-DTE S_qn must share the H_rxffe theta grid and fb.")
             d_w = int(self.cfg.dte.d_w)
             if d_w < 0 or d_w >= len(H_rxffe.ir):
                 raise ValueError("main_tap_white requires d_w within H_rxffe.ir.")
@@ -2619,16 +2507,18 @@ class COM:
             S_n_filtered = S_n_filtered.add(S_qn)
         else:
             raise ValueError(f"Unsupported MLSD quantization PSD method: {quantization_method}.")
-        # Eq. (178A-54) gives a two-sided ISI density. from_constant() folds
-        # interior rFFT bins into SampledPSD's one-sided representation.
-        # Keep the Stage 5 status response full-length. NUM-003 is applied only
-        # at this PSD-construction boundary, through the same Shared L3 used
-        # by the pre-DTE and post-FFE impairment PSDs.
-        S_isi = self._build_eq_ch_imp_psd(
-            h_ISI.ir,
-            imp_status.sigma_X**2,
+
+        S_rn_filtered = S_rn_pre.filtered_by(H_rxffe)
+        S_an = SampledPSD(
+            theta=record_cfg.theta,
+            psd=float(added_noise.g_an) * S_rn_filtered.psd,
+            fb=record_cfg.fb,
+            cfg=record_cfg,
+        )
+        S_isi = build_response_psd(
+            eq_ch.post_ffe.h_ISI.ir,
+            sigma_X**2,
             source_name="post-FFE ISI equivalent channel",
-            record_cfg=record_cfg,
         )
         # Eq. (178A-54): sum receiver, added, and ISI noise densities.
         S_ni = S_n_filtered.add(S_an).add(S_isi)

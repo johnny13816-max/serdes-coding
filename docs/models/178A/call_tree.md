@@ -38,8 +38,9 @@ RUN_MODE
 `excel_to_config_178A(..., run_mode=...)` 在建立 `COMConfig` 前選定一組
 profile，並展開為 `cfg.alg/num/srch/exe`；model 不判斷 selector。
 有效方法、profile 名稱及 raw/effective override 隨 config snapshot 輸出。
-`COM.__init__()` 另依 `cfg.num.eq_ch_imp_len` 建立共享 NUM-003
-impairment-record context；它不改動 channel／pulse 使用的 `COMConfig.link`。
+`COM.__init__()` 不解析 NUM-003，也不建立共享 impairment-record context。
+NUM-003 只在 Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD 即將加總時，由各自
+owner 解析；channel／pulse 與完整 `eq_ch` 一律保留原本的 `COMConfig.link` 表示。
 
 ## Manual file entry
 
@@ -102,19 +103,20 @@ COM._run_once()
 │               └── victim only: _realize_ctle_pulse(include_txffe=False)
 │                   └── path.pulse_no_txffe
 ├── Stage 2: calculate_pre_dte_imp_common(victim)
-│   ├── build receiver-noise PSD on the shared NUM-003 record
-│   └── return sigma_X + S_rn run-local cache
+│   └── return phase-independent sigma_X cache
 ├── initialize COMRunStatus
 ├── Stage 3: sampling-phase evaluation
 │   ├── prepare_sampling_phase_common(...)
 │   │   ├── select each XT path phase from the full oversampled response
-│   │   ├── emit full one-sample/UI eq_ch_XT records
-│   │   └── build S_xn through shared NUM-003 L3
+│   │   └── emit full one-sample/UI eq_ch_XT records
 │   ├── choose initial phase indices
 │   ├── evaluate each requested phase
 │   │   └── calculate_pos_candidate(...)
 │   │       ├── calculate_pre_dte_imp_at_pos(...) -> eq_ch + imp
-│   │       │   └── sample victim.pulse_no_txffe -> h_tn
+│   │       │   ├── build complete per-phase eq_ch responses
+│   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
+│   │       │       ├── resolve NUM-003 record_cfg
+│   │       │       └── build/sum PSDs → R_n
 │   │       └── Stage 4: calculate_MMSE_DTE(...)
 │   │           ├── COM_MMSE_DTE(...).run(...)
 │   │           └── build H_rxffe from selected w_lim representation
@@ -128,7 +130,7 @@ COM._run_once()
     │   ├── Stage 5: calculate_post_ffe_imp(...)
     │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
     │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
-    │   │   └── _resolve_post_ffe_imp_record_cfg(...) for independent NUM-003
+    │   │   └── transform pre-DTE PSDs on their existing record (NUM-003 non-owner)
     │   ├── _assign_post_ffe(...) once, including resolved response/PSD grids
     │   ├── calculate_COM_DFE(...)
     │   └── return DFE COM status
@@ -144,9 +146,10 @@ COM._run_once()
         └── return requested completed status
 ```
 
-Stage 7 建立 MLSD `S_isi` 時，以 Stage 5 status 的 `h_ISI` 與 resolved
-`post_ffe.record_cfg` 呼叫 shared NUM-003 L3；status 中的完整 `h_ISI` 不先截短。
-MLSD 不再擁有另一個 RX FFE realization selector。
+Stage 7 的 `build_mlsd_noise()` 是第二個 NUM-003 owner：它從完整 pre/post-FFE
+`eq_ch` response 直接建立 MLSD 專用 component PSD；只在該函數內解析 record、
+加總 `S_ni` 並形成 `R_ni`。Stage 5 的 reporting PSD 不作為 MLSD PSD source，
+完整 `h_ISI` 也不會預先截短。MLSD 不擁有另一個 RX FFE realization selector。
 
 A `COMMainCursorError` rejects only that phase in the sampling loop. Other exceptions leave `_run_once()` and preserve any status already assigned, as described in the status lifecycle.
 

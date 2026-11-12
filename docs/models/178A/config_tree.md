@@ -255,9 +255,10 @@ unit pulse。這些步驟沒有額外 config 欄位。`rxffe_record_realization`
 Stage 5 post-FFE record policy：`linear_fixed_grid` 保留 run grid 與 overflow guard；
 `linear_expanded_grid` 建立足以容納完整 linear convolution 的共同 response grid；
 `finite_record_circshift` 在原有限 record 做 shift-sum，供 reference preset 使用。
-Stage 5 為唯一 branch owner，Stage 6 DFE 與 Stage 7 MLSD 只消費 status 中已解析的
-response／PSD record grid。`num.eq_ch_imp_len`（NUM-003）仍獨立決定 full 或
-truncated PSD/correlation record，不改變 ALG-011 的 response realization。
+Stage 5 為 ALG-011 唯一 branch owner，Stage 6 DFE 與 Stage 7 MLSD 只消費 status
+中已解析的 response。`num.eq_ch_imp_len`（NUM-003）由 Stage 2 pre-DTE 與
+Stage 7 pre-MLSD 的兩個 PSD-sum owners 各自解析 full／truncated record；Stage 5
+reporting PSD 只沿用 pre-DTE record，不改變 ALG-011 response realization。
 
 `out_of_measured` 控制 terminated scalar `H_21` 從量測 S-parameter grid
 轉到 analysis grid 時的頻帶外處理。`cosine_decay` 保留原本的 cosine

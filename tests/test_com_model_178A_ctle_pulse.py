@@ -13,6 +13,7 @@ from serdes_coding.models.com_model_178A import (
     _apply_fir_finite_record,
     _apply_rxffe_response,
     _build_channel_under_test,
+    _build_psd_from_DFT_response,
     _build_paths,
     _calculate_tx_noise_eq_ch,
     _build_shared_path,
@@ -312,12 +313,8 @@ def test_reference_ctle_changes_only_six_path_pulses_and_tx_noise():
         h_bilin_cosine,
         bilinear_cosine[0].pulse_no_txffe.ir[pos::cfg.link.per_ui],
     )
-    S_cont = COM(continuous_cfg)._build_eq_ch_imp_psd(
-        h_cont, variance_cont, source_name="continuous TX-noise eq-channel"
-    )
-    S_bilin = COM(bilinear_cfg)._build_eq_ch_imp_psd(
-        h_bilin, variance_bilin, source_name="bilinear TX-noise eq-channel"
-    )
+    S_cont = _build_psd_from_DFT_response(h_cont, cfg.link, variance_cont)
+    S_bilin = _build_psd_from_DFT_response(h_bilin, cfg.link, variance_bilin)
     assert np.max(np.abs(h_cont - h_bilin)) > 0.0
     assert np.max(np.abs(S_cont.psd - S_bilin.psd)) > 0.0
     assert variance_bilin_cosine == variance_bilin

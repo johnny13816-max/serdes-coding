@@ -15,8 +15,7 @@ lowest DTE MSE.
 Before the victim-phase loop, Stage 3 also selects each XT path's independent
 worst-energy phase from its **full oversampled response**. This is not the
 victim sampling phase. It produces one full-length one-sample/UI `eq_ch_XT`
-record per path, then passes those records through the shared NUM-003 L3 to form
-`S_xn`.
+record per path and performs no PSD construction or NUM-003 decision.
 
 It does not change the existing phase definition, retain every candidate's
 full status, solve MMSE internally, or construct post-FFE results.
@@ -27,10 +26,7 @@ full status, solve MMSE internally, or construct post-FFE results.
 COM._run_once()                                      [L0: stage set]
 └── Stage 3: sampling-phase evaluation               [L1]
     ├── XT phase / common impairment preparation     [L2]
-    │   ├── _select_xtalk_path_phase()               [L3/L4]
-    │   └── eq-channel impairment PSD construction   [Shared L3; NUM-003]
-    │       ├── _realize_eq_ch_imp_record()          [L4]
-    │       └── _build_eq_ch_imp_psd()               [L4]
+    │   └── _select_xtalk_path_phase()               [L3/L4; full response]
     ├── phase-set construction                       [L2]
     │   ├── _initial_pos_sweep_indices()             [L3/L4]
     │   └── _fine_pos_sweep_indices()                [L3/L4]
@@ -86,8 +82,8 @@ commit. It cannot change `phase_index`, pre-DTE objects, or the selected DTE.
 - Other candidate failures propagate.
 - Minimum MSE uses the existing strict lower-than comparison.
 - No new phase-candidate dataclass or full-candidate history is introduced.
-- XT phase selection always sees the full response; NUM-003 may only alter the
-  record passed into PSD/correlation construction.
+- XT phase selection always sees and returns the full response; NUM-003 is not
+  read by Stage 3 and is applied later by the Stage 2 impairment owner.
 
 ## Validation
 

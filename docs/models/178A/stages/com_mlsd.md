@@ -96,24 +96,24 @@ delta_com_an_temp = 20.0 * np.log10(a_an / a_ref)
 
 ### Eq. 178A-54：MLSD input PSD 與 autocorrelation
 
-此 block 必須區分 Eq. 178A-15 的 pre-FFE `S_n` 與 Eq. 178A-50 的 post-FFE
-`S_an`。前者經 `H_rxffe` 一次，後者不得再濾波；ISI 項由 two-sided spec
-density 轉成 `SampledPSD` 的 one-sided rFFT 表示：
+此 block 必須區分 Eq. 178A-15 的 pre-FFE `S_n` 與 Eq. 178A-50 的 added
+receiver-noise term。`build_mlsd_noise()` 是 Stage 7 的 NUM-003 owner：它先從
+完整 eq-channel response 在同一 record 上重建各 component PSD，再套用
+`H_rxffe`、`g_an` 與 ISI，最後一次加總：
 
 ```python
-# com_model_178A.py::COM.build_mlsd_noise()
-S_n_filtered = S_n.filtered_by(H_rxffe)             # S_n |H_rxffe|²
-S_isi = SampledPSD.from_constant(
-    H_rxffe.theta, imp_status.sigma_X**2 / H_rxffe.fb,
-    H_rxffe.fb, cfg=H_rxffe.cfg,
-).filtered_by(h_ISI)                                # one-sided S_isi
-S_ni = S_n_filtered.add(added_noise.S_an).add(S_isi)
+# conceptual structure of COM.build_mlsd_noise()
+record_cfg = full_post_ffe_response_cfg_or_num_trunc_ui()
+S_n = rebuild_pre_ffe_components(eq_ch.pre_dte, record_cfg)
+S_n_filtered = apply_rxffe_and_alg015(S_n, H_rxffe)
+S_an = g_an * S_rn_pre.filtered_by(H_rxffe)
+S_isi = build_psd(eq_ch.post_ffe.h_ISI, record_cfg, sigma_X**2)
+S_ni = S_n_filtered.add(S_an).add(S_isi)
 R_ni = S_ni.to_autocorrelation()
 ```
 
-`SampledPSD.from_constant()` 對內部 rFFT bins 做 two-sided→one-sided folding；
-DC/Nyquist 不加倍。focused test 驗 `R_isi[0] = sigma_X² sum(h_ISI²)`、
-`S_ni` 的逐 bin 加總、pre-FFE source 與共同 grid。
+Focused tests verify `R_isi[0] = sigma_X² sum(h_ISI²)`、共同 grid、ALG-015
+quantization choice，以及 stored Stage 5 `S_an` grid 不會成為此 owner 的輸入。
 
 ### Eq. 178A-52／53：`p_j` recurrence
 
@@ -202,8 +202,8 @@ Required completed inputs are:
 | Input | Required data | Use |
 |---|---|---|
 | DFE PMF status | component PMFs, `p_combined`, `A_ni`, and DFE `COM` | immutable baseline and added-noise calibration |
-| selected pre-DTE and post-FFE status | pre-FFE `S_total` (Eq. 178A-15 `S_n`), run-level-grid `S_rn`, `sigma_G`, `H_rxffe`, `h_ISI`, `sigma_X` | added-noise calibration and Eq. 178A-54 noise model |
-| selected DTE | one limited feedback coefficient | DER recurrence |
+| selected pre-DTE and post-FFE status | complete `h_dsamp/h_XTs_dsamp/h_tn/h_J/h_ISI`, ADC delta, `sigma_G`, `sigma_X` | Stage 7 PSD reconstruction and added-noise calibration |
+| selected DTE | `w_lim`, `H_rxffe`, one limited feedback coefficient | PSD filtering and DER recurrence |
 | PMF config | final-COM resolved grid | added-noise PMFs |
 | MLSD config | `trunc_len`, added-noise target | convergence target and sequence length |
 | fixed config | `L`, `DER_0`, `As` | detector-error and amplitude evaluation |
@@ -251,7 +251,8 @@ calculate_COM_MLSD()
 └── assign status.mlsd
 ```
 
-The stage reads the already resolved `cfg.alg` and `cfg.num.final_pmf_grid`.
+The stage reads the already resolved `cfg.alg`, NUM-003 fields, and
+`cfg.num.final_pmf_grid`.
 That final grid directly owns the PMF voltage step for added-noise calibration,
 while final-PMF `keep_mass` remains 1.0. ADC-input grid controls are excluded;
 no run profile enters Stage 7.
@@ -288,19 +289,27 @@ The solver enforces non-negative `g_an`, non-decreasing added-noise penalty duri
 
 ## MLSD PSD and autocorrelation
 
-`build_mlsd_noise()` constructs the MLSD-specific PSD objects on the one run-level grid, following Eq. 178A-54:
+`build_mlsd_noise()` is the Stage 7 NUM-003 owner. It constructs MLSD-specific
+PSD objects on one record and follows Eq. 178A-54:
 
 ```text
-selected pre-DTE S_total (= Eq. 178A-15 S_n)
-  -> filter directly by |H_rxffe|² on cfg.link.theta
-h_ISI and sigma_X²/fb -> S_isi (two-sided spec density converted to one-sided)
+complete pre/post-FFE eq_ch responses
+  -> resolve full post-FFE response_cfg or fixed num_trunc_ui record
+  -> rebuild receiver/XT/TX/jitter/quantization component PSDs
+  -> apply |H_rxffe|² and ALG-015 quantization choice
+g_an * filtered receiver PSD -> S_an
+h_ISI and sigma_X² -> S_isi
 S_n_filtered + S_an + S_isi -> S_ni
 S_ni -> R_ni
 ```
 
 The block returns transient `COMMLSDNoiseStatus`; the top-level stage later copies its `S_isi`, `S_ni`, and `R_ni` into the complete `COMMLSDStatus`. These detector quantities do not belong to the physical impairment status.
 
-The method requires pre-DTE `S_n`, `S_an`, `h_ISI`, and `H_rxffe` to share the complete theta grid and `fb` (`rtol=1e-12`, `atol=1e-15` for theta); COM-produced objects retain the same `LinkConfig` reference. The post-FFE reporting `S_total` is not substituted for Eq. 178A-15 `S_n`, because its ADC quantization term is calculated independently. For `S_isi`, interior rFFT bins are doubled while DC and Nyquist are not; `R_isi[0] = sigma_X² sum(h_ISI[n]²)` is the Parseval check.
+The method does not consume Stage 5 reporting PSDs or their grid. Complete
+responses remain unchanged; crop/zero-pad occurs only in this owner immediately
+before DFT. `full` uses the resolved post-FFE response grid and `truncated` uses
+the configured even `num_trunc_ui` record. `R_isi[0] = sigma_X² sum(h_ISI[n]²)`
+is the Parseval check when the full response is retained.
 
 ## Truncated DER calculation
 
@@ -387,7 +396,7 @@ The stage rejects or propagates errors for these conditions:
 - PMF grid spacing differs between the DFE result and resolved final config;
 - added-noise target, convergence tolerance, or iteration budget is invalid;
 - added-noise penalty is non-monotonic or cannot be bracketed/converged;
-- pre-DTE `S_n`, `S_an`, or `h_ISI` does not share the run-level post-FFE grid;
+- required full eq-channel responses are absent, or a NUM-003 record cannot be built;
 - `R_ni` is missing, too short, complex beyond tolerance, non-finite, or non-positive at lag zero;
 - PAM order, `As`, `b_lim[0]`, or `trunc_len` is invalid;
 - a DER contribution, total DER, or inverse-CDF amplitude is invalid.

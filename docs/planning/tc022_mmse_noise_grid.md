@@ -13,7 +13,8 @@ PSD grid 相加，不能只替 `S_xn` 特判或修改 `LinkConfig`。
 
 `truncated` 在 DFT 前明確截斷或補零 sampled response。crosstalk 必須先以
 完整 oversampled pulse 選 Eq. 178A-18 worst phase，形成完整 one-sample/UI
-`eq_ch_XT`，之後才由 Shared L3 決定是否截短並建立 `S_xn`。完整 path
+`eq_ch_XT`，之後才由 Stage 2 `_build_pre_dte_psd()` 決定是否截短並建立
+`S_xn`。完整 path
 waveform、`h_dsamp` 與 status 內 full equivalent-channel responses 不變。
 
 ## Config 邊界
@@ -52,20 +53,22 @@ mapping。這三個入口因此具有同一個一般模式 default。
 
 ## NUM-003 closure evidence (legacy B-005)
 
-2026-11-12 二次 ownership review 確認 semantic owner 是跨 Stage 2／3／5／7
-共用的 L3 impairment-record realization block。實作該 block 的 L4 functions 為
-`_resolve_eq_ch_imp_record_cfg()`、`_resolve_post_ffe_imp_record_cfg()`、
-`_realize_eq_ch_imp_record()` 與 `_build_eq_ch_imp_psd()`。本次只修正 ownership
-文件；production behavior、config 與既有 validation evidence 均未改變。
+2026-11-12 二次 ownership review 的最終修正確認兩個 semantic owners：Stage 2
+`COM._build_pre_dte_psd()` 建立 pre-DTE `S_total/R_n`；Stage 7
+`COM.build_mlsd_noise()` 建立 MLSD `S_ni/R_ni`。兩者都在各自 PSD 真正加總前
+解析 record。舊 shared-state／forwarding helpers 已移除；Stage 3 不建 PSD，
+Stage 5 只在既有 pre-DTE record 上建立 reporting transforms。
 
 - XT phase selection 改為一律先讀完整 oversampled response；SiCoPR 五條 XT
   phase 在新舊順序下相同：`23, 7, 6, 31, 0`。
 - production golden 保持 selected phase `5`、MSE
   `0.0061912610245255335 V²`、DFE COM `1.5247607834259893 dB`、final
   COM `2.895898684873246 dB`；`w`、`h_dsamp`、`R_n` digest 未變。
-- 完整非 GUI regression：`187 passed`, `1 deselected`, `2 subtests passed`。
-  deselected 項目只因目前 Python/Tk runtime 缺少可用 Tk library；其餘先前
-  sandbox temp-path failures 已在 repository 外可寫 temp root 重跑通過。
+- Static ownership test 確認 `eq_ch_imp_len/num_trunc_ui` 在 `COM` production
+  methods 中只由上述兩個 owners 讀取；focused `54 passed`、non-GUI
+  `212 passed, 17 skipped, 2 subtests passed`、production golden `1 passed`，
+  且未修改 golden。完整 collection 的 7 failures 是缺少外部 Hansel workbook、
+  sandbox system temp 與 repo-internal basetemp provenance，未進入 NUM-003 path。
 - template workbook 預設 `full/None`；SiCoPR workbook 明示
   `truncated/4096`。兩者保留獨立 project-config control。
 

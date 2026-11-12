@@ -4,7 +4,8 @@
 
 ## Purpose and ownership
 
-This document owns the pre-DTE impairment algorithms used across two stage boundaries.
+This document owns the pre-DTE impairment algorithms. Stage 3 only orchestrates
+which phases invoke them; it does not own impairment construction or NUM-003.
 
 It is split into:
 
@@ -47,45 +48,30 @@ per-phase builder, then hands the matching `eq_ch` and impairment to Stage 4.
 
 ## COM call-tree hierarchy
 
-The two builders share a physical domain but have distinct stage ownership.
+The phase-dependent builder executes from the Stage 3 candidate loop, but its
+impairment block remains a Stage 2 semantic owner.
 
 ```text
 COM                                                   [Root: model]
-├── __init__(cfg)                                     [Root: shared context]
-│   └── _resolve_eq_ch_imp_record_cfg()               [NUM-003 shared state]
 └── _run_once()                                       [L0: stage set]
     ├── Stage 2: common pre-DTE impairment            [L1]
     │   └── calculate_pre_dte_imp_common()            [L2: common-cache set]
-    │       ├── receiver-noise construction           [L3]
-    │       │   └── _build_psd_rx_noise()             [L4; NUM-003 record]
     │       └── signal variance                       [L3/L4]
     └── Stage 3: sampling-phase evaluation            [L1]
         ├── prepare_sampling_phase_common()           [L2]
-        │   ├── XT path phase selection               [L3]
-        │   │   └── _select_xtalk_path_phase()        [L4; full response]
-        │   └── eq-channel impairment PSD construction [Shared L3; NUM-003]
-        │       ├── _realize_eq_ch_imp_record()       [L4]
-        │       └── _build_eq_ch_imp_psd()            [L4]
-        └── calculate_pre_dte_imp_at_pos()            [L2: phase-specific set]
+        │   └── XT path phase selection               [L3]
+        │       └── _select_xtalk_path_phase()        [L4; full response]
+        └── calculate_pre_dte_imp_at_pos()            [L2: invokes Stage 2 model]
             ├── sampled equivalent-channel formation  [L3]
             │   └── SampledResponse.from_ir()         [L4]
             ├── transmitter-noise construction        [L3]
-            │   ├── _calculate_tx_noise_eq_ch()       [L4: sample stored pulse_no_txffe]
-            │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
+            │   └── _calculate_tx_noise_eq_ch()       [L4: full response]
             ├── jitter-noise construction             [L3]
-            │   ├── _calculate_tx_jitter_eq_ch()      [L4]
-            │   └── _build_eq_ch_imp_psd()            [Shared L3; NUM-003]
-            ├── ADC-input / quantization              [L3]
-            │   ├── _resolve_adc_input_pmf_config()   [L4: NUM-004/NUM-006; Gaussian support fixed 8σ]
-            │   ├── _build_pmf_pam_L()                [L4: exact PAM source]
-            │   ├── clipping PSD/tail selection        [L4: ALG-008]
-            │   └── _build_psd_adc_qn()               [L4: fixed exact-PMF owner]
-            │       └── _calculate_V_qc()
-            │           ├── _build_pmf_interference_178A() [L4: ALG-002 direct injector]
-            │           │   └── Pmf1D.fir_filter()/scale_x() [L5: ALG-002 owner set]
-            │           └── Pmf1D.gaussian()          [L5: ALG-003]
-            └── total-noise covariance                [L3]
-                └── SampledPSD.add() / to_autocorrelation() [L4]
+            │   └── _calculate_tx_jitter_eq_ch()      [L4: full response]
+            └── _build_pre_dte_psd()                  [Stage 2 L3; NUM-003 owner]
+                ├── resolve one record_cfg            [full or num_trunc_ui]
+                ├── build S_rn/S_xn/S_tn/S_jn/S_qn   [all on record_cfg]
+                └── sum S_total / form R_n            [atomic output]
 ```
 
 Stage 2 returns a phase-independent `COMImpairmentStatus` used only as a local
@@ -108,7 +94,7 @@ availability handling, not a branch behavior.
 ```text
 once per concrete candidate
 ├── Stage 2: calculate_pre_dte_imp_common(...)
-│   └── sigma_X + S_rn common cache
+│   └── sigma_X common cache
 └── Stage 3 preparation: prepare_sampling_phase_common(...)
     └── S_xn + full one-sample/UI h_XTs_dsamp
 
@@ -128,12 +114,9 @@ The common return values are run-local cache objects. They are not a separate `C
 
 | Input | Required data | Use |
 |---|---|---|
-| `COMConfig.link` | sampled grid, `fb`, `theta`, and `per_ui` | sampled PSD/response construction |
-| `COMConfig.num.eq_ch_imp_len/num_trunc_ui` | `full` or `truncated` plus an even UI count | shared impairment PSD/correlation record |
-| `COMConfig.filter` | receiver noise-filter and CTF controls | receiver-noise filtering |
-| `COMConfig.imp` | `eta_0` | receiver-noise PSD |
+| `COMConfig.link` | sampled grid and `per_ui` | response sampling |
 | `COMConfig.L` | PAM order | normalized symbol standard deviation |
-| `h_XTs` | full oversampled aggressor pulse arrays | Stage 3 per-path phase selection, full sampled eq-channel records, and crosstalk PSD |
+| `h_XTs` | full oversampled aggressor pulse arrays | Stage 3 per-path phase selection and full sampled eq-channel records |
 
 The `victim` argument is accepted by the current public method but is not read inside the common calculation.
 
@@ -143,11 +126,11 @@ The `victim` argument is accepted by the current public method but is not read i
 |---|---|---|
 | `victim` | `pulse.ir`, `pulse_no_txffe.ir` | victim samples, jitter response, and TX-noise sampling; all CTLE/ALG-006/ALG-007 work is already complete in Stage 1 |
 | `pos` | integer in `[0, per_ui)` | victim phase selection |
-| `common` | `sigma_X`, `S_rn`, `S_xn`, and their integrated values | reused phase-independent components |
+| `common` | `sigma_X` | reused phase-independent scalar |
 | `h_XTs_dsamp` | one-dimensional sampled response for each aggressor | selected candidate equivalent-channel status |
 | `COMConfig.imp` | `SNR_TX`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc`, `R_LM` | phase-specific impairment and optional quantization controls |
 | `COMConfig.pmf` | PMF support/tap/mass defaults | ADC-input PMF construction |
-| `COMConfig.num` | `pmf_keep_mass`, effective `adc_input_pmf_grid` | retained-mass and grid numerical controls；no PMF-method selector |
+| `COMConfig.num` | `eq_ch_imp_len/num_trunc_ui`, `pmf_keep_mass`, effective `adc_input_pmf_grid` | NUM-003 record plus independent PMF numerical controls |
 
 The exact workbook mappings are defined in [Configuration tree](../config_tree.md).
 
@@ -155,53 +138,36 @@ The exact workbook mappings are defined in [Configuration tree](../config_tree.m
 
 ```text
 calculate_pre_dte_imp_common(...)
-├── derive sigma_X from the configured PAM order
-├── _build_psd_rx_noise(...)
-│   ├── construct continuous receiver-noise PSD
-│   ├── filter through receiver-noise and CTF responses
-│   └── convert onto the sampled theta grid
-└── return sigma_X + S_rn common cache
+└── derive and return sigma_X from the configured PAM order
 
 prepare_sampling_phase_common(...)
 └── for each aggressor
     ├── select phase from the full oversampled response
-    ├── retain the full one-sample/UI eq-channel response
-    ├── apply NUM-003 only before PSD conversion
-    └── add the PSD to the uncorrelated crosstalk sum
+    └── retain the full one-sample/UI eq-channel response
 ```
 
 The aggressor phase selection is independent of the victim `pos` loop. It is
 owned by Stage 3 preparation and cannot be changed by NUM-003 truncation.
 
-The common `COMPSDStatus` populates:
-
-- `sigma_X`;
-- `S_rn`, `sigma_rn`;
-- `S_xn`, `sigma_xn`.
-
-All other fields remain absent until the per-phase calculation.
+The common `COMPSDStatus` populates only `sigma_X`. Every PSD remains absent
+until `_build_pre_dte_psd()` receives the complete per-phase `eq_ch` material.
 
 ## Per-phase functional blocks
 
 ```text
 calculate_pre_dte_imp_at_pos(...)
 ├── validate pos and common cache
-├── resolve ADC-input PMF runtime config
 ├── sample victim pulse at pos -> h_dsamp
 ├── enforce positive dominant main cursor
 ├── sample victim.pulse_no_txffe at pos -> h_tn
-├── _build_eq_ch_imp_psd(h_tn, ...) -> S_tn
 ├── _calculate_tx_jitter_eq_ch(...) -> full h_J
-├── _build_eq_ch_imp_psd(h_J, ...) -> S_jn
-├── build PAM input PMF
-├── combine full-jitter non-quantization PSD components -> S_ga
-├── select clipping-only Gaussian PSD and CDF tail by fixed policy
-├── branch on N_qb / P_qc
-│   ├── disabled -> zero S_qn and method="disabled"
-│   └── enabled -> _build_psd_adc_qn(...)
-│       └── exact p_s + p_ga -> p_sn -> V_qc -> delta -> S_qn
-├── add S_qn -> S_total
-├── derive sigma values and R_n
+├── assemble complete full-length eq_ch responses
+├── _build_pre_dte_psd(...)                         [NUM-003 owner]
+│   ├── resolve record_cfg once
+│   ├── crop/zero-pad each response only inside owner
+│   ├── build receiver/XT/TX/jitter/quantization PSDs
+│   ├── add S_qn -> S_total
+│   └── derive sigma values and R_n
 └── return candidate COMImpairmentStatus
 ```
 
@@ -263,7 +229,7 @@ The stage rejects or propagates errors for these conditions:
 
 - an aggressor pulse or sampled aggressor response is not one-dimensional;
 - `pos` is outside `[0, per_ui)`;
-- common cache lacks `sigma_X`, `S_rn`, or `S_xn`;
+- common cache lacks `sigma_X`;
 - victim sampling produces an empty sequence;
 - the sampled victim response does not have the required positive dominant cursor;
 - jitter finite difference has no valid interior samples;

@@ -45,11 +45,7 @@ Workbook / profile facade
             ├── COMPostFFEEqChannelStatus
             │   ├── record_realization
             │   └── response_cfg
-            └── NUM-003 _resolve_post_ffe_imp_record_cfg()
-                ├── full -> response_cfg
-                └── truncated -> configured truncated record_cfg
-                    ├── Stage 5 PSD status
-                    └── Stage 7 MLSD noise PSDs
+            └── filter pre-DTE PSDs on existing record_cfg [NUM-003 non-owner]
 ```
 
 `SampledResponse.cascade_ir(force_grid=False, output_cfg=...)` 是 owner 使用的
@@ -67,23 +63,26 @@ caller-owned utility contract，不是另一個 selectable branch。`_calculate_
 
 ## 與 NUM-003 的關係
 
-ALG-011 決定 time-domain response 的 boundary method；NUM-003 決定
-PSD/correlation record 的 `full`／`truncated` numerical domain。兩者不可合併：
+ALG-011 決定 time-domain response 的 boundary method；NUM-003 的兩個 owners
+分別決定 pre-DTE／pre-MLSD PSD record。Stage 5 不解析 NUM-003：
 
 ```text
 ALG-011 response_cfg
-├── NUM-003 full      -> same response_cfg
-└── NUM-003 truncated -> configured num_trunc_ui grid
+├── Stage 5 reporting PSD -> reuse pre-DTE record_cfg
+└── Stage 7 NUM-003 owner
+    ├── full      -> response_cfg
+    └── truncated -> configured num_trunc_ui grid
 ```
 
-MLSD 沒有另一個 ALG-011 selector，只能消費 Stage 5 已解析並記錄的 `record_cfg`。
+MLSD 沒有另一個 ALG-011 selector；它消費 Stage 5 已解析的完整 response，
+但由自己的 NUM-003 owner 建立 PSD record。
 
 ## Closure gate
 
 1. 三個 method 的 owner unit tests 通過。
 2. victim／all XT／DDJ／ISI 共用 `response_cfg`。
-3. full／truncated NUM-003 與 expanded record 的交互測試通過。
-4. MLSD 消費 Stage 5 `record_cfg`，沒有自行重選 realization。
+3. expanded response grid 不改變 Stage 5 pre-DTE-derived reporting PSD record。
+4. MLSD 消費 Stage 5 response realization，但不消費其 reporting PSD record。
 5. template config、branch matrix、registry、stage/call-tree 與 Python 3.7 utility export 同步。
 6. SiCoPR case：`COM_DFE=1.5247607834259893 dB`、final
    `COM=2.895898684873246 dB`，不得改變 baseline。

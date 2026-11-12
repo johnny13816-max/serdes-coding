@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-11-11
+最後核對：2026-11-12
 
 本文件是 178A model 分支行為的唯一權威紀錄，集中保存分類總表與
 ownership/function-position tree。新增、修改、重新命名、合併、移除或二次審查
@@ -74,7 +74,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-004` | approved branch | Stage 7 fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **Closed 2026-11-11** |
-| `NUM-003` | approved branch | Stages 2／3／5／7 impairment PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **L3** impairment-record realization block；L4 `_resolve_eq_ch_imp_record_cfg()`／`_resolve_post_ffe_imp_record_cfg()`／`_realize_eq_ch_imp_record()`／`_build_eq_ch_imp_psd()` | **Closed 2026-11-12** |
+| `NUM-003` | approved branch | Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()` | **Closed 2026-11-12** |
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **目前登錄 L3** `calculate_pre_dte_imp()` phase-scheduling block | 待二次審查 |
 | `ALG-008` | approved branch | Stage 3 per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **目前登錄 L3** `calculate_pre_dte_imp_at_pos()` clipping block | 待二次審查 |
 | `NUM-004` | approved branch | Stage 3 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As_with_cap`；`dy_override=10e-6 V` | **目前登錄 L4** `_resolve_adc_input_pmf_config()` | 待二次審查 |
@@ -103,7 +103,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
 | `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
 | `ALG-007` | CTLE pulse method-specific shared state，以及 victim／NEXT／FEXT `pulse` 與 victim `pulse_no_txffe` 的完整 CTLE realization | TX FFE、continuous `H_all`、ALG-006 transfer extension、Stage 3 TX-noise sampling policy |
-| `NUM-003` | PSD 建構前 impairment record 的 `full` 或固定 `num_trunc_ui` realization；固定長度模式對過長 response 截尾、對過短 response 補零 | Stage 1 path response、XT phase selection、RX FFE tap solve、ALG-011 post-FFE response realization／grid |
+| `NUM-003` | 在 pre-DTE／pre-MLSD PSD 真正加總的 owner 內，先把各完整 eq-channel response realization 成 `full` 或固定 `num_trunc_ui` record，再建 PSD、加總並形成 autocorrelation；固定長度模式對過長 response 截尾、對過短 response 補零 | Stage 1 path response、完整 `eq_ch` status、Stage 3 phase orchestration、Stage 4 RX FFE tap solve、Stage 5 PSD reporting transform、ALG-011 post-FFE response realization／grid |
 | `SRCH-001` | 要評估的 phase schedule | 每個 visited phase 使用的 Stage 4 solver 與公式 |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
 | `NUM-004` | pre-DTE 與 selected-phase ADC-input PMF grid | Stage 6 final PMF grid |
@@ -146,12 +146,11 @@ COM model
 │                 ├─ continuous_tf                           [uses analysis-grid H21; ALG-006 upstream-folded]
 │                 └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
 │                    └─ resample_tf()                        [same ALG-006 L5 owner]
-├─ L0 Stages 2／3／5／7 — impairment PSD/correlation record
-│  └─ impairment-record realization block                    [NUM-003 shared L3 owner]
-│     ├─ _resolve_eq_ch_imp_record_cfg()                      [L4: pre-FFE record-grid decision]
-│     ├─ _resolve_post_ffe_imp_record_cfg()                   [L4: post-FFE record-grid decision]
-│     ├─ _realize_eq_ch_imp_record()                          [L4: identity or crop/zero-pad]
-│     └─ _build_eq_ch_imp_psd()                              [L4: shared PSD facade]
+├─ L0 Stage 2 — pre-DTE impairment model
+│  └─ _build_pre_dte_psd()                                   [NUM-003 L3 owner]
+│     ├─ resolve one record_cfg                               [full link cfg or num_trunc_ui]
+│     ├─ realize S_rn/S_xn/S_tn/S_jn/S_qn on that record
+│     └─ sum S_total and form R_n                             [one atomic owner boundary]
 ├─ L0 Stage 3 — sampling phase and ADC input
 │  ├─ calculate_pre_dte_imp() phase schedule                 [SRCH-001 owner]
 │  ├─ calculate_pre_dte_imp_at_pos()
@@ -163,17 +162,20 @@ COM model
 │  └─ selected phase → Stage 4 solver                        [SRCH-001 consumer]
 ├─ L0 Stage 4 — MMSE DTE
 │  ├─ COM_MMSE_DTE.run() floating tap/group solve            [ALG-010 owner]
-│  └─ COMDTEStatus.H_rxffe                                   [NUM-003 concrete PSD-grid consumer; solve unchanged]
+│  └─ COMDTEStatus.H_rxffe                                   [bound to pre-DTE record after solve; non-owner]
 ├─ L0 Stage 5 — post-FFE impairment
-│  └─ _apply_rxffe_response()                                [ALG-011 owner]
-│     └─ COMPostFFEEqChannelStatus                           [Stages 6／7 consumer record]
+│  ├─ _apply_rxffe_response()                                [ALG-011 owner]
+│  │  └─ COMPostFFEEqChannelStatus                           [Stages 6／7 consumer record]
+│  └─ transform pre-DTE PSDs on their existing record        [NUM-003 non-owner]
 ├─ L0 Stage 6 — DFE COM / final PMF
 │  ├─ _resolve_final_com_pmf_config()                        [NUM-005 owner]
 │  ├─ calculate_COM_DFE() final V_qc selection               [ALG-012 owner; evidence pending]
 │  └─ calculate_COM_DFE() final ADC PMF projection           [ALG-013 owner]
 ├─ L0 Stage 7 — MLSD COM
 │  ├─ solve_g_an() added-noise PDF                           [ALG-014 owner]
-│  ├─ build_mlsd_noise() Eq. 178A-54 composition             [ALG-015 owner]
+│  ├─ build_mlsd_noise()                                     [NUM-003 L3 owner + ALG-015 owner]
+│  │  ├─ resolve MLSD record_cfg and rebuild component PSDs
+│  │  └─ Eq. 178A-54 composition → S_ni／R_ni
 │  ├─ calculate_der_mlsd() recurrence termination            [ALG-016 owner]
 │  └─ calculate_COM_MLSD() reported DER formation            [ALG-017 owner]
 └─ Cross-stage L5 PMF operations — Stages 3／5／6／7
@@ -289,7 +291,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | High-frequency handling | `LinkSegment.from_tf()`、`_reference_fd_to_td_record()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py`、`tests/test_com_model_178A_ctle_pulse.py` |
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse()`；`COMPath.pulse_no_txffe` | `tests/test_com_model_178A_ctle_pulse.py` |
 | RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；Stage 6/7 consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
-| Eq-channel impairment record／MMSE inputs | `COM._realize_eq_ch_imp_record()`、`COM._build_eq_ch_imp_psd()`；Stage 3 `_select_xtalk_path_phase()` | policy tests、`tests/test_com_model_178A_mlsd_noise.py` |
+| Eq-channel impairment record／MMSE inputs | Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()`；Stage 3 `_select_xtalk_path_phase()` 明確是 non-owner | policy ownership test、`tests/test_com_model_178A_mlsd_noise.py`、SiCoPR golden |
 | PMF branches | `_build_pmf_interference_178A()`、`_build_pmf_G()`、ADC/final PMF builders | `tests/test_pmf_reference_methods.py`、policy tests |
 | MLSD branches | `solve_g_an()`、`build_mlsd_noise()`、`calculate_der_mlsd()`、`calculate_COM_MLSD()` | `tests/test_com_model_178A_mlsd_flow.py`、`test_com_model_178A_mlsd_noise.py`、`test_com_model_178A_mlsd_eq47.py` |
 | Fixed-grid cascade | `utilities/link.py::LinkSegment.cascade_ir()`、`SampledResponse.cascade_ir()` | `tests/test_fixed_grid_contract.py` |
