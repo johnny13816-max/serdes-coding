@@ -39,12 +39,16 @@ value and `dy_abs_max`.
 ```text
 execution_profile
 └─ effective numerical controls
-   ├─ ADC-input family → _resolve_adc_input_pmf_config()
+   ├─ ADC-input family → _resolve_adc_input_pmf_config() [NUM-004 L4 owner]
    │  ├─ pre-DTE phase/MMSE
    │  └─ selected-phase ADC-input PMF
-   └─ final family → _resolve_final_com_pmf_config()
+   └─ final family → _resolve_final_com_pmf_config() [NUM-005 L4 owner]
       ├─ final DFE COM
       └─ final MLSD
+
+Both L4 domain owners delegate the common spacing formula to
+`COMPMFGridControl.resolve_dy()`. That L5 kernel does not select the ADC-input
+or final family and therefore is not the sole branch owner of either domain.
 ```
 
 The SiCoPR reference profile resolves ADC-input `dy_override=10e-6 V` and final

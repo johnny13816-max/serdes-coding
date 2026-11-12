@@ -54,7 +54,7 @@ realization 與 ALG-008 pre-DTE ADC clipping convention 均已完成。ALG-008 �
 Stage 2 L3 `_build_pre_dte_psd()` 單一 owner 執行；D3.2 確認 full-jitter／`P_qc/2`
 project method，MATLAB 4.17 RJ-only／`P_qc` 保留為 reference-only 對照。
 ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF；ownership
-二次審查下一個項目是 NUM-004 ADC-input PMF grid。NUM-006 `pmf_keep_mass`
+二次審查下一個項目是 NUM-005 final PMF grid。NUM-006 `pmf_keep_mass`
 retained-mass control 維持暫停。93A、reporting、
 C2M migration 與 public release 維持暫停。
 

@@ -77,7 +77,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `NUM-003` | approved branch | Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()` | **Closed 2026-11-12** |
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L2** `COM.calculate_sampling_phase()` | **Closed 2026-11-12** |
 | `ALG-008` | approved branch | Stage 2 pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
-| `NUM-004` | approved branch | Stage 3 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As_with_cap`；`dy_override=10e-6 V` | **目前登錄 L4** `_resolve_adc_input_pmf_config()` | 待二次審查 |
+| `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-005` | approved branch | Stage 6 final PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As`；`dy_override=None` | **目前登錄 L4** `_resolve_final_com_pmf_config()` | 待二次審查 |
 | `NUM-006` | pending candidate | Stage 3 ADC-input PMF convergence | `num.pmf_keep_mass`：project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **未決定** | 一次審查暫停；不宣稱 branch owner |
 | `ALG-010` | approved branch | Stage 4 MMSE DTE | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **目前登錄 L3** `COM_MMSE_DTE.run()` floating-tap/group block | 待二次審查 |
@@ -106,7 +106,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `NUM-003` | 在 pre-DTE／pre-MLSD PSD 真正加總的 owner 內，先把各完整 eq-channel response realization 成 `full` 或固定 `num_trunc_ui` record，再建 PSD、加總並形成 autocorrelation；固定長度模式對過長 response 截尾、對過短 response 補零 | Stage 1 path response、完整 `eq_ch` status、Stage 3 phase orchestration、Stage 4 RX FFE tap solve、Stage 5 PSD reporting transform、ALG-011 post-FFE response realization／grid |
 | `SRCH-001` | 要評估的 phase schedule、coarse/fine visit order、最低 MSE phase bundle 與 per-phase run status | `calculate_pos_candidate()` 的單點演算法、每個 visited phase 使用的 Stage 4 solver／公式、XT independent phase preparation |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
-| `NUM-004` | pre-DTE 與 selected-phase ADC-input PMF grid | Stage 6 final PMF grid |
+| `NUM-004` | Stage 2 pre-DTE 與 Stage 5 selected-phase ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
 | `NUM-005` | final DFE/MLSD PMF grid | Stage 3 ADC-input PMF grid |
 | `NUM-006` | pending：ADC-input PMF retained-mass／convergence effect | branch eligibility、consumer scope 與 owner 尚未核准 |
 | `ALG-010` | floating tap/group selection and solve flow | fixed-tap limiter definition |
@@ -155,6 +155,8 @@ COM model
 │     │  └─ RJ-only jitter + P_qc
 │     ├─ _build_psd_adc_qn(...)                               [fixed executor / non-owner]
 │     │  └─ _calculate_V_qc(...)                              [PMF helper / non-owner]
+│     ├─ _resolve_adc_input_pmf_config()                      [NUM-004 L4 owner; execution point 1]
+│     │  └─ COMPMFGridControl.resolve_dy()                    [L5 shared grid kernel]
 │     └─ sum S_total and form R_n                             [one atomic owner boundary]
 ├─ L0 Stage 3 — sampling phase and ADC input
 │  ├─ calculate_sampling_phase()                             [SRCH-001 L2 owner]
@@ -164,8 +166,7 @@ COM model
 │  │  ├─ calculate_pos_candidate(...) × visited phase        [single-phase evaluator / non-owner]
 │  │  ├─ strict minimum-MSE complete-bundle retention
 │  │  └─ COMRunStatus coarse/fine/MSE/error records
-│  ├─ calculate_pre_dte_imp_at_pos()                         [ALG-008 caller / non-owner]
-│  │  ├─ _resolve_adc_input_pmf_config()                     [NUM-004 owner]
+│  ├─ calculate_pre_dte_imp_at_pos()                         [ALG-008 / NUM-004 caller]
 │  │  └─ PMF retained-mass consumer                          [NUM-006 pending owner/scope]
 │  ├─ _calculate_tx_noise_eq_ch()
 │  │  └─ victim.pulse_no_txffe                               [ALG-006/007 upstream-folded consumer]
@@ -176,6 +177,8 @@ COM model
 ├─ L0 Stage 5 — post-FFE impairment
 │  ├─ _apply_rxffe_response()                                [ALG-011 owner]
 │  │  └─ COMPostFFEEqChannelStatus                           [Stages 6／7 consumer record]
+│  ├─ _resolve_adc_input_pmf_config()                        [same NUM-004 L4 owner; execution point 2]
+│  │  └─ COMPMFGridControl.resolve_dy()                      [same L5 shared grid kernel]
 │  └─ transform pre-DTE PSDs on their existing record        [NUM-003 non-owner]
 ├─ L0 Stage 6 — DFE COM / final PMF
 │  ├─ _resolve_final_com_pmf_config()                        [NUM-005 owner]

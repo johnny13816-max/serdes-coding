@@ -210,7 +210,8 @@ listed in [the migration contract](../../planning/comconfig_domain_migration.md#
 The eight grid fields have primary domain `numerical_control`, exposure
 `advanced`, effect `accuracy/cost`, and workbook class `policy`. Their owners
 are `_resolve_adc_input_pmf_config()` and `_resolve_final_com_pmf_config()`;
-raw/effective/profile provenance is exported. An override must be finite and
+both delegate the common spacing formula to the non-domain-owning L5 kernel
+`COMPMFGridControl.resolve_dy()`. Raw/effective/profile provenance is exported. An override must be finite and
 positive and has priority over both derived rules. The ADC-input family covers
 pre-DTE and selected-phase ADC-input PMFs only; the final family covers final
 DFE/MLSD PMFs only. The legacy shared `dy_rel_As`, `dy_abs_max`,

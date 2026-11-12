@@ -119,6 +119,7 @@ COM._run_once()
 │   │   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
 │   │   │       │       ├── resolve NUM-003 record_cfg
 │   │   │       │       ├── resolve ALG-008 clipping noise / CDF tail
+│   │   │       │       ├── resolve NUM-004 ADC-input PMF grid
 │   │   │       │       └── build/sum PSDs → R_n
 │   │   │       └── Stage 4: calculate_MMSE_DTE(...)
 │   │   │           ├── COM_MMSE_DTE(...).run(...)
@@ -133,6 +134,7 @@ COM._run_once()
     │   ├── Stage 5: calculate_post_ffe_imp(...)
     │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
     │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
+    │   │   ├── _resolve_adc_input_pmf_config() for NUM-004 selected-phase material
     │   │   └── transform pre-DTE PSDs on their existing record (NUM-003 non-owner)
     │   ├── _assign_post_ffe(...) once, including resolved response/PSD grids
     │   ├── calculate_COM_DFE(...)

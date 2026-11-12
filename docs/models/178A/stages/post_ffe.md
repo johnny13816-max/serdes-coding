@@ -201,6 +201,12 @@ The stage uses the supplied run's effective `adc_input_pmf_grid` and
 the final-PMF family. Enabled pre-DTE and post-FFE ADC-input material are both
 built through their fixed exact paths; neither stage exposes a PMF-method selector.
 
+Stage 5 是 NUM-004 的第二個 consumer。它呼叫同一個 L4 owner
+`_resolve_adc_input_pmf_config()`，為 selected-phase ADC-input material 解析
+grid；owner 再使用 shared L5 `COMPMFGridControl.resolve_dy()`。Stage 5 不讀取
+`final_pmf_grid`，L5 kernel 也不區分 ADC-input／final domain，因此不能取代
+兩個 L4 domain owners。
+
 The stage reads the already resolved `cfg.alg` and `cfg.num` owned by this
 single simulator instance. Run-mode selection occurs in the workbook adapter
 before `COM` construction; Stage 5 does not receive or interpret a profile.

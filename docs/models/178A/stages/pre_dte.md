@@ -215,8 +215,16 @@ Enabled quantization always obtains the pre-DTE ADC clipping/quantization materi
 `adc_input_pmf_grid` owns `rule`, `dy_rel_As`, `dy_abs_max`, and optional
 `dy_override`. The override has highest priority; otherwise the rule selects
 relative-only or relative-with-cap resolution. `pmf_keep_mass` remains the
-separate NUM-006 retention control. These numerical controls do not affect final
-DFE/MLSD PMFs.
+separate NUM-006 retention control. NUM-004 does not control the final DFE/MLSD
+PMF output grid; its resolved ADC-input `V_qc/delta` can still affect later PMF
+values as an upstream calculation input.
+
+NUM-004 的 sole branch owner 是 L4 `_resolve_adc_input_pmf_config()`：它明確
+選取 `cfg.num.adc_input_pmf_grid`，並組成 ADC-input domain 的 runtime PMF
+config。`COMPMFGridControl.resolve_dy()` 是與 NUM-005 共用的 L5 numerical
+kernel，只執行 override／relative／capped-relative 公式，不擁有 ADC-input
+或 final-PMF branch identity。本 stage 的 `_build_pre_dte_psd()` 是 NUM-004
+第一個 consumer。
 
 workbook `execution_profile=sicopr_reference_v1` 時，adapter 將各 run profile 展開為
 `keep_mass=1` 與 ADC-input explicit `dy=10 µV`；同時把
