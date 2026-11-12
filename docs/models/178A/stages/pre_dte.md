@@ -68,9 +68,11 @@ COM                                                   [Root: model]
             │   └── _calculate_tx_noise_eq_ch()       [L4: full response]
             ├── jitter-noise construction             [L3]
             │   └── _calculate_tx_jitter_eq_ch()      [L4: full response]
-            └── _build_pre_dte_psd()                  [Stage 2 L3; NUM-003 owner]
-                ├── resolve one record_cfg            [full or num_trunc_ui]
-                ├── build S_rn/S_xn/S_tn/S_jn/S_qn   [all on record_cfg]
+            └── _build_pre_dte_psd()                  [Stage 2 L3; NUM-003 / ALG-008 owner]
+                ├── resolve one record_cfg            [NUM-003]
+                ├── build S_rn/S_xn/S_tn/S_jn         [all on record_cfg]
+                ├── resolve clipping noise / tail     [ALG-008]
+                ├── build S_qn                        [fixed downstream executor]
                 └── sum S_total / form R_n            [atomic output]
 ```
 
@@ -162,10 +164,12 @@ calculate_pre_dte_imp_at_pos(...)
 ├── sample victim.pulse_no_txffe at pos -> h_tn
 ├── _calculate_tx_jitter_eq_ch(...) -> full h_J
 ├── assemble complete full-length eq_ch responses
-├── _build_pre_dte_psd(...)                         [NUM-003 owner]
+├── _build_pre_dte_psd(...)                         [NUM-003 / ALG-008 owner]
 │   ├── resolve record_cfg once
 │   ├── crop/zero-pad each response only inside owner
-│   ├── build receiver/XT/TX/jitter/quantization PSDs
+│   ├── build receiver/XT/TX/jitter PSDs
+│   ├── resolve ALG-008 clipping noise and CDF tail
+│   ├── build quantization PSD through fixed helpers
 │   ├── add S_qn -> S_total
 │   └── derive sigma values and R_n
 └── return candidate COMImpairmentStatus
@@ -220,6 +224,13 @@ pre-DTE clipping、離散訊號最近落格及 Gaussian reference sampling 寫�
 具名 runtime methods。此 stage 與 `Pmf1D` 都不讀取 profile selector。
 
 For `full_jitter_half_tail`, clipping uses the full-jitter `S_ga=S_rn+S_xn+S_tn+S_jn` and left-tail `P_qc/2`, matching D3.2 Eq. (178A-29) through Eq. (178A-31). `rj_only_full_tail_reference` uses random-jitter-only `S_jn_RJ` **only for the clipping Gaussian sigma** and left-tail `P_qc`. Both modes keep the full `S_jn` in `S_total=S_ga+S_qn` and therefore in MMSE `R_n`. `COMAdcInputPMF.clipping_convention` records the clipping convention separately from the fixed exact-PMF `method`. The later final-COM ADC PMF calculation remains independently owned.
+
+ALG-008 的 sole callable owner 是 Stage 2 L3 `_build_pre_dte_psd()`。它讀取
+`pre_dte_adc_clipping_convention`、完成 clipping PSD/tail dispatch、呼叫固定的
+exact-PMF／quantization helpers，並將共同的 `S_ga` 與 `S_qn` 組成 `S_total/R_n`。
+`calculate_pre_dte_imp_at_pos()` 只建立 per-phase equivalent responses 並呼叫
+owner；`_build_psd_adc_qn()` 與 `_calculate_V_qc()` 只消費已解析的
+`sigma_ga/cdf_tail`，均不是 branch owner。
 
 This pre-DTE policy does not control the accuracy-required final COM PMF configuration; final COM resolves its own PMF settings in the later COM DFE stage.
 

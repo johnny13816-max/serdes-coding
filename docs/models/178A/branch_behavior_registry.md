@@ -76,7 +76,7 @@ consumer。尚未完成二次審查的 owner 標為「目前登錄」，不得�
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **Closed 2026-11-11** |
 | `NUM-003` | approved branch | Stage 2 pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Stage 2 `COM._build_pre_dte_psd()`；Stage 7 `COM.build_mlsd_noise()` | **Closed 2026-11-12** |
 | `SRCH-001` | approved branch | Stage 3 phase scheduling | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L2** `COM.calculate_sampling_phase()` | **Closed 2026-11-12** |
-| `ALG-008` | approved branch | Stage 3 per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **目前登錄 L3** `calculate_pre_dte_imp_at_pos()` clipping block | 待二次審查 |
+| `ALG-008` | approved branch | Stage 2 pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stage 3 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As_with_cap`；`dy_override=10e-6 V` | **目前登錄 L4** `_resolve_adc_input_pmf_config()` | 待二次審查 |
 | `NUM-005` | approved branch | Stage 6 final PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters | `relative_As`；`dy_override=None` | **目前登錄 L4** `_resolve_final_com_pmf_config()` | 待二次審查 |
 | `NUM-006` | pending candidate | Stage 3 ADC-input PMF convergence | `num.pmf_keep_mass`：project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **未決定** | 一次審查暫停；不宣稱 branch owner |
@@ -147,9 +147,14 @@ COM model
 │                 └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
 │                    └─ resample_tf()                        [same ALG-006 L5 owner]
 ├─ L0 Stage 2 — pre-DTE impairment model
-│  └─ _build_pre_dte_psd()                                   [NUM-003 L3 owner]
-│     ├─ resolve one record_cfg                               [full link cfg or num_trunc_ui]
-│     ├─ realize S_rn/S_xn/S_tn/S_jn/S_qn on that record
+│  └─ _build_pre_dte_psd()                                   [NUM-003 / ALG-008 L3 owner]
+│     ├─ resolve one record_cfg                               [NUM-003 dispatch]
+│     ├─ realize S_rn/S_xn/S_tn/S_jn on that record
+│     ├─ resolve clipping noise + CDF tail                    [ALG-008 dispatch]
+│     │  ├─ full jitter + P_qc/2
+│     │  └─ RJ-only jitter + P_qc
+│     ├─ _build_psd_adc_qn(...)                               [fixed executor / non-owner]
+│     │  └─ _calculate_V_qc(...)                              [PMF helper / non-owner]
 │     └─ sum S_total and form R_n                             [one atomic owner boundary]
 ├─ L0 Stage 3 — sampling phase and ADC input
 │  ├─ calculate_sampling_phase()                             [SRCH-001 L2 owner]
@@ -159,8 +164,7 @@ COM model
 │  │  ├─ calculate_pos_candidate(...) × visited phase        [single-phase evaluator / non-owner]
 │  │  ├─ strict minimum-MSE complete-bundle retention
 │  │  └─ COMRunStatus coarse/fine/MSE/error records
-│  ├─ calculate_pre_dte_imp_at_pos()
-│  │  ├─ clipping PSD/tail selection                         [ALG-008 owner]
+│  ├─ calculate_pre_dte_imp_at_pos()                         [ALG-008 caller / non-owner]
 │  │  ├─ _resolve_adc_input_pmf_config()                     [NUM-004 owner]
 │  │  └─ PMF retained-mass consumer                          [NUM-006 pending owner/scope]
 │  ├─ _calculate_tx_noise_eq_ch()

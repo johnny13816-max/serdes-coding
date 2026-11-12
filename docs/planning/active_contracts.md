@@ -19,7 +19,8 @@ convergence、驗證與 isolated integration。ALG-004 signed-scale contract、�
 L3 CTLE pulse-realization functional block ownership。NUM-003 也已完成二次審查與
 實作修正，確認 Stage 2／Stage 7 各有一個 PSD-sum owner。SRCH-001 已完成
 ownership 收斂，Stage 3 L2 `COM.calculate_sampling_phase()` 是唯一 selector
-owner；二次審查移至 ALG-008。NUM-006
+owner。ALG-008 也已完成二次審查，確認 Stage 2 L3 `_build_pre_dte_psd()`
+是 sole owner；二次審查移至 NUM-004。NUM-006
 保持暫停。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
@@ -34,7 +35,7 @@ reporting、C2M migration 或 release 工作。
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A branch ownership second review | **Active — ALG-008** | SRCH-001 已關閉；Stage 3 L2 `COM.calculate_sampling_phase()` 是 sole owner，`_run_once()` 與單點 candidate／Stage 4 solver 都是 non-owner | 重新確認 ALG-008 pre-DTE ADC clipping convention 的 owner、consumers 與 branch parameters |
+| CP-BR — 178A branch ownership second review | **Active — NUM-004** | ALG-008 已關閉；Stage 2 L3 `_build_pre_dte_psd()` 是 sole owner，per-phase caller 與 PMF/quantization helpers 都是 non-owner | 重新確認 NUM-004 ADC-input PMF grid 的 owner、consumers 與 branch parameters |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
@@ -66,7 +67,7 @@ reporting、C2M migration 或 release 工作。
 | ALG-005（legacy B-001）— Channel renormalization | Retired as non-branch。D3.2 measured S4P 固定 single-ended renormalization → mixed-mode；native S2P 僅依 port count dispatch，錯誤不 fallback。Focused `52 passed`、Python 3.7 validator passed、9 份 workbook selector scan 0、matrix formula errors 0；SiCoPR golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。 |
 | ALG-006（legacy B-002）— Out-of-measured transfer | 保留 `cosine_decay`／`zero_padding` branch；`resample_tf()` 是共同數值 owner。Analysis-grid `H_21` 與 bilinear finite record 是兩個 direct execution paths；victim TX noise 只抽樣已建立的 `pulse_no_txffe`，不是第三個 execution point。Focused `41 passed`；SiCoPR fixed 67 GHz＋zero-padding golden `1 passed`，MSE `0.0061912610245255335`、`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 與 stage digests 不變。Full suite 的七項既有／環境 failure 已依 contract 記錄 deviation。Implementation `db0e836` 已推送至 `origin/main`。 |
 | ALG-007（legacy B-003）— CTLE pulse realization | **Closed 2026-11-11**。L3 CTLE pulse-realization functional block 是 semantic owner；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` 分別執行 shared setup 與 per-path realization。Victim `COMPath` 同時保存 `pulse` 與 `pulse_no_txffe`，NEXT／FEXT 的後者為 `None`；Stage 3 只抽樣 no-TX-FFE pulse。Focused `38 passed`；SiCoPR production golden 的 MSE、COM_DFE、final COM 與三個 digests 不變。Implementation `e676a45`、二次 ownership 文件 `b79a964`。 |
-| ALG-008（legacy B-006）— Pre-DTE ADC clipping convention | Stage 3 `calculate_pre_dte_imp_at_pos()` 是 sole execution owner；D3.2 確認 `full_jitter_half_tail`，MATLAB 4.17 對照為 `rj_only_full_tail_reference`。直接影響 `V_qc/delta/S_qn/R_n`；後續 COM 僅可能經 phase／taps 間接受影響，final ADC PMF 不讀此 selector。Focused `29 passed`；SiCoPR production golden `1 passed`，`COM_DFE=1.5247607834259893 dB`、final `COM=2.895898684873246 dB` 不變。 |
+| ALG-008（legacy B-006）— Pre-DTE ADC clipping convention | **二次 ownership review Closed 2026-11-12**。Stage 2 L3 `_build_pre_dte_psd()` 是 sole owner；它選擇 clipping noise composition／CDF tail，固定 `_build_psd_adc_qn()`／`_calculate_V_qc()` 只消費 concrete inputs。D3.2 確認 `full_jitter_half_tail`，MATLAB 4.17 對照為 `rj_only_full_tail_reference`。直接影響 `V_qc/delta/S_qn/R_n`；後續 COM 僅可能經 phase／taps 間接受影響，final ADC PMF 不讀此 selector。AST ownership evidence 只找到一個 owner；current focused `2 passed`。Production path 未變，因此未重跑 golden；既有 SiCoPR golden `1 passed` evidence 保留。 |
 | RC-20261106-001 — Remove stale branch-review checklist | `9161e63823daaa1009deeccebd927ea72dc46ab0`；registry 與 stage progress 為現行分類／待辦來源。 |
 | RC-20261106-002 — Repository workbook batch maintenance | `194ce220479c2c2825bf553b333a2e7c0d6f90c2`；inventory→batch authoring→single final verification，按 layout 與視覺影響 render。 |
 

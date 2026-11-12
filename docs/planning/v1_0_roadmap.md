@@ -51,10 +51,11 @@ Stage 1。ALG-006 Out-of-measured transfer 已於 2026-11-07 關閉：保留
 `cosine_decay`／`zero_padding`，並讓 analysis-grid `H_21`、bilinear path pulse
 與 victim TX-noise finite record 使用同一 resolved policy。ALG-007 CTLE pulse
 realization 與 ALG-008 pre-DTE ADC clipping convention 均已完成。ALG-008 由
-`calculate_pre_dte_imp_at_pos()` 單一 owner 執行；D3.2 確認 full-jitter／`P_qc/2`
+Stage 2 L3 `_build_pre_dte_psd()` 單一 owner 執行；D3.2 確認 full-jitter／`P_qc/2`
 project method，MATLAB 4.17 RJ-only／`P_qc` 保留為 reference-only 對照。
-ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF；下一個待討論項目是
-NUM-006 `pmf_keep_mass` retained-mass control。93A、reporting、
+ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF；ownership
+二次審查下一個項目是 NUM-004 ADC-input PMF grid。NUM-006 `pmf_keep_mass`
+retained-mass control 維持暫停。93A、reporting、
 C2M migration 與 public release 維持暫停。
 
 ## 與其他狀態文件的分工

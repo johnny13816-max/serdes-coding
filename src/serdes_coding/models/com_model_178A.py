@@ -331,7 +331,7 @@ def _calculate_V_qc(
 
     pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal")
     # Annex 178A.1.7.6 uses P_qc/2; the reference-only pre-DTE branch
-    # supplies P_qc explicitly from calculate_pre_dte_imp_at_pos().
+    # supplies P_qc explicitly from the _build_pre_dte_psd() owner.
     V_qc = -(pmf_sn.quantile(P_qc / 2 if cdf_tail is None else cdf_tail))
 
     return COMAdcInputPMF(

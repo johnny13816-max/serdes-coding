@@ -118,6 +118,7 @@ COM._run_once()
 │   │   │       │   ├── build complete per-phase eq_ch responses
 │   │   │       │   └── Stage 2 owner: _build_pre_dte_psd(...)
 │   │   │       │       ├── resolve NUM-003 record_cfg
+│   │   │       │       ├── resolve ALG-008 clipping noise / CDF tail
 │   │   │       │       └── build/sum PSDs → R_n
 │   │   │       └── Stage 4: calculate_MMSE_DTE(...)
 │   │   │           ├── COM_MMSE_DTE(...).run(...)

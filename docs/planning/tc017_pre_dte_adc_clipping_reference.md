@@ -1,12 +1,12 @@
 # TC-017 — 178A pre-DTE ADC clipping 的 MATLAB 4.17 對照分支
 
-**狀態：ALG-008 closure review 於 2026-11-09 完成；D3.2 evidence、唯一 owner、impact boundary 與語意命名已收斂。** 關聯 G-004。`full_jitter_half_tail` 是 D3.2 支持的 project method；`rj_only_full_tail_reference` 僅供與 COM MATLAB 4.17.0／SiCoPR 的固定案例比較，**不是 general method**。
+**狀態：ALG-008 二次 ownership review 於 2026-11-12 關閉；D3.2 evidence、唯一 owner、impact boundary 與語意命名已收斂。** 關聯 G-004。`full_jitter_half_tail` 是 D3.2 支持的 project method；`rj_only_full_tail_reference` 僅供與 COM MATLAB 4.17.0／SiCoPR 的固定案例比較，**不是 general method**。
 
 ## 目標、證據與目前資料流
 
 IEEE P802.3dj/D3.2 Annex 178A.1.7.6 Eq. (178A-29)–(178A-31) 確認：ADC clipping 的 Gaussian noise PSD 含完整 jitter `S_jn`，由 `P_sn` 的 `P_qc/2` 左尾求 `V_qc`。本地 COM MATLAB 4.17.0 `release/com_ieee8023_4p16p0.m` 的 `get_PSDs` 路徑則用 random-jitter-only 項建立 clipping Gaussian `P_n`，以 `CDF=P_qc` 求 `V_qc`；完整 jitter 仍用於 MMSE 的 noise PSD。已擷取的 SiCoPR fixed candidate亦呈現同一組差異，因此保留明確標示的 reference-only 對照分支。
 
-目前 `src/serdes_coding/models/com_model_178A.py::calculate_pre_dte_imp_at_pos()` 是唯一 execution owner：先算完整 `S_jn`，令 `S_ga=S_rn+S_xn+S_tn+S_jn`，再把已選定的 clipping sigma／tail 送 `_build_psd_adc_qn()`；其後 `S_total=S_ga+S_qn`，轉成 `R_n`。D3.2 Eq. (178A-29) 至 Eq. (178A-31) 已確認 project method 使用完整 jitter 與 `P_qc/2`。
+目前 `src/serdes_coding/models/com_model_178A.py::COM._build_pre_dte_psd()` 是唯一 execution owner：先算完整 `S_jn`，令 `S_ga=S_rn+S_xn+S_tn+S_jn`，再依 selector 決定 clipping sigma／tail 並送 `_build_psd_adc_qn()`；其後 `S_total=S_ga+S_qn`，轉成 `R_n`。`calculate_pre_dte_imp_at_pos()` 是 per-phase caller；`_build_psd_adc_qn()`／`_calculate_V_qc()` 是只接 concrete inputs 的 non-owner。D3.2 Eq. (178A-29) 至 Eq. (178A-31) 已確認 project method 使用完整 jitter 與 `P_qc/2`。
 
 ## 提議的責任邊界與數學資料流
 
@@ -37,7 +37,7 @@ R_n = IFFT(S_noise_for_MMSE)
 
 | 層級 | 檔案與函式／位置 | 變更 |
 | --- | --- | --- |
-| 178A config／protected kernel | `src/serdes_coding/models/com_178a/config.py::COMPolicyConfig`、`src/serdes_coding/models/com_model_178A.py::COM.calculate_pre_dte_imp_at_pos()`、`_calculate_V_qc()`、`_calculate_V_qc_gaussian_approx()`、`_build_psd_adc_qn()` | 固定 policy 驗證與狀態記錄；clipping sigma／tail 選擇；MMSE 完整 jitter 不動 |
+| 178A config／protected kernel | `src/serdes_coding/models/com_178a/config.py::COMAlgorithmPolicyConfig`、`src/serdes_coding/models/com_model_178A.py::COM._build_pre_dte_psd()`、`_calculate_V_qc()`、`_build_psd_adc_qn()` | 固定 policy 驗證與狀態記錄；sole owner 選擇 clipping sigma／tail；helpers 只執行 concrete operation；MMSE 完整 jitter 不動 |
 | 178A workbook adapter | `src/serdes_coding/io/com_excel_io_178A.py::_project_excel_to_com_config_178A()` | 讀 fixed-config selector，舊 workbook 缺欄時使用 `full_jitter_half_tail` |
 | conversion 分類 | `src/serdes_coding/io/conversion/mapping_rules.py::POLICY_FIXED_178A` | 列為 project-owned policy，不從 Ad Hoc intrinsic 映射 |
 | workbooks | 現有 178A case/template workbooks | selector 未直接持久化；adapter 由 execution profile 展開 project／reference method |
