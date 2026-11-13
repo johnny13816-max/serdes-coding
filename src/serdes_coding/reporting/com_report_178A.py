@@ -99,11 +99,7 @@ class COMReport178A(COMReportBase):
         self._annotate_pmf_settings(ax, pmf, keep_mass=self._pmf_keep_mass())
 
     def _pmf_keep_mass(self) -> float:
-        return float(
-            self.status.run.pmf_keep_mass
-            if self.status.run is not None and self.status.run.pmf_keep_mass is not None
-            else 1 - 1e-5
-        )
+        return float(self.cfg.num.pmf_keep_mass)
 
     def _annotate_pmf_settings(
         self,

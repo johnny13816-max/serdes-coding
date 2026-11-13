@@ -120,18 +120,21 @@ sampled response，因此兩者位於不同 lifecycle/status branches，不重�
 
 ## Run status
 
-`COMRunStatus` records the execution policy actually used and the sampling-phase sweep trace.
+`COMRunStatus` is the diagnostic trace emitted by the Stage 3 sampling-phase
+sweep. It is retained only so reporting can reconstruct `mse_by_pos.png`; it is
+not a numerical input or a general run-policy record.
 
 | Field | Type/domain | Producer | Consumer |
 |---|---|---|---|
-| `pmf_grid_quality` | optional effective annotation | `_run_once()` from resolved `cfg.num` | report annotation；canonical grid evidence is the resolved ADC-input/final PMF runtime config |
-| `pmf_keep_mass` | optional probability | `_run_once()` from resolved `cfg.num` | report annotation |
 | `mse_by_pos` | list indexed by phase; `float V²` or `None` | phase evaluation loop | phase/MSE report |
 | `main_cursor_error_by_pos` | list indexed by phase; message or `None` | phase evaluation loop | invalid-phase report |
 | `coarse_pos` | phase indices | initial sweep | phase/MSE report |
 | `fine_pos` | phase indices | optional fine sweep | phase/MSE report |
 
 `None` in `mse_by_pos` means that phase did not produce a valid candidate or was not visited by the selected sweep policy. The corresponding error list distinguishes a recorded main-cursor rejection from an unvisited position.
+
+PMF numerical controls are not duplicated here. `COMReport178A` receives the
+resolved `COMConfig` and reads PMF annotations directly from `cfg.num`.
 
 ## Selected DTE status
 

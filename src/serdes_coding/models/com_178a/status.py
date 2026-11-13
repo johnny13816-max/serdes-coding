@@ -825,9 +825,7 @@ class COMDTEStatus(COMDataclassText):
 
 @dataclass(repr=False)
 class COMRunStatus(COMDataclassText):
-    """Runtime records collected while one concrete 178A COM point is evaluated."""
-    pmf_grid_quality: Optional[str] = None
-    pmf_keep_mass: Optional[float] = None
+    """Diagnostic trace produced by the Stage 3 sampling-phase sweep."""
     mse_by_pos: list[Optional[float]] = field(default_factory=list)
     main_cursor_error_by_pos: list[Optional[str]] = field(default_factory=list)
     coarse_pos: list[int] = field(default_factory=list)
@@ -835,10 +833,6 @@ class COMRunStatus(COMDataclassText):
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
-            TextSection("Resolved precision", (
-                self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
-                self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
-            )),
             TextSection("Sampling sweep", (
                 self._field("mse_by_pos", "MSE by phase", stored_unit="V^2"),
                 self._field("main_cursor_error_by_pos", "main-cursor errors", stored_unit="status"),
@@ -849,7 +843,6 @@ class COMRunStatus(COMDataclassText):
 
     def _repr_fields(self) -> tuple[TextField, ...]:
         return (
-            self._field("pmf_grid_quality", "PMF grid quality", stored_unit="policy"),
             self._field("mse_by_pos", "MSE by phase", stored_unit="V^2", summary="count"),
         )
 

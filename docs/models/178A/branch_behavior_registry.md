@@ -77,7 +77,7 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **Closed 2026-11-11** |
 | `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | **Closed 2026-11-12** |
-| `SRCH-001` | approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **semantic owner** Sampling search function set；**concrete owner** `COM._run_once()` phase-search loop | **Ownership corrected 2026-11-13** |
+| `SRCH-001` | approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
 | `ALG-008` | approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
@@ -167,7 +167,7 @@ COM model
 │     │  └─ COMPMFGridControl.resolve_dy()                    [L5 shared grid kernel]
 │     └─ sum S_total and form R_n                             [one atomic owner boundary]
 ├─ L1 Stage 3 / Control — Sampling search
-│  └─ _run_once() phase-search loop                          [SRCH-001 concrete owner]
+│  └─ _run_once() exposed Stage 3 control block              [SRCH-001 L1 owner]
 │     ├─ resolve pos_sweep_method / pos_coarse_stride        [sole selector read]
 │     ├─ _initial_pos_sweep_indices(...)                     [concrete-choice helper]
 │     ├─ one shared initial/fine phase-batch loop

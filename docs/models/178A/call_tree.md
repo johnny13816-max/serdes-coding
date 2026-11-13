@@ -107,7 +107,7 @@ COM._run_once()
 │   └── prepare_pre_dte_phase_inputs(...)
 │       ├── select each XT path phase from the full oversampled response
 │       └── emit full one-sample/UI eq_ch_XT records
-├── Stage 3 — Sampling search loop in _run_once()        [SRCH-001 owner]
+├── Stage 3 — Sampling search block in _run_once()       [SRCH-001 L1 owner]
 │   ├── resolve method / stride once                     [sole selector read]
 │   ├── initialize COMRunStatus
 │   ├── _initial_pos_sweep_indices(...)

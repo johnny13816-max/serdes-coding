@@ -1625,8 +1625,6 @@ class COM:
         method = self.cfg.srch.pos_sweep_method
         coarse_stride = self.cfg.srch.pos_coarse_stride
         run_status = COMRunStatus(
-            pmf_grid_quality=self.cfg.num.pmf_grid_quality,
-            pmf_keep_mass=self.cfg.num.pmf_keep_mass,
             mse_by_pos=[None] * self.per_ui,
             main_cursor_error_by_pos=[None] * self.per_ui,
         )

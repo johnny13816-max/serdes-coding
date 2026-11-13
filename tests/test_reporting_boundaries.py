@@ -35,6 +35,13 @@ def test_reporters_own_single_and_search_plot_exports():
         assert callable(getattr(reporter_type, "export_search_run"))
 
 
+def test_178a_report_reads_pmf_annotation_from_numerical_config():
+    cfg = SimpleNamespace(num=SimpleNamespace(pmf_keep_mass=0.987))
+    report = COMReport178A(cfg, COMStatus178A())
+
+    assert report._pmf_keep_mass() == pytest.approx(0.987)
+
+
 class _DummyReport(COMReportBase):
     def __init__(self, cfg, status):
         self.calls = []

@@ -1,5 +1,7 @@
 """Sampling-search, selected-phase ownership and atomic commit checks."""
 
+from dataclasses import fields
+
 from types import SimpleNamespace
 
 import numpy as np
@@ -13,6 +15,7 @@ from serdes_coding.models.com_model_178A import (
     COMMainCursorError,
     COMPostFFEEqChannelStatus,
     COMPreDTEEqChannelStatus,
+    COMRunStatus,
     COMStatus,
 )
 from serdes_coding.utilities.link import LinkConfig, SampledResponse
@@ -68,6 +71,15 @@ def _sampling_search_model(*, per_ui, method, stride, mse_by_pos, rejected=()):
     model.calculate_pre_dte_imp_at_pos = calculate_pre_dte
     model.calculate_MMSE_DTE = calculate_dte
     return model, visited
+
+
+def test_run_status_contains_only_stage_3_sampling_trace() -> None:
+    assert {field.name for field in fields(COMRunStatus)} == {
+        "mse_by_pos",
+        "main_cursor_error_by_pos",
+        "coarse_pos",
+        "fine_pos",
+    }
 
 
 def test_selected_phase_mismatch_does_not_partially_update_status() -> None:
