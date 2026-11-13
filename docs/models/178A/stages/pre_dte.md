@@ -217,7 +217,10 @@ Enabled quantization always obtains the pre-DTE ADC clipping/quantization materi
 `adc_input_pmf_grid` owns `rule`, `dy_rel_As`, `dy_abs_max`, and optional
 `dy_override`. The override has highest priority; otherwise the rule selects
 relative-only or relative-with-cap resolution. `pmf_keep_mass` remains the
-separate NUM-006 retention control. NUM-004 does not control the final DFE/MLSD
+separate NUM-006 retention control: this stage injects the resolved scalar into
+ADC-input FIR-PMF construction, while L5 `Pmf1D.fir_filter()` owns the behavior
+of symmetrically truncating and renormalizing after every tap convolution.
+NUM-004 does not control the final DFE/MLSD
 PMF output grid; its resolved ADC-input `V_qc/delta` can still affect later PMF
 values as an upstream calculation input.
 

@@ -29,8 +29,10 @@ L5 `COMPMFGridControl.resolve_dy()` 僅為 shared kernel。NUM-005 的 Stage 6
 consumer 是直接完整使用；Stage 7 依 added-noise flow 直接使用 final grid 或
 間接沿用 Stage 6 PMFs。ALG-010 已完成完整初次審查並關閉：保留三種 floating
 strategies，L3 `COM_MMSE_DTE`／`COM_MMSE_DTE.run()` 是 semantic／concrete owner，
-production 不需修改。下一項為 NUM-006；NUM-006 與 ALG-011–017
-同樣不得沿用舊有 approved／owner 結論。RC-004
+production 不需修改。NUM-006 也已完成完整初次審查：L5
+`Pmf1D.fir_filter()` 是 owner，Stage 2／5 是 direct consumers，Stage 6 固定
+`keep_mass=1.0` 而不是 consumer。下一項為 ALG-011；ALG-011–017
+不得沿用舊有 approved／owner 結論。RC-004
 仍為 Proposed，僅由規則專用對話評估。
 
 歷史評估與 178A P3 workbook/config interface review 已完成；P3 的完成範圍限於目前同步的
@@ -43,8 +45,8 @@ reporting、C2M migration 或 release 工作。
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
-| CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新定義 NUM-006 boundary |
-| CP-BR — 178A complete branch review | **Active — NUM-006 initial review** | 已關閉項目不重開；ALG-010 已關閉，NUM-006、ALG-011–017 全部從 eligibility 開始，不採信歷史 approved／owner 標籤 | 從 eligibility 開始完整審查 NUM-006 `pmf_keep_mass` 的 scope、owner、consumers 與 validation |
+| CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 回到 CP-BR，從 production consumers 重新審查 ALG-011 boundary |
+| CP-BR — 178A complete branch review | **Active — ALG-011 initial review** | 已關閉項目不重開；NUM-006 已關閉，ALG-011–017 全部從 eligibility 開始，不採信歷史 approved／owner 標籤 | 從 eligibility 開始完整審查 ALG-011 `rxffe_record_realization` 的 scope、owner、consumers 與 validation |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
@@ -54,6 +56,7 @@ reporting、C2M migration 或 release 工作。
 
 | Boundary | Evidence |
 | --- | --- |
+| NUM-006 — ADC-input FIR-PMF retained mass | **完整初次審查 Closed 2026-11-13**。保留 project `1-1e-5`／reference `1.0`；L5 public `Pmf1D.fir_filter()` 是 owner，在每個 tap convolution 後對稱截尾並重新正規化，`1.0` 關閉截斷。Stage 2／5 是 direct consumers；`_resolve_adc_input_pmf_config()` 只注入數值，private `_truncate_keep_mass()` 只執行；Stage 6 final PMF 固定 `1.0`，不是 consumer。公開 owner 新增 `(0,1]` finite validation；合法設定的 numerical path 未變。Focused `53 passed`，未重跑 golden。 |
 | ALG-010 — Floating FFE strategy | **完整初次審查 Closed 2026-11-12**。保留 `heuristic`／`simplified`／`spec-defined`；L3 `COM_MMSE_DTE` 是 semantic owner，`COM_MMSE_DTE.run()` 是 concrete callable owner。`COM.calculate_MMSE_DTE()` 只注入 `cfg.alg.floating_mode`；三個 strategy helpers 是 executors。Focused `7 passed` 覆蓋唯一 operational selector read、每個 selector 的唯一 dispatch 與三種 mode 的 `N_wg=0` bypass，並檢查 coherent `COMDTEStatus`；與既有 policy tests 合跑 `42 passed`。Production path 不變，未重跑 golden，也不宣稱 equation/spec equivalence。 |
 | SRCH-001 — Sampling-phase schedule | **Ownership corrected 2026-11-13**。`COM._run_once()` 中完整且刻意展開的 L1 Stage 3 control block 是 owner：唯一讀取 method/stride、操作 initial/fine phase sweeping、處理 cursor rejection、保留 strict-minimum complete bundle、決定 locking point 並 commit。Stage 2 Pre-DTE 與 Stage 4 DTE 直接顯示於 loop 內但保有獨立 ownership。`COMRunStatus` 只保存 `mse_by_pos.png` 所需的四個 diagnostic trace 欄位；PMF controls 由 reporter 直接讀取 `cfg.num`。Current focused Stage 3/status/reporting/policy `63 passed`；既有 fixed SiCoPR golden `1 passed`；production numerical formulas 未修改。 |
 | ARC-178A-001 — standalone 178A COM roots | `cc5339e` |

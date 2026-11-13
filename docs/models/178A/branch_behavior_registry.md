@@ -81,7 +81,7 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-008` | approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
-| `NUM-006` | pending candidate | Stage 2 Pre-DTE ADC-input PMF convergence | `num.pmf_keep_mass`：project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **未決定** | 待完整初次審查；不宣稱 branch owner |
+| `NUM-006` | approved branch | Stages 2／5 ADC-input FIR-PMF convergence | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
 | `ALG-010` | approved branch | Stage 4 DTE solver | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
 | `ALG-011` | unreviewed existing selector | Stage 5 Post-FFE model | `alg.rxffe_record_realization`：`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | `finite_record_circshift` | **provisional L3** `_apply_rxffe_response()` | 待完整初次審查 |
 | `ALG-012` | unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
@@ -110,7 +110,7 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
 | `NUM-004` | Pre-DTE 與 selected-phase Post-FFE ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
 | `NUM-005` | DFE component／combined PMFs 與 MLSD added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 DFE PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、MLSD PSD record grid |
-| `NUM-006` | pending：ADC-input PMF retained-mass／convergence effect | branch eligibility、consumer scope 與 owner 尚未核准 |
+| `NUM-006` | 每個 tap convolution 後對 intermediate PMF 做對稱尾端截斷並重新正規化；`1.0` 關閉截斷。Stage 2／5 是 direct consumers | NUM-004／005 grid spacing、tap threshold、ALG-002 projection、ALG-003 PDF discretization、ALG-008 clipping、NUM-003 PSD record；Stage 6 final PMF 固定 `keep_mass=1.0`，不是此 branch consumer |
 | `ALG-010` | floating tap/group selection strategy；owner 依 resolved selector dispatch，並控制該 placement 的完整 solve／limit／MSE／`COMDTEStatus` lifecycle | fixed-tap limiter definition、MMSE/KKT equations、coefficient limits、phase search、equal-score tie-break implementation |
 | `ALG-011` | victim、all XT、DDJ 的 post-FFE response record/grid | RX FFE taps、MMSE solve、pre-FFE responses、NUM-003 record length |
 | `ALG-012` | final-COM clipping voltage convention | final-quantization main-tap accumulation issue |
@@ -154,7 +154,7 @@ COM model
 │  │  └─ _select_xtalk_path_phase()                          [full-response preparation]
 │  ├─ calculate_pre_dte_imp_at_pos()                         [per-phase domain operation]
 │  │  ├─ _calculate_tx_noise_eq_ch()                         [ALG-006/007 upstream-folded consumer]
-│  │  └─ PMF retained-mass consumer                          [NUM-006 pending owner/scope]
+│  │  └─ ADC-input FIR-PMF construction                     [NUM-006 direct consumer]
 │  └─ _build_pre_dte_psd()                                   [NUM-003 / ALG-008 L3 owner]
 │     ├─ resolve one record_cfg                               [NUM-003 dispatch]
 │     ├─ realize S_rn/S_xn/S_tn/S_jn on that record
@@ -163,6 +163,8 @@ COM model
 │     │  └─ RJ-only jitter + P_qc
 │     ├─ _build_psd_adc_qn(...)                               [fixed executor / non-owner]
 │     │  └─ _calculate_V_qc(...)                              [PMF helper / non-owner]
+│     │     └─ _build_pmf_interference_178A(...)
+│     │        └─ Pmf1D.fir_filter()                          [NUM-006 L5 owner]
 │     ├─ _resolve_adc_input_pmf_config()                      [NUM-004 L4 owner; execution point 1]
 │     │  └─ COMPMFGridControl.resolve_dy()                    [L5 shared grid kernel]
 │     └─ sum S_total and form R_n                             [one atomic owner boundary]
@@ -189,6 +191,9 @@ COM model
 │  │  └─ COMPostFFEEqChannelStatus                           [DFE／MLSD consumer record]
 │  ├─ _resolve_adc_input_pmf_config()                        [same NUM-004 L4 owner; execution point 2]
 │  │  └─ COMPMFGridControl.resolve_dy()                      [same L5 shared grid kernel]
+│  ├─ _build_adc_input_pmf_exact()                           [NUM-006 direct consumer]
+│  │  └─ _build_pmf_interference_178A(...) × signal/XT/DDJ
+│  │     └─ Pmf1D.fir_filter()                               [same NUM-006 L5 owner]
 │  └─ transform pre-DTE PSDs on their existing record        [NUM-003 non-owner]
 ├─ L1 Stage 6 / Domain — DFE COM model / final PMF
 │  ├─ _resolve_final_com_pmf_config()                        [NUM-005 L4 owner; execution point 1]
@@ -211,6 +216,8 @@ COM model
    ├─ model helpers(..., pmf_projection_method)              [ALG-002 injectors]
    │  └─ Pmf1D.multi_dirac()/scale_x()/resample_dx()/fir_filter() [ALG-002 owner set]
    │     └─ Pmf1D._project_to_grid()                         [private kernel; non-owner]
+   ├─ Pmf1D.fir_filter(..., keep_mass)                       [NUM-006 L5 owner]
+   │  └─ _truncate_keep_mass()                               [private executor; non-owner]
    ├─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
    └─ MLSD scalar-PMF scaling
       ├─ _build_scaled_total_pdf_added_noise()               [ALG-004 direct injector]

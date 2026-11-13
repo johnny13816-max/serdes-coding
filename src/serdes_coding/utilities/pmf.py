@@ -965,7 +965,9 @@ class Pmf1D:
         fir:
             1D FIR tap coefficients.
         keep_mass:
-            Probability mass to keep after each convolution.
+            Symmetric probability-mass target retained after each tap
+            convolution. ``1.0`` disables truncation; every truncated
+            intermediate PMF is renormalized.
         dx_ref:
             Shared grid spacing for each tap contribution. Defaults to self.dx.
         tap_abs_th:
@@ -981,6 +983,10 @@ class Pmf1D:
             Only the zero bin has mass; other bins retain the supplied support
             during subsequent convolutions.
         """
+        keep_mass = float(keep_mass)
+        if not np.isfinite(keep_mass) or not 0.0 < keep_mass <= 1.0:
+            raise ValueError("keep_mass must be finite and in (0, 1].")
+
         coeff = _prune_fir_coeff(fir, tap_abs_th=tap_abs_th, max_taps=max_taps)
         dx_ref = self.dx if dx_ref is None else self._validate_dx(dx_ref)
         projection_method = self._validate_projection_method(projection_method)

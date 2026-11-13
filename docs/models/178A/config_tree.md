@@ -360,6 +360,12 @@ sweep; the reference preset uses explicit ADC-input `10 µV` and final
 `relative_As`. Final COM still keeps all PMF mass (`keep_mass=1`) independently
 of the selected grid family.
 
+`pmf_keep_mass` 的合法範圍為 `0 < value <= 1`。它只控制 Stage 2／5
+ADC-input FIR-PMF：每個 tap convolution 後保留對稱的目標機率質量並重新正規化；
+`1.0` 表示不截斷。Project profile 使用 `1-1e-5`，reference profile 使用
+`1.0`。L5 `Pmf1D.fir_filter()` 是 NUM-006 owner；profile adapter 與
+`_resolve_adc_input_pmf_config()` 只解析／注入數值。
+
 ## Requiredness and runtime fallback
 
 - A required Ad Hoc intrinsic absent from the source is a conversion failure; do not fill it from the template.

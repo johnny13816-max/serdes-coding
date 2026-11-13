@@ -196,7 +196,10 @@ The automated test explicitly checks that replacing every fixed-grid display PSD
 ## Execution-policy controls
 
 The stage uses the supplied run's effective `adc_input_pmf_grid` and
-`pmf_keep_mass` while resolving selected-phase ADC-input PMF material. Its
+`pmf_keep_mass` while resolving selected-phase ADC-input PMF material. It is the
+second NUM-006 direct consumer: `_build_adc_input_pmf_exact()` injects the
+resolved scalar for signal／XT／DDJ FIR-PMF construction, and L5
+`Pmf1D.fir_filter()` owns truncation after each tap convolution. Its
 `dy_override` bypasses that family's relative/absolute rule and cannot affect
 the final-PMF family. Enabled pre-DTE and post-FFE ADC-input material are both
 built through their fixed exact paths; neither stage exposes a PMF-method selector.

@@ -57,7 +57,8 @@ The stage is called only after `calculate_post_ffe_imp()` has been merged into s
 ## Accuracy-required PMF policy
 
 Final COM does not use the ADC-input grid family or active run's
-`pmf_keep_mass`; it uses the independent effective `final_pmf_grid` family.
+`pmf_keep_mass`; it uses the independent effective `final_pmf_grid` family and
+fixes `keep_mass=1.0`. Stage 6 therefore is not a NUM-006 consumer.
 
 ```text
 _resolve_final_com_pmf_config(...)

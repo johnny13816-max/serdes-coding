@@ -165,6 +165,35 @@ def test_fir_filter_uses_mass_deposit_not_scalar_resampling():
     assert not np.array_equal(filtered.pmf, interpolated.pmf)
 
 
+def test_fir_filter_keep_mass_truncates_each_intermediate_and_renormalizes():
+    source = Pmf1D(
+        dx=1.0,
+        st_idx=-2,
+        pmf=np.array([0.01, 0.09, 0.80, 0.09, 0.01]),
+    )
+    taps = np.array([1.0, 1.0, 1.0])
+
+    full = source.fir_filter(taps, keep_mass=1.0, dx_ref=1.0)
+    truncated = source.fir_filter(taps, keep_mass=0.90, dx_ref=1.0)
+
+    assert len(truncated.pmf) < len(full.pmf)
+    assert truncated.x[0] >= full.x[0]
+    assert truncated.x[-1] <= full.x[-1]
+    assert np.sum(truncated.pmf) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize(
+    "invalid", [0.0, -1.0, 1.000001, np.nan, np.inf, -np.inf],
+)
+def test_fir_filter_rejects_invalid_keep_mass_at_public_owner(invalid):
+    source = Pmf1D.multi_dirac(np.array([-1.0, 1.0]), dx=1.0)
+
+    with pytest.raises(ValueError, match="keep_mass"):
+        source.fir_filter(
+            np.array([0.5, 0.25]), keep_mass=invalid, dx_ref=0.1,
+        )
+
+
 def test_reference_quantizer_retains_noise_axis_support_before_ffe():
     noise_support = Pmf1D(dx=0.1, st_idx=-4, pmf=np.full(9, 1.0 / 9.0))
     grid = type("Grid", (), {"dy": 0.1})()

@@ -182,8 +182,8 @@ def test_178a_canonical_adc_grid_is_the_only_runtime_grid_owner(reference_cfg):
     ).dy == pytest.approx(3e-5)
 
 
-@pytest.mark.parametrize("invalid", [0.0, -1e-5, np.nan, np.inf])
-def test_178a_num_keep_mass_rejects_nonpositive_or_nonfinite(invalid):
+@pytest.mark.parametrize("invalid", [0.0, -1e-5, 1.000001, np.nan, np.inf])
+def test_178a_num_keep_mass_rejects_out_of_range_or_nonfinite(invalid):
     with pytest.raises(ValueError, match="pmf_keep_mass"):
         COMNumericalControlConfig(pmf_keep_mass=invalid)
 
