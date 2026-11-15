@@ -1848,12 +1848,12 @@ class COM:
         3. build every path-specific model
         """
         channels = _build_channel_under_test(self.cfg.src, self.cfg.channel)
-        if self.cfg.num.path_grid_mode == "fixed":
+        if self.cfg.alg.path_grid_mode == "fixed":
             shared = _build_shared_path(self.cfg, channels[0].freqs)
             paths = _build_paths(self.cfg, shared, channels)
             self._validate_victim_time_alignment(paths[0])
             return paths
-        if self.cfg.num.path_grid_mode == "adaptive":
+        if self.cfg.alg.path_grid_mode == "adaptive":
             fine_cfg = LinkConfig(fb=self.cfg.link.fb, per_ui=self.cfg.link.per_ui,
                                   target_df=self.cfg.num.fine_grid_df)
             report_cfg = LinkConfig(fb=self.cfg.link.fb, per_ui=self.cfg.link.per_ui,
@@ -1874,7 +1874,7 @@ class COM:
                 self.cfg, xt_specs, fine_cfg, report_cfg, report_shared, victim_group=False,
             )
             return victim + xtalk
-        raise ValueError(f"unsupported path grid mode: {self.cfg.num.path_grid_mode!r}")
+        raise ValueError(f"unsupported path grid mode: {self.cfg.alg.path_grid_mode!r}")
 
     def calculate_pre_dte_imp_common(
         self,

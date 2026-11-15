@@ -43,7 +43,8 @@ def test_adaptive_build_all_paths_without_xt_only_builds_victim(monkeypatch):
     model = COM.__new__(COM)
     model.cfg = SimpleNamespace(
         src=SimpleNamespace(channel=SimpleNamespace(next=[], fext=[])),
-        channel=object(), num=SimpleNamespace(path_grid_mode="adaptive", fine_grid_df=1.0),
+        channel=object(), alg=SimpleNamespace(path_grid_mode="adaptive"),
+        num=SimpleNamespace(fine_grid_df=1.0),
         link=SimpleNamespace(fb=8.0, per_ui=2), txpkg_victim=object(),
     )
     monkeypatch.setattr(model_module, "_build_channel_under_test", lambda *_: [channel])

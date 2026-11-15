@@ -204,7 +204,7 @@ listed in [the migration contract](../../planning/comconfig_domain_migration.md#
 | `ctle_pulse_realization` | `COMConfig.alg`（workbook 不單獨曝露） | `continuous_tf` |
 | `eq_ch_imp_len` | `COMConfig.num`（workbook 獨立曝露） | `full` |
 | `num_trunc_ui` | `COMConfig.num`（僅 `truncated` 適用） | blank / `None` |
-| `path_grid_mode` | `COMConfig.num`（runtime 實作中；adaptive 驗證中） | `fixed` |
+| `path_grid_mode` | `COMConfig.alg`（Stage 1 path-grid method） | `fixed` |
 | `fine_grid_df` | `COMConfig.num`（adaptive fine-grid target df，Hz） | `1e6` |
 | `relative_threshold` | `COMConfig.num`（adaptive 相對 amplitude 門檻） | `1e-3` |
 | `absolute_threshold` | `COMConfig.num`（adaptive 絕對 amplitude 門檻） | `None` |

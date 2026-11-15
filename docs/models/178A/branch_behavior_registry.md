@@ -13,7 +13,7 @@ execution detail；`call_tree.md` 只保存 pipeline flow，不再各自維護 b
 
 ## 實作中：Stage 1 adaptive grid
 
-`num.path_grid_mode`（`fixed`／`adaptive`）的候選 owner 為
+`alg.path_grid_mode`（`fixed`／`adaptive`）的 owner 為
 `COM.build_all_paths()`；fixed 與 adaptive 已完成實作及主要驗證，local commits
 已建立，remote 整合待完成，尚未結案。
 `num.fine_grid_df`、`num.relative_threshold`、
@@ -37,7 +37,7 @@ owner／consumer 位置改變而重編或重用。新 branch 通過 eligibility 
 項目後來判定為從未成立的 non-branch，移除該列但不回退序號。各類別序號只增不減，
 退役 ID 永不重用。ID prefix 記錄 selector 所在 runtime domain，不編入 Stage 或排序資訊。
 
-Next ID allocation cursor：`ALG-018`、`NUM-008`、`SRCH-002`。此 cursor 只記錄各類別
+Next ID allocation cursor：`ALG-019`、`NUM-008`、`SRCH-002`。此 cursor 只記錄各類別
 下一個可核發號碼，不建立舊 ID 對照或歷史映射。
 
 本表依 Stage／function call tree 順序排列，不依 ID 數字排序。跨 Stage 或 shared
@@ -92,7 +92,8 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 
 | ID | Branch classification / lifecycle | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
-| `NUM-007` | active — numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作與主要驗證；remote 整合待完成 |
+| `ALG-018` | active — algorithm_policy branch | Stage 1 path response grid | `alg.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 numerical parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作；分類遷移及 project golden 已驗證，遠端整合待完成 |
+| `NUM-007` | retired — approved branch | Stage 1 path response grid | none — retired；方法選擇已遷移至 algorithm policy | none — retired | — | Retired：原 numerical selector 已移除，由 ALG-018 提供相同方法選擇。 |
 | `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
 | `ALG-001` | active — approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-006` | active — approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
@@ -129,6 +130,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
 | `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
 | `ALG-007` | CTLE pulse method-specific shared state，以及 victim／NEXT／FEXT `pulse` 與 victim `pulse_no_txffe` 的完整 CTLE realization | TX FFE、continuous `H_all`、ALG-006 transfer extension、Pre-DTE TX-noise sampling policy |
+| `ALG-018` | 決定 Stage 1 固定或 adaptive path grid 建立方式及輸出 paths；影響 response 表示和後續計算 | downstream stage 不讀取 selector；NUM-003 PSD record、CTLE realization 與 threshold 數值保持獨立 |
 | `NUM-003` | 在 pre-DTE／pre-MLSD PSD owner 內建立 `full` 或固定 `num_trunc_ui` record；truncated 的 XT 先選完整 response phase，再選最大能量 window，其他 response 取前段；過短補零，再建 PSD 並加總 | Path response、完整 `eq_ch` status、Sampling search、DTE solve、Post-FFE reporting transform、response grid |
 | `SRCH-001` | 要評估的 phase schedule、coarse/fine visit order、最低 MSE complete bundle 與 per-phase run status | Pre-DTE model、DTE solver／ALG-010、XT independent-phase preparation、post-selection domains |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
@@ -155,7 +157,7 @@ review 尚未完成。
 ```text
 COM model
 ├─ L1 Stage 1 / Domain — Path realization
-│  ├─ COM.build_all_paths()                                  [NUM-007 L1 owner: fixed / adaptive]
+│  ├─ COM.build_all_paths()                                  [ALG-018 L1 owner: fixed / adaptive]
 │  └─ L2 path-realization function set
 │     ├─ _build_shared_path()                                [ALG-007 config resolver / shared coordinator]
 │     │  └─ CTLE pulse-realization block                     [ALG-007 L3 owner: shared setup]

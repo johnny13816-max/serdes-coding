@@ -367,7 +367,6 @@ class COMNumericalControlConfig(COMDataclassText):
     final_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
     eq_ch_imp_len: Literal["full", "truncated"] = "full"
     num_trunc_ui: Optional[int] = None
-    path_grid_mode: Literal["fixed", "adaptive"] = "fixed"
     fine_grid_df: float = 1e6
     relative_threshold: Optional[float] = 1e-3
     absolute_threshold: Optional[float] = None
@@ -385,7 +384,6 @@ class COMNumericalControlConfig(COMDataclassText):
                 ),
             )),
             TextSection("Record and convergence", (
-                self._field("path_grid_mode", "path grid selection", stored_unit="policy"),
                 self._field("fine_grid_df", "fine grid frequency step", stored_unit="Hz"),
                 self._field("relative_threshold", "relative response threshold", stored_unit="dimensionless"),
                 self._field("absolute_threshold", "absolute response threshold", stored_unit="response amplitude"),
@@ -408,8 +406,6 @@ class COMNumericalControlConfig(COMDataclassText):
         )
 
     def __post_init__(self) -> None:
-        if self.path_grid_mode not in {"fixed", "adaptive"}:
-            raise ValueError("path_grid_mode must be 'fixed' or 'adaptive'.")
         self.fine_grid_df = float(self.fine_grid_df)
         if not np.isfinite(self.fine_grid_df) or self.fine_grid_df <= 0.0:
             raise ValueError("fine_grid_df must be finite and positive.")
@@ -420,9 +416,6 @@ class COMNumericalControlConfig(COMDataclassText):
                 if not np.isfinite(value) or value < 0.0:
                     raise ValueError(f"{name} must be finite and non-negative.")
                 setattr(self, name, value)
-        if (self.path_grid_mode == "adaptive" and self.relative_threshold is None
-                and self.absolute_threshold is None):
-            raise ValueError("adaptive path grids require at least one threshold.")
         for name in ("adc_input_pmf_grid", "final_pmf_grid"):
             if not isinstance(getattr(self, name), COMPMFGridControl):
                 raise TypeError(
@@ -1218,6 +1211,7 @@ class COMMLSDConfig(COMDataclassText):
 class COMAlgorithmPolicyConfig(COMDataclassText):
     """One-level collection of resolved 178A algorithm selectors."""
 
+    path_grid_mode: Literal["fixed", "adaptive"] = "fixed"
     missing_dc_policy: Literal[
         "error", "hold", "skrf", "mag_phase_trend_to_dc"
     ] = "error"
@@ -1244,6 +1238,7 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Channel and pulse", (
+                self._field("path_grid_mode", "path grid selection", stored_unit="policy"),
                 self._field("missing_dc_policy", "missing-DC completion", stored_unit="policy"),
                 self._field("out_of_measured", "out-of-measured-band behavior", stored_unit="policy"),
                 self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
@@ -1277,6 +1272,7 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
 
     def __post_init__(self) -> None:
         allowed = {
+            "path_grid_mode": {"fixed", "adaptive"},
             "missing_dc_policy": {
                 "error", "hold", "skrf", "mag_phase_trend_to_dc"
             },
@@ -1376,6 +1372,9 @@ class COMConfig(COMDataclassText):
             raise TypeError("alg must be a COMAlgorithmPolicyConfig.")
         if not isinstance(self.num, COMNumericalControlConfig):
             raise TypeError("num must be a COMNumericalControlConfig.")
+        if (self.alg.path_grid_mode == "adaptive" and self.num.relative_threshold is None
+                and self.num.absolute_threshold is None):
+            raise ValueError("adaptive path grids require at least one threshold.")
         if not isinstance(self.exe, COMExecutionConfig):
             raise TypeError("exe must be a COMExecutionConfig.")
         if not isinstance(self.srch, COMSearchConfig):

@@ -58,7 +58,7 @@ Grid mode 是 Stage 1 的數值實現選擇；threshold 數值與 fine-grid df �
 
 | 候選 runtime 欄位 | domain / exposure | 預設與合法值 | owner / effect / scope |
 | --- | --- | --- | --- |
-| `path_grid_mode` | numerical_control / advanced | `fixed`（維持既有 grid 選擇）或 `adaptive`；預設 `fixed` | Stage 1 `COM.build_all_paths()`；method、accuracy、cost；不由後續 stages 讀取 |
+| `path_grid_mode` | algorithm_policy / advanced | `fixed`（維持既有 grid 選擇）或 `adaptive`；預設 `fixed` | Stage 1 `COM.build_all_paths()`；method、accuracy、cost；不由後續 stages 讀取 |
 | `fine_grid_df` | numerical_control / advanced | 正 finite Hz；預設 `1e6` | Stage 1 adaptive；accuracy、cost；fixed 忽略 |
 | `relative_threshold` | numerical_control / advanced | `None` 或有限非負數；預設 `1e-3` | Stage 1 adaptive 注入 `LinkSegment`；accuracy、cost；fixed 忽略 |
 | `absolute_threshold` | numerical_control / advanced | `None` 或有限非負數；預設 `None` | Stage 1 adaptive 注入 `LinkSegment`；accuracy、cost；fixed 忽略 |

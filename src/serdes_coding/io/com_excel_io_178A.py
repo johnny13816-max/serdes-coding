@@ -262,6 +262,7 @@ def _resolve_project_profile_178A(
     configured_eq_ch_imp_len = str(fixed.get("eq_ch_imp_len", "full")).strip()
     configured_num_trunc_ui = _fixed_optional_int(fixed, "num_trunc_ui")
     general_methods = COMAlgorithmPolicyConfig(
+        path_grid_mode=str(fixed.get("path_grid_mode", "fixed")).strip(),
         missing_dc_policy=str(fixed.get("missing_dc_policy", "error")).strip().lower(),
         out_of_measured=str(fixed.get("out_of_measured", "cosine_decay")).strip(),
         pre_dte_adc_clipping_convention=str(
@@ -355,6 +356,7 @@ def _resolve_project_profile_178A(
         }
 
     methods = COMAlgorithmPolicyConfig(
+        path_grid_mode=str(fixed.get("path_grid_mode", "fixed")).strip(),
         missing_dc_policy="mag_phase_trend_to_dc",
         out_of_measured="zero_padding",
         pre_dte_adc_clipping_convention="rj_only_full_tail_reference",
@@ -452,7 +454,6 @@ def _read_project_numerical_control_178A(
     relative = fixed.get("relative_threshold", 1e-3)
     absolute = fixed.get("absolute_threshold")
     grid_controls = {
-        "path_grid_mode": str(fixed.get("path_grid_mode", "fixed")).strip(),
         "fine_grid_df": float(fixed.get("fine_grid_df", 1e6)),
         "relative_threshold": None if _is_blank(relative) else float(relative),
         "absolute_threshold": None if _is_blank(absolute) else float(absolute),

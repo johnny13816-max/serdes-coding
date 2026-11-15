@@ -11,7 +11,8 @@
 
 This stage converts workbook-derived channel, package, and filter configuration into the ordered `COMPath` objects used by every later 178A stage.
 
-`COM.build_all_paths()` owns grid-mode dispatch and the complete Stage 1 result;
+`COM.build_all_paths()` owns grid-mode dispatch through
+`cfg.alg.path_grid_mode` (ALG-018) and the complete Stage 1 result;
 the path builders and adaptive group execution live in
 `src/serdes_coding/models/com_178a/path_stage.py`.
 

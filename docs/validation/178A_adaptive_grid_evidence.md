@@ -188,3 +188,11 @@ XT 整數 UI 平移有關，但尚未逐項隔離每個變更的貢獻。MSE 差
 golden 的 `1e-14` absolute tolerance；COM 數值在此 case 相同。使用者已
 確認 adaptive 不要求與 SiCoPR intermediate 完全對齊；fixed golden tolerance
 仍只適用 fixed，不能據此宣稱 adaptive 全面等價。
+
+## ALG-018 分類遷移驗證（2026-11-15）
+
+`path_grid_mode` 由 `cfg.num` 移至 `cfg.alg`，Stage 1 owner 和方法不變；
+fine df 與 thresholds 仍屬 numerical control。相關測試 113 項通過，
+既有 fixed project golden 通過（phase 5、final COM 2.895898684873246 dB）。
+九份 workbook 逐格比較，僅 `path_grid_mode` 分類由 numerical control
+改為 algorithm policy。此驗證不代表 adaptive 與 SiCoPR 數值完全對齊。
