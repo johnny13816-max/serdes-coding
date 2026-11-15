@@ -7,6 +7,21 @@
 production code 為準；實測與未完成的驗證邊界見
 [adaptive grid 驗證紀錄](../validation/178A_adaptive_grid_evidence.md)。
 
+## 暫存契約歸檔核對
+
+已核對暫存契約的最終討論結論，早期被取代的偽程式不作為實作依據：
+
+| 範圍 | 正式紀錄與現況 |
+| --- | --- |
+| Stage 1 fixed／adaptive、兩輪、effective range、window 與時間對齊 | 本契約「Adaptive Stage 1」、Stage 1 文件與 production path；grid selector 為 ALG-018。 |
+| CTLE IIR 及 fine-grid 方法 | 本契約「記憶體與時間語意」、Stage 1 文件與 ALG-007 紀錄；reference 方法保留。 |
+| Stage 2–7、circular FFE、NUM-003 XT window | 本契約「Stage 2–7 介面與計算」及各 stage 文件；驗證結果見驗證紀錄。 |
+| 實測、假設與限制 | 驗證紀錄保存 fixed golden、adaptive case、window 外能量、繞回與 memory 數據；結果僅適用所測案例。 |
+
+歸檔不代表所有假設對所有 channels 均已證明；`1e-3`、有限 fine grid、
+`from_ir()` 對其他 XT 的適用性、記憶體及 circular wrap 仍以現有量測和
+限制為界。所有 production commits 尚待遠端整合，故尚未正式結案。
+
 ## 目的與邊界
 
 Stage 1 支援使用者指定單一 grid，以及依 response 有效範圍自動選擇 grid。
@@ -49,28 +64,25 @@ Adaptive 輸出的 `LinkSegment` 僅使用 `victim_cfg`、`xtalk_cfg` 或
 內部，最終輸出不得透過物件或 array view 持有大型 fine-grid 暫存。
 三種輸出 cfg 與 fine cfg 共用 `fb`、`per_ui`；相互關係不由名稱推定長短。
 
-Grid mode 是 Stage 1 的數值實現選擇；threshold 數值與 fine-grid df 是其
-控制參數，不因可設定便自動取得獨立 branch identity。新增選擇須在實作時
-同步 config inventory、runtime resolution 與 version registry；最終 selector
-名稱、預設與 profile 必須先與現有 configuration contract 核對，不可虛構。
+Grid mode 是 Stage 1 的 algorithm policy 選擇；threshold 數值與 fine-grid df
+是 numerical control 參數，不各自構成 branch。selector、runtime resolution
+與 registry 已同步；現行設定以 config tree 與分支總表為準。
 
-### 178A configuration inventory（implementation target）
+### 178A configuration inventory
 
-| 候選 runtime 欄位 | domain / exposure | 預設與合法值 | owner / effect / scope |
+| Runtime 欄位 | domain / exposure | 預設與合法值 | owner / effect / scope |
 | --- | --- | --- | --- |
 | `path_grid_mode` | algorithm_policy / advanced | `fixed`（維持既有 grid 選擇）或 `adaptive`；預設 `fixed` | Stage 1 `COM.build_all_paths()`；method、accuracy、cost；不由後續 stages 讀取 |
 | `fine_grid_df` | numerical_control / advanced | 正 finite Hz；預設 `1e6` | Stage 1 adaptive；accuracy、cost；fixed 忽略 |
 | `relative_threshold` | numerical_control / advanced | `None` 或有限非負數；預設 `1e-3` | Stage 1 adaptive 注入 `LinkSegment`；accuracy、cost；fixed 忽略 |
 | `absolute_threshold` | numerical_control / advanced | `None` 或有限非負數；預設 `None` | Stage 1 adaptive 注入 `LinkSegment`；accuracy、cost；fixed 忽略 |
 
-上述名稱與 profile mapping 屬實作目標，並非宣稱 workbook 已暴露。兩種
-threshold 在 adaptive 至少一項啟用；raw 值由 API／workbook 提供，effective
-值由 adapter 的 preset/profile 解析後寫入 `COMConfig.num`，每個欄位的 raw、
-effective、source 與 override 依既有 adapter provenance 機制輸出。未明訂
+上述欄位已由 API／workbook 暴露；grid mode 解析至 `COMConfig.alg`，其餘
+控制參數解析至 `COMConfig.num`。兩種 threshold 在 adaptive 至少一項啟用；
+raw、effective、source 與 override 依既有 adapter provenance 機制輸出。未明訂
 profile 的欄位繼承 project 值；既有 SiCoPR profile 未額外覆寫 grid mode，
 因此預設採 fixed，也可由使用者明示 adaptive 進行比較；整體數值相容仍需
-驗證。介面正式暴露前應核對既有
-workbook mapping、override 與 config inventory；不可將候選狀態誤記為已實作。
+驗證。Workbook mapping 與 profile 對應以現行 config tree 為準。
 
 ## Adaptive Stage 1
 
@@ -185,8 +197,8 @@ realization，但其他時間對齊及 grid 修改仍可能影響整體數值對
 | Config／profile／registry／stage contracts | 新 grid mode 與 controls、移除 ALG-011、更新 consumer 與 call tree；以各文件既有權責為準。 |
 
 實際私有 helper 名稱以清楚表達完整功能為原則，不因本表強制新增 wrapper。
-具體 public config 欄位、預設與向現有 workbook／profile 的遷移應先核對
-專案 configuration contract；不將此草案寫成目前已實裝的權威現況。
+具體 public config 欄位、預設與 workbook／profile mapping 以現行 config tree
+與 production code 為準。
 
 ## 驗證與完成條件
 
