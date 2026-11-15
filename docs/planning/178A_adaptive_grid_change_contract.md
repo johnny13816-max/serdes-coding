@@ -1,10 +1,11 @@
 # 178A Adaptive Response Grid 修改契約
 
-狀態：**待使用者審閱／尚未核准實作**｜2026-11-14
+狀態：**已核准、已實作並完成主要驗證；remote 整合待完成**｜2026-11-15
 
-本文件定義擬議修改，不描述目前 production 已實現的行為。它是受保護的 COM
-數值流程變更契約；核准與實作後，依專案文件權責將有效內容併入各權威文件。
-現有程式、registry 與既有驗證在實作完成前仍是目前狀態的依據。
+本文件保留已核准的 COM 數值流程修改契約。現行行為與 ownership 以
+[分支總表](../models/178A/branch_behavior_registry.md)、各 stage 文件和
+production code 為準；實測與未完成的驗證邊界見
+[adaptive grid 驗證紀錄](../validation/178A_adaptive_grid_evidence.md)。
 
 ## 目的與邊界
 
@@ -206,5 +207,5 @@ realization，但其他時間對齊及 grid 修改仍可能影響整體數值對
 7. 同步 config、registry、stage/call tree 與 validation 權威文件；確認
    ALG-011 清理及 branch review 狀態，依專案流程完成隔離整合與驗證。
 
-本契約不主張現有 production 已符合上述行為，也不主張 IEEE compliance、
-完整 SiCoPR 等價或任何尚未取得的數值驗證結果。
+契約與實作的驗證範圍以驗證紀錄為準；不主張 IEEE compliance、完整 SiCoPR
+等價或任何尚未取得的數值驗證結果。

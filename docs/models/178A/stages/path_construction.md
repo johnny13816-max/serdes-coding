@@ -2,10 +2,10 @@
 
 > **Review state:** the software boundary, configuration ownership, data flow, status output, and failure behavior below are confirmed from current source. The individual S-parameter and filter equations have not been independently revalidated by this documentation change.
 
-> **Adaptive grid in progress:** `_select_response_windows()` and
-> `_trim_response_to_window()` are connected to the Stage 1 two-pass flow.
-> Adaptive mode is under integration and numerical validation; it is not yet
-> closed or reference-aligned. The fixed-grid flow below remains available.
+> **Adaptive grid:** fixed／adaptive path construction and both CTLE IIR
+> methods are implemented and have passed the recorded focused and case
+> checks. Local commits are complete; remote integration remains pending.
+> This is not a claim of complete SiCoPR alignment.
 
 ## Purpose and ownership
 
@@ -69,8 +69,8 @@ build_all_paths() [grid mode owner]
 
 Adaptive fine-grid arrays and window/shift data are local intermediates. Each
 XT may shift its own origin by whole UI to accommodate FFE margin. Output
-responses use victim, XT, or report cfg; production integration and reference
-validation are still in progress.
+responses use victim, XT, or report cfg. Validation results and remaining
+limitations are recorded in the adaptive-grid validation document.
 
 ## COM call-tree hierarchy
 
@@ -216,12 +216,12 @@ path construction 的 I/O、function ordering 與數值契約。
 
 | Input | Fields used by this stage | Role |
 |---|---|---|
-| `COMConfig.link` | frequency/time grid and symbol timing consumed by filter and response constructors | common response grid |
+| `COMConfig.link` | fixed-mode grid and symbol timing shared by all grids | fixed response grid; adaptive supplies its own grids |
 | `COMConfig.src.channel` | victim/NEXT/FEXT artifact bindings, representation and port order | source selection and measured-channel ingestion |
 | `COMConfig.channel` | `R0`, source/load reflection coefficients and optional `sparam_frequency_limit_Hz` | physical termination and measured-frequency boundary |
 | `COMConfig.alg.missing_dc_policy` | `error`／`hold`／`skrf`／`mag_phase_trend_to_dc` | ALG-001 completion of terminated scalar H21 |
 | `COMConfig.alg.out_of_measured` | shared `cosine_decay`／`zero_padding` policy | measured-to-analysis-grid conversion of terminated scalar `H_21` and every bilinear finite-record consumer derived from the same completed transfer |
-| `COMConfig.alg.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir` | composite pre-CTLE response to pulse realization |
+| `COMConfig.alg.ctle_pulse_realization` | `continuous_tf`／`bilinear_iir`／`bilinear_fine_grid` | composite pre-CTLE response to pulse realization |
 | `COMConfig.filter` | TX FFE taps and cursor constraint, transition time, receiver filter/equalizer controls, victim/NEXT/FEXT amplitudes | shared and path-specific scalar responses |
 | `txpkg_victim` | nested termination/package/partial-host config | victim TX package |
 | `txpkg_next` | nested termination/package/partial-host config | NEXT TX package |
@@ -388,7 +388,8 @@ raw IFFT、時間原點與截尾仍是 ALG-007 該具名方法的固定定義，
 頻率網格並執行完整 Nfft IFFT；不做 IIR 前截尾。Actual pre-CTLE IR 選擇
 causal shift，victim preset 套用同一 shift；XT 各自決定 shift，然後以
 zero-state IIR 和 boxcar 各自輸出 Nfft samples。Shift 僅為建立 path 的
-局部資料，已對齊 pulse 不再於 adaptive 裁切時套用第二次。此路徑仍在驗證。
+局部資料，已對齊 pulse 不再於 adaptive 裁切時套用第二次；案例驗證與
+適用範圍見 [adaptive grid 驗證紀錄](../../../validation/178A_adaptive_grid_evidence.md)。
 後者依前者的 frequency／finite-record 表示法保留原本的 convolution semantics，
 但不引入額外 project policy。
 
@@ -490,5 +491,13 @@ Case placement and channel ownership follow
 
 ## Known limitations and unresolved questions
 
+- Fine-grid 範圍與 `1e-3` threshold 是設計假設，不保證所有 channel、COM 或
+  DER 誤差；跨更多分散型 XT cases 的收斂仍需驗證。
+- `from_ir()` 既有檢查對所有分散型 XT 的適用性、victim preset window
+  外能量、跨 case 的時間對齊與 peak memory 尚無普遍保證。Circular FFE
+  的繞回量已在指定 case 量測，不代表所有 tap／response 都可忽略。
+- 預先截尾與 fine-grid IIR 的比較、SiCoPR 對照與兩輪建立結果均只適用
+  已量測的範圍；詳細數據與限制見
+  [adaptive grid 驗證紀錄](../../../validation/178A_adaptive_grid_evidence.md)。
 - The implementation reference annotations for the termination, package, partial-host, and augmented-transfer equations still need a spec-by-spec numerical review.
 - `isNext` is accepted by `_build_txpkg()` but does not currently select different construction inside that helper; NEXT behavior differs through `txpkg_next`, `H_ffe_next`, and `A_ne` supplied by the caller.

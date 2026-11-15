@@ -1,6 +1,6 @@
 # 178A adaptive grid 驗證紀錄
 
-狀態：**實作／驗證進行中，未結案**｜更新至 2026-11-15
+狀態：**已實作並完成主要驗證；remote 整合待完成**｜更新至 2026-11-15
 
 本紀錄只描述目前工作樹在指定 case 的結果；不得推廣為其他 case、IEEE
 compliance 或全面 SiCoPR 等價。契約見
@@ -57,8 +57,10 @@ actual pre-CTLE IR 決定 shift，preset 套用同一 shift，XT 各自決定 sh
 `all_enabled` 的 production run 完成：victim `4096 UI`、5 條 XT `32768 UI`、
 phase `28`、MSE `0.005351752979756553`、COM_DFE `1.4014087983082355 dB`、
 final COM `2.705531359394457 dB`。這些數值不宣稱與 reference 一致；
-reference fixed golden 於新路徑與 normalization 完成後以原容差重跑：
+當時的 reference fixed golden 於新路徑與 normalization 完成後以原容差重跑：
 `tests/test_com_model_178A_golden.py`，`1 passed`。
+該結果早於 XT 最大能量 window 修改；目前 project golden 和 SiCoPR
+差異以本文件上方的最新記錄為準。
 同一 case 的 fixed + `bilinear_fine_grid`、`target=mse` run 完成：
 六條 path 均 `10626 UI`，phase `3`，MSE `0.005353060408701168`；
 該 run 不包含 DFE／MLSD，也不視為 reference-alignment 結果。
