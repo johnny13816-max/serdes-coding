@@ -5,14 +5,14 @@
 
 ## RC-20261115-002 — 大型演算法契約完成與切換
 
-- 日期／狀態：2026-11-15／Implemented；待提交與證據同步後 Closed。
+- 日期／狀態：2026-11-15／Closed。
 - 問題：大型演算法契約的完成條件散落於 implementation、branch review、documentation 與 integration 規則，未要求執行中持續核對剩餘 gate；單項測試通過可能被誤當成整份契約完成。
 - 依據：使用者提出大型修改契約完成與切換建議，並同意以獨立 `algorithm-development` skill 指導演算法開發、由 project workflow 設最低治理 gate，保留 `algorithm-review` 的審查職責。
 - 評估／決策：接受。大型契約需逐項標示完成條件及不適用理由；執行中持續核對清單；未完成時不啟動無關分支審查；狀態分開回報實作驗證、分支審查、文件與本機提交、遠端整合與結案；使用者糾正後須修正狀態並實際遵循。
 - 修改範圍：`project_workflow.md`、新增個人 Codex skill `algorithm-development`；不修改 `algorithm-review`、程式、tracker 或既存 project dirty state。
 - 驗證：project workflow `git diff --check` 通過；skill frontmatter、生成的 UI metadata 與內容結構人工核對通過。skill-creator `quick_validate.py` 因當前 Python 缺少 `PyYAML` 未能執行。
 - 評估者／授權依據：本規則維護對話；使用者同意前述整合方式並授權執行。
-- Commit evidence：待提交；提交後更新本紀錄為 Closed。
+- Commit evidence：規則實作 commit `9c60365`；closure 狀態記錄於後續 commit。
 
 ## RC-20261115-001 — Stable branch IDs and legacy-ID cleanup
 
