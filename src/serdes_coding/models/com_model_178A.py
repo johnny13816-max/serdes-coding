@@ -2535,59 +2535,15 @@ class COM:
             sigma_qn=S_qn.to_sigma() if S_qn is not None else None,
         )
 
-    def calculate_COM_DFE(
+    def _build_final_adc_quantization(
         self,
         imp_status: COMImpairmentStatus,
         eq_ch: COMEqChannelStatus,
         dte_status: COMDTEStatus,
-    ) -> COMPMFStatus:
-        """
-        Calculate 178A final COM result after DFE.
-
-        Parameters
-        ----------
-        imp_status:
-            178A impairment status.
-        dte_status:
-            Selected 178A receiver DTE result.
-        """
+        pmf_cfg_for_com: COMPMFRuntimeConfig,
+    ) -> tuple[Pmf1D, Optional[float], Optional[float]]:
+        """Build final ADC quantization PMF and its clipping values."""
         imp_cfg = self.cfg.imp
-        pmf_cfg_for_com = _resolve_final_com_pmf_config(
-            self.cfg.pmf,
-            imp_status.As,
-            self.cfg.num,
-        )
-        As = imp_status.As
-
-        # base pmf of PAM-L
-        p_sig = _build_pmf_pam_L(self.cfg.L)
-
-        # pmf of ISI
-        p_ISI = _build_pmf_interference_178A(
-            p_sig,
-            eq_ch.h_ISI.ir,
-            pmf_cfg_for_com,
-            projection_method=self.cfg.alg.pmf_projection_method,
-            name="ISI",
-        )
-
-        # pmf of XT (all combined)
-        p_w_XT_all = _build_pmf_w_XT_all(
-            p_sig,
-            eq_ch.h_XTs_w or [],
-            pmf_cfg_for_com,
-            projection_method=self.cfg.alg.pmf_projection_method,
-        )
-
-        # pmf of tx Dual-dirac jitter
-        p_w_DD = _build_pmf_interference_178A(
-            p_sig,
-            imp_cfg.A_DD * eq_ch.h_w_J.ir,
-            pmf_cfg_for_com,
-            projection_method=self.cfg.alg.pmf_projection_method,
-            name="Dual-Dirac",
-        )
-
         # Annex D3 final quantization consumes the selected-phase ADC-input
         # delta prepared by calculate_post_ffe_imp(). The reference-only branch
         # below follows MATLAB 4.17's distinct final-PDF clipping boundary.
@@ -2595,6 +2551,8 @@ class COM:
         if imp_status.post_ffe is None:
             raise RuntimeError("calculate_COM_DFE requires post-FFE impairment status.")
         adc_input_pmf = imp_status.post_ffe.adc_input
+        V_qc = None
+        delta = None
         if adc_input_pmf is None or adc_input_pmf.method == "disabled":
             p_qn = Pmf1D.multi_dirac(
                 np.array([0.0]),
@@ -2657,6 +2615,7 @@ class COM:
                 # clipping result. Tap accumulation is not an ALG-012 decision.
                 if adc_input_pmf.delta is None:
                     raise RuntimeError("Annex D3 final quantization requires ADC input delta.")
+                V_qc = adc_input_pmf.V_qc
                 delta = adc_input_pmf.delta
                 quantization_taps = w_lim
                 p_delta = Pmf1D.uniform(
@@ -2683,6 +2642,67 @@ class COM:
                     else None
                 ),
             )
+        if V_qc is not None and self.cfg.alg.final_com_vqc_convention == "sicopr_final_reconstruction":
+            V_qc = float(V_qc)
+        return p_qn, V_qc, None if delta is None else float(delta)
+
+
+    def calculate_COM_DFE(
+        self,
+        imp_status: COMImpairmentStatus,
+        eq_ch: COMEqChannelStatus,
+        dte_status: COMDTEStatus,
+    ) -> COMPMFStatus:
+        """
+        Calculate 178A final COM result after DFE.
+
+        Parameters
+        ----------
+        imp_status:
+            178A impairment status.
+        dte_status:
+            Selected 178A receiver DTE result.
+        """
+        imp_cfg = self.cfg.imp
+        pmf_cfg_for_com = _resolve_final_com_pmf_config(
+            self.cfg.pmf,
+            imp_status.As,
+            self.cfg.num,
+        )
+        As = imp_status.As
+
+        # base pmf of PAM-L
+        p_sig = _build_pmf_pam_L(self.cfg.L)
+
+        # pmf of ISI
+        p_ISI = _build_pmf_interference_178A(
+            p_sig,
+            eq_ch.h_ISI.ir,
+            pmf_cfg_for_com,
+            projection_method=self.cfg.alg.pmf_projection_method,
+            name="ISI",
+        )
+
+        # pmf of XT (all combined)
+        p_w_XT_all = _build_pmf_w_XT_all(
+            p_sig,
+            eq_ch.h_XTs_w or [],
+            pmf_cfg_for_com,
+            projection_method=self.cfg.alg.pmf_projection_method,
+        )
+
+        # pmf of tx Dual-dirac jitter
+        p_w_DD = _build_pmf_interference_178A(
+            p_sig,
+            imp_cfg.A_DD * eq_ch.h_w_J.ir,
+            pmf_cfg_for_com,
+            projection_method=self.cfg.alg.pmf_projection_method,
+            name="Dual-Dirac",
+        )
+
+        p_qn, final_V_qc, final_delta = self._build_final_adc_quantization(
+            imp_status, eq_ch, dte_status, pmf_cfg_for_com,
+        )
 
         # pmf of gaussian noise
         p_G = _build_pmf_G(
@@ -2701,19 +2721,8 @@ class COM:
             dy=pmf_cfg_for_com.dy,
             tap_abs_th=pmf_cfg_for_com.tap_abs_th,
             final_vqc_convention=self.cfg.alg.final_com_vqc_convention,
-            final_V_qc=(
-                None
-                if adc_input_pmf is None or adc_input_pmf.method == "disabled"
-                else float(V_qc)
-                if self.cfg.alg.final_com_vqc_convention
-                == "sicopr_final_reconstruction"
-                else adc_input_pmf.V_qc
-            ),
-            final_delta=(
-                None
-                if adc_input_pmf is None or adc_input_pmf.method == "disabled"
-                else float(delta)
-            ),
+            final_V_qc=final_V_qc,
+            final_delta=final_delta,
             p_ISI=p_ISI,
             p_G=p_G,
             p_DD=p_w_DD,

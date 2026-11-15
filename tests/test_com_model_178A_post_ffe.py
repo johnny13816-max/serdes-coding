@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import numpy as np
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
-from serdes_coding.models.com_model_178A import COM
+from serdes_coding.models.com_model_178A import COM, _resolve_final_com_pmf_config
 from serdes_coding.utilities.psd import SampledPSD
 from serdes_coding.utilities.pmf import Pmf1D
 
@@ -34,6 +35,19 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         )
         cls.model = COM(cls.cfg)
         cls.status = cls.model.run(progress=False)
+
+    def test_final_adc_owner_disabled_and_invalid(self) -> None:
+        pmf_cfg = _resolve_final_com_pmf_config(self.cfg.pmf, self.status.imp.As, self.cfg.num)
+        for adc_input in (None, SimpleNamespace(method="disabled")):
+            disabled = SimpleNamespace(post_ffe=SimpleNamespace(adc_input=adc_input))
+            p_qn, vqc, delta = self.model._build_final_adc_quantization(disabled, None, None, pmf_cfg)
+            self.assertIsNone(vqc)
+            self.assertIsNone(delta)
+            np.testing.assert_allclose(p_qn.pmf, [1.0])
+            self.assertEqual(p_qn.st_idx, 0)
+        invalid = SimpleNamespace(post_ffe=SimpleNamespace(adc_input=SimpleNamespace(method="unexpected")))
+        with self.assertRaisesRegex(RuntimeError, "pmf_exact"):
+            self.model._build_final_adc_quantization(invalid, None, None, pmf_cfg)
 
     def test_mse_and_post_grid_contract(self) -> None:
         status = self.status
