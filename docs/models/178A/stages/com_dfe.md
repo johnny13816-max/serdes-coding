@@ -133,6 +133,9 @@ below; this reference-only behavior is not the complete FIR model. Both V_qc
 conventions share the selected phase, FFE/DFE, and non-quantization final PMFs.
 
 ALG-013 的 concrete owner 是 `COM._build_final_adc_quantization()`。
+其 selector 只在此 owner 操作；`calculate_COM_DFE()` 消費回傳的 `p_qn`、
+`V_qc` 與 `delta`，不再次選擇本分支。ALG-013 review 已完成；reference
+證據限於既有 fixed-input PMF 與 fixed-case COM，不宣稱普遍等價。
 
 PMF 卷積方法由 NUM-007 獨立控制：`fft` 是 project 預設，reference profile
 使用 `linear`。`Pmf1D.fir_filter()` 和 `Pmf1D.combine()` 為 operation owners；

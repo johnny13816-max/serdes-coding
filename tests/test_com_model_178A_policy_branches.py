@@ -366,6 +366,31 @@ def test_178a_reference_adc_support_rejects_bin_integral(reference_cfg):
         _with_methods(reference_cfg, pdf_to_pmf_method="bin_integral")
 
 
+def test_annex_final_adc_pmf_passes_full_taps_and_numerical_threshold(reference_cfg):
+    cfg = _with_methods(
+        reference_cfg,
+        final_com_vqc_convention="selected_phase_adc_input",
+        final_adc_pmf_projection="annex_d3",
+    )
+    runtime = _resolve_final_com_pmf_config(cfg.pmf, 0.3, cfg.num)
+    taps = np.zeros(cfg.dte.N_max)
+    taps[cfg.dte.d_w] = 1.0
+    taps[cfg.dte.d_w + 1] = -0.2
+    imp = SimpleNamespace(post_ffe=SimpleNamespace(adc_input=SimpleNamespace(
+        method="pmf_exact", V_qc=0.01, delta=0.001,
+    )))
+    result = Pmf1D.multi_dirac(np.array([0.0]), dx=runtime.dy)
+    with patch.object(Pmf1D, "fir_filter", return_value=result) as fir:
+        actual, vqc, delta = COM(cfg)._build_final_adc_quantization(
+            imp, None, SimpleNamespace(w_lim=taps), runtime,
+        )
+    np.testing.assert_array_equal(fir.call_args.args[0], taps)
+    assert fir.call_args.kwargs["tap_abs_th"] == runtime.tap_abs_th
+    assert fir.call_args.kwargs["scaling_method"] == "mass_deposit"
+    assert fir.call_args.kwargs["initial_bin_range"] is None
+    assert (actual, vqc, delta) == (result, 0.01, 0.001)
+
+
 def test_reference_final_adc_pmf_uses_adc_grid_with_ordinate_scaling(reference_cfg):
     cfg = reference_cfg
     runtime = _resolve_final_com_pmf_config(cfg.pmf, 0.3, cfg.num)

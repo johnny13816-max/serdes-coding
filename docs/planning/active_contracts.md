@@ -48,6 +48,12 @@ reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
+**現行更新（2026-11-16）：** ALG-013 完成選項、Stage 6 owner、profile、
+fixed-input SiCoPR PMF 和固定案例 COM 審查；新增 focused boundary tests
+3 passed。NUM-007 提供 reference direct convolution（`564aac4`）。
+不宣稱一般案例全面對齊；ALG-012 的獨立 reference 證據不因本項結案而關閉。
+下一項從 ALG-014 的完整初次審查開始。
+
 | ID／名稱 | 狀態 | 邊界 | 下一個關卡 |
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
