@@ -8,7 +8,7 @@ v1.0 release 狀態見
 ## Temporary rule contract — RC-20261115-001
 
 **Boundary:** 修改 branch ID lifecycle、registry ordering、retired records 與舊 ID cleanup 規則；不接管或修改 CP-BR project task。
-**Next gate:** 核對規則文件與 178A registry，完成 scoped commit。HANDOFF 的舊 cleanup 摘要待 project dirty state 可安全同步時更新。
+**Next gate:** HANDOFF 的過寬 cleanup 摘要待 project dirty state 可安全同步時更新，之後關閉本 RC。push 暫緩，因 `origin/main` 落後的 16 個既有 project commits 超出本規則變更範圍。
 **Authorization:** 使用者已核准 change contract；本規則專用對話有明確規則維護授權。
 
 ## Workflow state
