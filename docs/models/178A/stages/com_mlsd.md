@@ -103,7 +103,7 @@ receiver-noise term。`build_mlsd_noise()` 是 Stage 7 的 NUM-003 owner：它�
 
 ```python
 # conceptual structure of COM.build_mlsd_noise()
-record_cfg = full_post_ffe_response_cfg_or_num_trunc_ui()
+record_cfg = longest_input_grid_for_full_or_num_trunc_ui()
 S_n = rebuild_pre_ffe_components(eq_ch.pre_dte, record_cfg)
 S_n_filtered = apply_rxffe_and_alg015(S_n, H_rxffe)
 S_an = g_an * S_rn_pre.filtered_by(H_rxffe)
@@ -299,7 +299,7 @@ PSD objects on one record and follows Eq. 178A-54:
 
 ```text
 complete pre/post-FFE eq_ch responses
-  -> resolve full post-FFE response_cfg or fixed num_trunc_ui record
+  -> resolve longest participating response grid or fixed num_trunc_ui record
   -> rebuild receiver/XT/TX/jitter/quantization component PSDs
   -> apply |H_rxffe|² and ALG-015 quantization choice
 g_an * filtered receiver PSD -> S_an
@@ -312,8 +312,10 @@ The block returns transient `COMMLSDNoiseStatus`; the top-level stage later copi
 
 The method does not consume Stage 5 reporting PSDs or their grid. Complete
 responses remain unchanged; crop/zero-pad occurs only in this owner immediately
-before DFT. `full` uses the resolved post-FFE response grid and `truncated` uses
-the configured even `num_trunc_ui` record. `R_isi[0] = sigma_X² sum(h_ISI[n]²)`
+before DFT. `full` uses the longest participating response grid and `truncated` uses
+the configured even `num_trunc_ui` record. XT 使用完整 response 選定的 phase，
+截取最大能量 window；其他 response 取前段。同能量取最早 window。
+`R_isi[0] = sigma_X² sum(h_ISI[n]²)`
 is the Parseval check when the full response is retained.
 
 ## Truncated DER calculation

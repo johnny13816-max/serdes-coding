@@ -47,36 +47,27 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         direct = status.imp.pre_dte.psd.S_xn.filtered_by(status.dte.H_rxffe)
         np.testing.assert_allclose(post.S_xn.psd, direct.psd, rtol=1e-12, atol=1e-24)
 
-    def test_expanded_response_grid_does_not_change_stage5_psd_record(self) -> None:
-        expanded_cfg = replace(
+    def test_response_grid_does_not_change_stage5_psd_record(self) -> None:
+        full_cfg = replace(
             self.cfg,
-            alg=replace(
-                self.cfg.alg,
-                rxffe_record_realization="linear_expanded_grid",
-            ),
             num=replace(
                 self.cfg.num,
                 eq_ch_imp_len="full",
                 num_trunc_ui=None,
             ),
         )
-        model = COM(expanded_cfg)
+        model = COM(full_cfg)
         status = model.run(progress=False)
-        response_cfg = status.eq_ch.post_ffe.response_cfg
         record_cfg = status.imp.post_ffe.record_cfg
-        expected = expanded_cfg.link.sampled_nfft + expanded_cfg.dte.N_max - 1
-        if expected % 2:
-            expected += 1
-        self.assertEqual(response_cfg.sampled_nfft, expected)
         self.assertIs(record_cfg, status.imp.pre_dte.record_cfg)
-        self.assertIs(record_cfg, expanded_cfg.link)
+        self.assertIs(record_cfg, full_cfg.link)
         for response in (
             status.eq_ch.h_w,
             status.eq_ch.h_ISI,
             status.eq_ch.h_w_J,
             *status.eq_ch.h_XTs_w,
         ):
-            self.assertIs(response.cfg, response_cfg)
+            self.assertIs(response.cfg, full_cfg.link)
         for name in ("S_rn", "S_xn", "S_tn", "S_jn", "S_qn", "S_total"):
             self.assertIs(getattr(status.imp.post_ffe.psd, name).cfg, record_cfg)
 

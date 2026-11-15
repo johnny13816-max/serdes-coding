@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, Optional
 
 import numpy as np
@@ -23,6 +23,67 @@ from .config import (
 )
 from .errors import COMLengthMismatchError
 from .status import COMPath, COMSharedPath
+
+
+def _select_response_windows(
+    required_ranges: list[tuple[int, int]],
+    per_ui: int,
+    record_length: int,
+) -> tuple[int, list[tuple[int, int]]]:
+    """Select one candidate length and independent windows on a fine record.
+
+    Required ranges include FFE margin and use half-open sample indices.
+    The returned length is in UI; no path-to-path time alignment is implied.
+    """
+    if not required_ranges or per_ui <= 0 or record_length <= 0:
+        raise ValueError("nonempty ranges and positive grid sizes are required")
+    for start, stop in required_ranges:
+        if not 0 <= start < stop <= record_length:
+            raise ValueError("required response range must fit the fine record")
+        if start % per_ui or stop % per_ui:
+            raise ValueError("ideal window boundaries must align to whole UIs")
+
+    # Choose the shared grid length before extending each independent window.
+    step = per_ui
+    required_width = max(stop - start for start, stop in required_ranges)
+    ui_length = next(
+        (1 << exponent for exponent in range(7, 17)
+         if required_width <= (1 << exponent) * per_ui <= record_length),
+        None,
+    )
+    if ui_length is None:
+        raise ValueError("no supported grid window fits every required response range")
+
+    width = ui_length * per_ui
+    windows = []
+    for required_start, required_stop in required_ranges:
+        low = max(0, required_stop - width)
+        high = min(required_start, record_length - width)
+        first = ((low + step - 1) // step) * step
+        last = (high // step) * step
+        if first > last:
+            raise ValueError("no supported grid window fits every required response range")
+        centered = (required_start + required_stop - width) // 2
+        start = max(first, min(last, (centered // step) * step))
+        windows.append((start, start + width))
+    return ui_length, windows
+
+
+def _trim_response_to_window(
+    response: LinkSegment,
+    window_start: int,
+    window_stop: int,
+    output_cfg: LinkConfig,
+) -> LinkSegment:
+    """Copy an already aligned fine-grid IR window onto its output grid."""
+    if response.cfg.fb != output_cfg.fb or response.cfg.per_ui != output_cfg.per_ui:
+        raise ValueError("fine and output grids must have identical fb and per_ui")
+    if not 0 <= window_start < window_stop <= response.cfg.Nfft:
+        raise ValueError("window must fit inside the fine-grid record")
+    if window_stop - window_start != output_cfg.Nfft:
+        raise ValueError("window length must equal the output grid Nfft")
+    return LinkSegment.from_ir(response.ir[window_start:window_stop].copy(), output_cfg)
+
 
 class IEEECOMSparam(SparamModel):
     """
@@ -756,12 +817,12 @@ def _evaluate_pre_ctle_on_measured_grid(freqs: np.ndarray, H_21: np.ndarray, lin
     time_origin = np.exp(-1j * 2.0 * np.pi * freqs * (3.0 * ft_cfg.Tr))
     return (freqs, H_ffe * H_t * H_21 * H_r * time_origin)
 
-def _prepare_ctle_pulse_realization(link_cfg: LinkConfig, ft_cfg: COMFilterConfig, realization: Literal['continuous_tf', 'bilinear_iir']) -> Optional[COMBilinearCTLE]:
+def _prepare_ctle_pulse_realization(link_cfg: LinkConfig, ft_cfg: COMFilterConfig, realization: Literal['continuous_tf', 'bilinear_iir', 'bilinear_fine_grid']) -> Optional[COMBilinearCTLE]:
     """Prepare the shared CTLE state for one resolved pulse-realization method."""
     if realization == 'continuous_tf':
         return None
-    if realization != 'bilinear_iir':
-        raise ValueError('CTLE pulse realization must be continuous_tf or bilinear_iir.')
+    if realization not in {'bilinear_iir', 'bilinear_fine_grid'}:
+        raise ValueError('unsupported CTLE pulse realization.')
     required = {'g_1': ft_cfg.g_1, 'g_2': ft_cfg.g_2, 'f_z1': ft_cfg.f_z1, 'f_z2': ft_cfg.f_z2, 'f_p1': ft_cfg.f_p1, 'f_p2': ft_cfg.f_p2, 'f_p3': ft_cfg.f_p3}
     missing = [name for name, value in required.items() if value is None]
     if missing:
@@ -784,7 +845,7 @@ def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_c
     pulse_record[:len(pulse_ir)] = pulse_ir
     return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
 
-def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding'], *, include_txffe: bool=True) -> LinkSegment:
+def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding'], *, include_txffe: bool=True, pre_ctle_shift: Optional[int]=None) -> tuple[LinkSegment, Optional[int]]:
     """Realize one complete path pulse at the Stage 1 ALG-007 owner."""
     if shared.ctle_pulse_realization == 'continuous_tf':
         return _apply_rectangular_unit_pulse(
@@ -793,9 +854,9 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
             link_cfg,
             amplitude,
             'frequency_tf',
-        )
-    if shared.ctle_pulse_realization != 'bilinear_iir':
-        raise ValueError('CTLE pulse realization must be continuous_tf or bilinear_iir.')
+        ), None
+    if shared.ctle_pulse_realization not in {'bilinear_iir', 'bilinear_fine_grid'}:
+        raise ValueError('unsupported CTLE pulse realization.')
     if shared.ctle_iir is None:
         raise ValueError('bilinear_iir realization requires shared.ctle_iir.')
     if not np.isclose(shared.ctle_iir.Fs, link_cfg.Fs, rtol=0.0, atol=0.0):
@@ -808,6 +869,18 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
         kind=kind,
         include_txffe=include_txffe,
     )
+    if shared.ctle_pulse_realization == 'bilinear_fine_grid':
+        grid_tf = resample_tf(measured_pre_ctle, measured_freqs, link_cfg.freqs,
+                              out_of_measured=out_of_measured)
+        kernel = np.fft.irfft(grid_tf, n=link_cfg.Nfft)
+        if pre_ctle_shift is None:
+            kernel, pre_ctle_shift = H_pre.causalize_ir(kernel)
+        else:
+            kernel = np.roll(kernel, pre_ctle_shift)
+        ctle_ir = shared.ctle_iir.filtered(kernel)
+        pulse_ir = lfilter(np.ones(link_cfg.per_ui, dtype=float), np.array([1.0]),
+                           ctle_ir) * float(amplitude)
+        return IEEECOMFilter._from_finite_record_ir(pulse_ir, link_cfg), pre_ctle_shift
     discrete_kernel = _reference_fd_to_td_record(
         measured_freqs,
         measured_pre_ctle,
@@ -826,7 +899,7 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
         link_cfg,
         amplitude,
         'finite_record_ir',
-    )
+    ), None
 
 def _build_channel_under_test(
     source_cfg: COMSourceConfig,
@@ -920,11 +993,14 @@ def _build_path(
     )
     H_pre = H_ffe.cascade_tf(shared.H_t).cascade_tf(H_21).cascade_tf(shared.H_r)
     H_all = H_pre.cascade_tf(shared.H_ctf)
-    pulse = _realize_ctle_pulse(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured)
+    pulse, pre_ctle_shift = _realize_ctle_pulse(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured)
     pulse_no_txffe = None
     if kind == 'victim':
-        H_pre_no_txffe = shared.H_t.cascade_tf(H_21).cascade_tf(shared.H_r)
-        pulse_no_txffe = _realize_ctle_pulse(
+        # Main-only TXFIR uses the same filter convention with unit main tap.
+        preset_txfir = IEEECOMFilter.tx_ffe(link_cfg, np.array([0.0, 1.0, 0.0]), num_pre=1)
+        H_pre_no_txffe = (preset_txfir.cascade_tf(shared.H_t)
+                          .cascade_tf(H_21).cascade_tf(shared.H_r))
+        pulse_no_txffe, _ = _realize_ctle_pulse(
             shared,
             H_pre_no_txffe,
             H_21_measured_freqs,
@@ -936,22 +1012,130 @@ def _build_path(
             link_cfg,
             out_of_measured,
             include_txffe=False,
+            pre_ctle_shift=pre_ctle_shift,
         )
     return COMPath(kind=kind, shared=shared, S_tx=S_tx, S_ch=S_ch, S_all=S_all, H_21_measured_freqs=H_21_measured_freqs, H_21_measured_tf=H_21_measured_tf, H_21=H_21, H_all=H_all, X=X, pulse=pulse, pulse_no_txffe=pulse_no_txffe)
 
-def _build_shared_path(cfg: COMConfig, freqs: np.ndarray) -> COMSharedPath:
+def _build_shared_path(
+    cfg: COMConfig, freqs: np.ndarray, *, link_cfg: Optional[LinkConfig] = None,
+) -> COMSharedPath:
     """
     Build 178A path-shared COM models.
 
     The returned COMSharedPath keeps the same fields as 93A:
     H_ffe, H_ffe_next, H_t, S_rx, H_r, H_ctf.
     """
-    link_cfg = cfg.link
+    link_cfg = cfg.link if link_cfg is None else link_cfg
     ft_cfg = cfg.filter
     H_ctf = _build_H_ctf(link_cfg, ft_cfg)
     method = cfg.alg.ctle_pulse_realization
     ctle_iir = _prepare_ctle_pulse_realization(link_cfg, ft_cfg, method)
     return COMSharedPath(H_ffe=_build_H_ffe(link_cfg, ft_cfg), H_ffe_next=_build_H_ffe_next(link_cfg), H_t=_build_H_t(link_cfg, ft_cfg), S_rx=_build_rxpkg(freqs, cfg.rxpkg), H_r=_build_H_r(link_cfg, ft_cfg), H_ctf=H_ctf, ctle_iir=ctle_iir, ctle_pulse_realization=method)
+
+
+def _build_adaptive_group(
+    cfg: COMConfig,
+    specs: list[tuple[str, COMPkgConfig, SparamModel]],
+    fine_cfg: LinkConfig,
+    report_cfg: LinkConfig,
+    report_shared: COMSharedPath,
+    *,
+    victim_group: bool,
+) -> tuple[list[COMPath], LinkConfig]:
+    """Measure then rebuild one victim or XT group without retaining fine paths."""
+    if not specs:
+        raise ValueError("adaptive group requires at least one path")
+    fine_shared = _build_shared_path(cfg, specs[0][2].freqs, link_cfg=fine_cfg)
+    dte = cfg.dte
+    if dte is None or dte.d_w is None or dte.N_max is None:
+        pre_ui = post_ui = 50
+    else:
+        pre_ui = int(dte.d_w)
+        post_ui = int(dte.N_max) - 1 - pre_ui
+    if pre_ui < 0 or post_ui < 0:
+        raise ValueError("invalid FFE layout for adaptive grid margin")
+    ranges = []
+    shifts = []
+    for kind, txpkg_cfg, channel in specs:
+        path = _build_path(
+            fine_cfg, cfg.channel, cfg.filter, txpkg_cfg, fine_shared, kind,
+            channel, cfg.alg.missing_dc_policy, cfg.alg.out_of_measured,
+        )
+        start, stop = path.pulse.effective_range(
+            relative_threshold=cfg.num.relative_threshold,
+            absolute_threshold=cfg.num.absolute_threshold,
+        )
+        if start == stop:
+            raise ValueError(f"{kind} pulse has no samples above threshold")
+        # The ideal window is expressed in whole UIs before FFE margin.
+        start = (start // fine_cfg.per_ui) * fine_cfg.per_ui
+        stop = ((stop + fine_cfg.per_ui - 1) // fine_cfg.per_ui) * fine_cfg.per_ui
+        shift = 0
+        pre_samples = pre_ui * fine_cfg.per_ui
+        post_samples = post_ui * fine_cfg.per_ui
+        if not victim_group and start < pre_samples:
+            shift = ((pre_samples - start + fine_cfg.per_ui - 1)
+                     // fine_cfg.per_ui) * fine_cfg.per_ui
+        elif not victim_group and stop + post_samples > fine_cfg.Nfft:
+            shift = -((stop + post_samples - fine_cfg.Nfft + fine_cfg.per_ui - 1)
+                      // fine_cfg.per_ui) * fine_cfg.per_ui
+        if start + shift < 0 or stop + shift > fine_cfg.Nfft:
+            raise ValueError(f"{kind} effective response cannot fit the fine record")
+        start += shift
+        stop += shift
+        shifts.append(shift)
+        ranges.append((start - pre_ui * fine_cfg.per_ui,
+                       stop + post_ui * fine_cfg.per_ui))
+        del path
+
+    ui_length, windows = _select_response_windows(
+        ranges, fine_cfg.per_ui, fine_cfg.Nfft,
+    )
+    group_cfg = LinkConfig.from_Nfft(
+        fb=fine_cfg.fb, per_ui=fine_cfg.per_ui,
+        Nfft=ui_length * fine_cfg.per_ui,
+    )
+    results = []
+    for (kind, txpkg_cfg, channel), (start, stop), shift in zip(specs, windows, shifts):
+        path = _build_path(
+            fine_cfg, cfg.channel, cfg.filter, txpkg_cfg, fine_shared, kind,
+            channel, cfg.alg.missing_dc_policy, cfg.alg.out_of_measured,
+        )
+        if shift:
+            aligned_pulse = IEEECOMFilter._from_finite_record_ir(
+                np.roll(path.pulse.ir, shift), fine_cfg,
+            )
+            pulse = _trim_response_to_window(aligned_pulse, start, stop, group_cfg)
+            del aligned_pulse
+        else:
+            pulse = _trim_response_to_window(path.pulse, start, stop, group_cfg)
+        preset = None
+        if victim_group:
+            if path.pulse_no_txffe is None:
+                raise ValueError("victim path requires a preset pulse")
+            aligned_ir = np.roll(
+                path.pulse_no_txffe.raw_ir, path.pulse.causal_shift_samples,
+            )
+            aligned = IEEECOMFilter._from_finite_record_ir(aligned_ir, fine_cfg)
+            preset = _trim_response_to_window(aligned, start, stop, group_cfg)
+            del aligned, aligned_ir
+        report_h21 = LinkSegment.from_tf(
+            path.H_21_measured_freqs, path.H_21_measured_tf, report_cfg,
+            dc="error", out_of_measured=cfg.alg.out_of_measured,
+        )
+        report_ffe = report_shared.H_ffe_next if kind == "next" else report_shared.H_ffe
+        report_all = (report_ffe.cascade_tf(report_shared.H_t)
+                      .cascade_tf(report_h21).cascade_tf(report_shared.H_r)
+                      .cascade_tf(report_shared.H_ctf))
+        amplitude = {"victim": cfg.filter.A_v, "next": cfg.filter.A_ne,
+                     "fext": cfg.filter.A_fe}[kind]
+        report_pulse_shape = IEEECOMFilter.rect_pulse(report_cfg, amplitude)
+        results.append(replace(
+            path, shared=report_shared, H_21=report_h21, H_all=report_all,
+            X=report_pulse_shape, pulse=pulse, pulse_no_txffe=preset,
+        ))
+        del path
+    return results, group_cfg
 
 def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamModel]) -> list[COMPath]:
     """

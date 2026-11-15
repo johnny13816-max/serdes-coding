@@ -367,6 +367,10 @@ class COMNumericalControlConfig(COMDataclassText):
     final_pmf_grid: COMPMFGridControl = field(default_factory=COMPMFGridControl)
     eq_ch_imp_len: Literal["full", "truncated"] = "full"
     num_trunc_ui: Optional[int] = None
+    path_grid_mode: Literal["fixed", "adaptive"] = "fixed"
+    fine_grid_df: float = 1e6
+    relative_threshold: Optional[float] = 1e-3
+    absolute_threshold: Optional[float] = None
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
 
@@ -381,6 +385,10 @@ class COMNumericalControlConfig(COMDataclassText):
                 ),
             )),
             TextSection("Record and convergence", (
+                self._field("path_grid_mode", "path grid selection", stored_unit="policy"),
+                self._field("fine_grid_df", "fine grid frequency step", stored_unit="Hz"),
+                self._field("relative_threshold", "relative response threshold", stored_unit="dimensionless"),
+                self._field("absolute_threshold", "absolute response threshold", stored_unit="response amplitude"),
                 self._field("eq_ch_imp_len", "impairment eq-channel record length", stored_unit="policy"),
                 self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("pmf_grid_quality", "legacy PMF grid quality", stored_unit="policy"),
@@ -400,6 +408,21 @@ class COMNumericalControlConfig(COMDataclassText):
         )
 
     def __post_init__(self) -> None:
+        if self.path_grid_mode not in {"fixed", "adaptive"}:
+            raise ValueError("path_grid_mode must be 'fixed' or 'adaptive'.")
+        self.fine_grid_df = float(self.fine_grid_df)
+        if not np.isfinite(self.fine_grid_df) or self.fine_grid_df <= 0.0:
+            raise ValueError("fine_grid_df must be finite and positive.")
+        for name in ("relative_threshold", "absolute_threshold"):
+            value = getattr(self, name)
+            if value is not None:
+                value = float(value)
+                if not np.isfinite(value) or value < 0.0:
+                    raise ValueError(f"{name} must be finite and non-negative.")
+                setattr(self, name, value)
+        if (self.path_grid_mode == "adaptive" and self.relative_threshold is None
+                and self.absolute_threshold is None):
+            raise ValueError("adaptive path grids require at least one threshold.")
         for name in ("adc_input_pmf_grid", "final_pmf_grid"):
             if not isinstance(getattr(self, name), COMPMFGridControl):
                 raise TypeError(
@@ -1205,10 +1228,7 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
     final_com_vqc_convention: Literal[
         "selected_phase_adc_input", "sicopr_final_reconstruction"
     ] = "selected_phase_adc_input"
-    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
-    rxffe_record_realization: Literal[
-        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
-    ] = "linear_fixed_grid"
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir", "bilinear_fine_grid"] = "continuous_tf"
     floating_mode: Literal["heuristic", "simplified", "spec-defined"] = "heuristic"
     pmf_projection_method: Literal["linear", "nearest"] = "linear"
     xtalk_pmf_accumulation: Literal["pathwise_convolution"] = "pathwise_convolution"
@@ -1227,7 +1247,6 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
                 self._field("missing_dc_policy", "missing-DC completion", stored_unit="policy"),
                 self._field("out_of_measured", "out-of-measured-band behavior", stored_unit="policy"),
                 self._field("ctle_pulse_realization", "CTLE pulse realization", stored_unit="policy"),
-                self._field("rxffe_record_realization", "RX FFE record realization", stored_unit="policy"),
             )),
             TextSection("Noise and ADC", (
                 self._field("pre_dte_adc_clipping_convention", "pre-DTE ADC clipping", stored_unit="policy"),
@@ -1266,10 +1285,7 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
             "final_com_vqc_convention": {
                 "selected_phase_adc_input", "sicopr_final_reconstruction"
             },
-            "ctle_pulse_realization": {"continuous_tf", "bilinear_iir"},
-            "rxffe_record_realization": {
-                "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
-            },
+            "ctle_pulse_realization": {"continuous_tf", "bilinear_iir", "bilinear_fine_grid"},
             "floating_mode": {"heuristic", "simplified", "spec-defined"},
             "pmf_projection_method": {"linear", "nearest"},
             "xtalk_pmf_accumulation": {"pathwise_convolution"},

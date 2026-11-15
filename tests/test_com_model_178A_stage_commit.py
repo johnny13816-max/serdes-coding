@@ -73,6 +73,34 @@ def _sampling_search_model(*, per_ui, method, stride, mse_by_pos, rejected=()):
     return model, visited
 
 
+@pytest.mark.parametrize("target,expected", [
+    ("mse", []),
+    ("dfe", ["post_ffe", "dfe"]),
+    ("mlsd", ["post_ffe", "dfe", "mlsd"]),
+    ("all_enabled", ["post_ffe", "dfe", "mlsd"]),
+])
+def test_execution_targets_keep_expected_stage_boundaries(target, expected):
+    model, _ = _sampling_search_model(
+        per_ui=1, method="each_phase", stride=1, mse_by_pos=[0.1],
+    )
+    model.cfg.exe.target = target
+    model.cfg.mlsd.enable = True
+    calls = []
+    def post_ffe(*, dte_status, eq_ch, imp_pre, h):
+        calls.append("post_ffe")
+        return (COMPostFFEEqChannelStatus(h_w=eq_ch.h_dsamp),
+                COMImpairmentStatus(post_ffe=COMImpStageStatus()))
+    def dfe(*args):
+        calls.append("dfe")
+        return object()
+    model.calculate_post_ffe_imp = post_ffe
+    model.calculate_COM_DFE = dfe
+    model._assign_pmf = lambda _: None
+    model.calculate_COM_MLSD = lambda: calls.append("mlsd")
+    model._run_once(progress=False)
+    assert calls == expected
+
+
 def test_run_status_contains_only_stage_3_sampling_trace() -> None:
     assert {field.name for field in fields(COMRunStatus)} == {
         "mse_by_pos",
@@ -137,18 +165,15 @@ def test_post_ffe_phase_mismatch_does_not_partially_update_status() -> None:
     assert model.status.imp.post_ffe is None
 
 
-def test_post_ffe_status_requires_one_shared_response_grid() -> None:
+def test_post_ffe_status_preserves_distinct_response_grids() -> None:
     first_grid = LinkConfig.from_Nfft(8.0, 1, 16)
     second_grid = LinkConfig.from_Nfft(8.0, 1, 18)
     victim = SampledResponse.from_ir(np.array([1.0, 0.25]), first_grid)
     xtalk = SampledResponse.from_ir(np.array([0.5]), second_grid)
 
-    with pytest.raises(ValueError, match="must share response_cfg"):
-        COMPostFFEEqChannelStatus(
-            response_cfg=first_grid,
-            h_w=victim,
-            h_XTs_w=[xtalk],
-        )
+    status = COMPostFFEEqChannelStatus(h_w=victim, h_XTs_w=[xtalk])
+    assert status.h_w.cfg is first_grid
+    assert status.h_XTs_w[0].cfg is second_grid
 
 
 def test_sampling_phase_owner_resolves_coarse_fine_and_keeps_complete_bundle() -> None:

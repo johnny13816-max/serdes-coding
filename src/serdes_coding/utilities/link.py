@@ -1203,7 +1203,11 @@ class LinkSegment:
         """
         if (self._raw_ir is None):
             if (self._tf is not None):
-                self._raw_ir, self._causal_ir = self.tf2ir(self._tf)
+                # Raw access must not independently select a causal shift.
+                # This permits related responses to use a caller-owned shift.
+                tf = self.validate_tf(self._tf)
+                raw_ir = np.fft.irfft(tf, n=self.cfg.Nfft) * self.cfg.Fs
+                self._raw_ir = self.validate_ir(raw_ir, correct_wrap=False)
             elif (self._sr is not None):
                 self._raw_ir = self.sr2ir(self._sr)
                 self._causal_ir = self.validate_ir_from_time_domain(self._raw_ir, source_name="sr")
@@ -1229,6 +1233,41 @@ class LinkSegment:
         _ = self.ir
         assert self._causal_shift_samples is not None
         return int(self._causal_shift_samples)
+
+    def effective_range(
+        self, *, relative_threshold=None, absolute_threshold=None,
+    ) -> tuple[int, int]:
+        """Return the half-open IR sample range exceeding either threshold."""
+        thresholds = []
+        for name, value in (("relative_threshold", relative_threshold),
+                            ("absolute_threshold", absolute_threshold)):
+            if value is None:
+                continue
+            value = float(value)
+            if not np.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and non-negative.")
+            thresholds.append((name, value))
+        ir = self.ir
+        if not thresholds:
+            return 0, len(ir)
+        amplitude = np.abs(ir)
+        peak = float(np.max(amplitude))
+        limit = min(value * peak if name == "relative_threshold" else value
+                    for name, value in thresholds)
+        indices = np.flatnonzero(amplitude > limit)
+        if indices.size == 0:
+            return 0, 0
+        return int(indices[0]), int(indices[-1]) + 1
+
+    def effective_length(
+        self, *, relative_threshold=None, absolute_threshold=None,
+    ) -> int:
+        """Return the effective IR range length in samples."""
+        start, stop = self.effective_range(
+            relative_threshold=relative_threshold,
+            absolute_threshold=absolute_threshold,
+        )
+        return stop - start
 
     @property
     def sbr(self) -> np.ndarray:

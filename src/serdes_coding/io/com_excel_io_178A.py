@@ -275,9 +275,6 @@ def _resolve_project_profile_178A(
         # realization; the reference execution profile expands it to the
         # validated reference realization.
         ctle_pulse_realization="continuous_tf",
-        rxffe_record_realization=str(
-            fixed.get("rxffe_record_realization", "linear_fixed_grid")
-        ).strip(),
     )
     effective_numerical = replace(
         numerical_control,
@@ -363,7 +360,6 @@ def _resolve_project_profile_178A(
         pre_dte_adc_clipping_convention="rj_only_full_tail_reference",
         final_com_vqc_convention="sicopr_final_reconstruction",
         ctle_pulse_realization="bilinear_iir",
-        rxffe_record_realization="finite_record_circshift",
         pmf_projection_method="nearest",
         xtalk_pmf_accumulation="pathwise_convolution",
         pdf_to_pmf_method="pmf_sample",
@@ -453,6 +449,14 @@ def _read_project_numerical_control_178A(
     fixed: dict[str, object],
 ) -> tuple[COMNumericalControlConfig, bool]:
     """Read the canonical two-domain PMF grid family or legacy shared values."""
+    relative = fixed.get("relative_threshold", 1e-3)
+    absolute = fixed.get("absolute_threshold")
+    grid_controls = {
+        "path_grid_mode": str(fixed.get("path_grid_mode", "fixed")).strip(),
+        "fine_grid_df": float(fixed.get("fine_grid_df", 1e6)),
+        "relative_threshold": None if _is_blank(relative) else float(relative),
+        "absolute_threshold": None if _is_blank(absolute) else float(absolute),
+    }
     prefixes = ("adc_input_pmf_grid", "final_pmf_grid")
     fields = ("rule", "dy_rel_As", "dy_abs_max", "dy_override")
     canonical_keys = {f"{prefix}.{name}" for prefix in prefixes for name in fields}
@@ -478,6 +482,7 @@ def _read_project_numerical_control_178A(
             COMNumericalControlConfig(
                 adc_input_pmf_grid=canonical_grid("adc_input_pmf_grid"),
                 final_pmf_grid=canonical_grid("final_pmf_grid"),
+                **grid_controls,
             ),
             True,
         )
@@ -496,6 +501,7 @@ def _read_project_numerical_control_178A(
                 dy_rel_As=legacy_rel,
                 dy_abs_max=legacy_cap,
             ),
+            **grid_controls,
         ),
         False,
     )

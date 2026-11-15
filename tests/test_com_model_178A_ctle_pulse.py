@@ -1,5 +1,6 @@
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -21,12 +22,63 @@ from serdes_coding.models.com_model_178A import (
 from serdes_coding.models.com_178a.path_stage import (
     _apply_rectangular_unit_pulse,
     _reference_fd_to_td_record,
+    _realize_ctle_pulse,
 )
+from serdes_coding.models.com_178a import path_stage
+from serdes_coding.models.com_178a.config import COMAlgorithmPolicyConfig
 from serdes_coding.utilities.link import LinkConfig, LinkSegment, SampledResponse, resample_tf
 
 
 def _small_cfg() -> LinkConfig:
     return LinkConfig(fb=100e9, per_ui=8, target_df=1e9)
+
+
+def test_bilinear_fine_grid_keeps_full_input_and_zero_state(monkeypatch):
+    cfg = LinkConfig.from_Nfft(fb=8.0, per_ui=4, Nfft=64)
+    kernel = np.zeros(cfg.Nfft)
+    kernel[3], kernel[35], kernel[-1] = 1.0, 0.0001, 0.0002
+    tf = np.fft.rfft(kernel)
+    ctle = COMBilinearCTLE(b1=np.array([1.0]), a1=np.array([1.0, -0.2]),
+                           b2=np.array([1.0]), a2=np.array([1.0, -0.1]), Fs=cfg.Fs)
+    shared = SimpleNamespace(ctle_pulse_realization="bilinear_fine_grid", ctle_iir=ctle)
+    monkeypatch.setattr(path_stage, "_evaluate_pre_ctle_on_measured_grid",
+                        lambda *args, **kwargs: (cfg.freqs, tf))
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fine-grid method must not use reference truncation")
+    monkeypatch.setattr(path_stage, "_reference_fd_to_td_record", forbidden)
+    result, shift = _realize_ctle_pulse(shared, None, cfg.freqs, tf, None, "victim",
+                                        None, 1.0, cfg, "zero_padding", pre_ctle_shift=0)
+    expected = lfilter(np.ones(cfg.per_ui), [1.0],
+                       lfilter(ctle.b2, ctle.a2, lfilter(ctle.b1, ctle.a1, kernel)))
+    assert len(result.ir) == cfg.Nfft
+    assert shift == 0
+    np.testing.assert_allclose(result.ir, expected, rtol=1e-12, atol=1e-12)
+    assert COMAlgorithmPolicyConfig(ctle_pulse_realization="bilinear_fine_grid").ctle_pulse_realization == "bilinear_fine_grid"
+
+
+def test_bilinear_fine_grid_preset_reuses_actual_pre_iir_shift(monkeypatch):
+    cfg = LinkConfig.from_Nfft(fb=8.0, per_ui=4, Nfft=64)
+    actual = np.zeros(cfg.Nfft); actual[4] = 1.0
+    preset = np.zeros(cfg.Nfft); preset[4] = 0.5; preset[5] = 0.1
+    ctle = COMBilinearCTLE(b1=np.array([1.0]), a1=np.array([1.0]),
+                           b2=np.array([1.0]), a2=np.array([1.0]), Fs=cfg.Fs)
+    shared = SimpleNamespace(ctle_pulse_realization="bilinear_fine_grid", ctle_iir=ctle)
+    monkeypatch.setattr(path_stage, "_evaluate_pre_ctle_on_measured_grid",
+                        lambda *a, **kw: (cfg.freqs, np.fft.rfft(actual if kw['include_txffe'] else preset)))
+    decisions = []
+    def causalize(kernel):
+        decisions.append(7)
+        return np.roll(kernel, 7), 7
+    actual_response, shift = _realize_ctle_pulse(
+        shared, SimpleNamespace(causalize_ir=causalize), cfg.freqs, None, None,
+        "victim", None, 1.0, cfg, "zero_padding")
+    preset_response, preset_shift = _realize_ctle_pulse(
+        shared, None, cfg.freqs, None, None, "victim", None, 1.0, cfg,
+        "zero_padding", include_txffe=False, pre_ctle_shift=shift)
+    assert decisions == [7] and shift == preset_shift == 7
+    np.testing.assert_allclose(actual_response.ir, lfilter(np.ones(4), [1.0], np.roll(actual, 7)), atol=1e-12)
+    np.testing.assert_allclose(preset_response.ir, lfilter(np.ones(4), [1.0], np.roll(preset, 7)), atol=1e-12)
+    assert actual_response.causal_shift_samples == preset_response.causal_shift_samples == 0
 
 
 def test_bilinear_ctle_sections_have_expected_gain_and_stable_poles():
@@ -106,26 +158,12 @@ def test_finite_record_rxffe_is_circular_shift_sum():
     np.testing.assert_array_equal(_apply_fir_finite_record(response, taps), expected)
 
 
-def test_rxffe_owner_covers_fixed_expanded_and_circular_records():
+def test_rxffe_uses_circular_convolution_on_input_grid():
     cfg = LinkConfig.from_Nfft(8.0, 1, 8)
-    expanded = LinkConfig.from_Nfft(8.0, 1, 10)
     response = SampledResponse.from_ir(np.array([1.0, 2.0, 3.0, 4.0]), cfg)
     taps = np.array([0.5, -0.25])
-
-    fixed = _apply_rxffe_response(
-        response, taps, cfg, "linear_fixed_grid", "fixed test"
-    )
-    full = _apply_rxffe_response(
-        response, taps, expanded, "linear_expanded_grid", "expanded test"
-    )
-    circular = _apply_rxffe_response(
-        response, taps, cfg, "finite_record_circshift", "circular test"
-    )
-
-    expected_linear = np.convolve(np.array([1.0, 2.0, 3.0, 4.0]), taps)
-    np.testing.assert_allclose(fixed.ir[:5], expected_linear)
-    np.testing.assert_allclose(full.ir[:5], expected_linear)
-    assert full.cfg is expanded
+    circular = _apply_rxffe_response(response, taps)
+    assert circular.cfg is cfg
     np.testing.assert_allclose(
         circular.ir,
         0.5 * response.ir - 0.25 * np.roll(response.ir, 1),

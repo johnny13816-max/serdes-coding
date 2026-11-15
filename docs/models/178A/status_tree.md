@@ -206,10 +206,10 @@ Every `S_*` field is a `SampledPSD` and therefore carries its own `theta`, `fb`,
 |---|---|---|
 | `COMEqChannelStatus` | `phase_index`, `pre_dte`, optional `post_ffe` | selected-phase lifecycle |
 | `COMPreDTEEqChannelStatus` | `h_dsamp`, `h_tn`, `h_J`, `h_XTs_dsamp` | `SampledResponse` or list thereof |
-| `COMPostFFEEqChannelStatus` | `record_realization`, `response_cfg`, `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | ALG-011 provenance/grid plus `SampledResponse` or list thereof |
+| `COMPostFFEEqChannelStatus` | `h_ISI`, `h_w_J`, `h_w`, `h_XTs_w` | `SampledResponse` or list thereof, each with its source grid |
 
-All Post-FFE responses retain the exact `response_cfg` resolved by ALG-011 and
-own their impulse/transfer representation. `COMImpStageStatus.record_cfg`
+Post-FFE responses retain their respective input `cfg` and own their
+impulse/transfer representation. `COMImpStageStatus.record_cfg`
 records the concrete grid of that domain's PSD output. Post-FFE reporting reuses
 the pre-DTE record; MLSD reconstructs its own PSD record from complete
 eq-channel responses and stores it in `COMMLSDNoiseStatus.record_cfg`.

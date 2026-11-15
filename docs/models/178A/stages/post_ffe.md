@@ -1,6 +1,6 @@
 # 178A Stage 5 — Post-FFE model
 
-> **Review state:** selected-phase response construction, status ownership, reporting-PSD separation, downstream COM inputs, and current automated checks are confirmed from source. Governing equations and reference-case accuracy have not been independently revalidated by this documentation change.
+> **Review state:** adaptive-grid integration is in progress; equations and broad reference-case accuracy remain subject to validation.
 
 ## Purpose and ownership
 
@@ -8,7 +8,7 @@ This stage takes the selected pre-DTE impairment and selected limited DTE result
 
 It owns:
 
-- ALG-011 的 post-FFE response record realization 與共同 response grid；
+- 每條 response 在其來源 grid 上的固定 circular RX FFE；
 - consumption of the Stage 4 RX FFE response representation;
 - equalized victim and aggressor responses;
 - residual ISI after applying selected DFE feedback taps;
@@ -38,45 +38,27 @@ The commit validates the selected phase and adds only `eq_ch.post_ffe` and
 | `eq_ch` | matching `phase_index` plus pre-DTE `h_dsamp`, `h_J`, `h_XTs_dsamp` | selected equivalent-channel inputs |
 | `imp_pre` | `sigma_X`, pre-DTE `S_rn`, `S_tn`, and selected impairment data | physical pre-DTE inputs |
 | `h` | oversampled victim pulse | post-FFE jitter sensitivity from adjacent phases |
-| `COMConfig.link` | run-level sampled grid and symbol timing | pre-FFE input grid and fixed/circular output grid |
-| `COMConfig.alg.rxffe_record_realization` | `linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | victim、all XT 與 DDJ 的共同 FFE record realization |
+| response `cfg` | 每條 pre-DTE response 自帶的 grid | RX FFE 的輸入與輸出 grid |
 | `COMConfig.imp` | `R_LM`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc` | signal amplitude, jitter, and quantization controls |
 | `COMConfig.L` | PAM order | signal amplitude and PMF input |
 | `COMConfig.pmf` plus `COMConfig.num` | ADC-input PMF grid/retention policy | exact selected-phase ADC clipping material |
 
 `w_lim` must be the full zero-filled vector with shape `(N_max,)`, as guaranteed by the DTE stage contract.
 
-## ALG-011 response domain and pre-DTE PSD record
+## Response domain and pre-DTE PSD record
 
-`COM._resolve_post_ffe_response_cfg()` first resolves one response grid. All
-victim、XT、DDJ and residual-ISI responses must share this exact `LinkConfig`:
+`_apply_rxffe_response()` executes fixed circular shift-sum on each input's
+own `LinkConfig`. Victim, ISI and DDJ retain the victim grid; each XT retains
+its input grid. There is no RX FFE realization selector and Stage 5 does not
+read the Stage 1 grid mode.
 
-- `linear_fixed_grid` computes linear convolution, checks the discarded tail,
-  then returns to `cfg.link`. The guard requires
-  `max|tail|/max|full| <= 2e-3` and `sum(tail²)/sum(full²) <= 1e-6`.
-- `linear_expanded_grid` allocates one caller-owned grid large enough for
-  `cfg.link.sampled_nfft + N_max - 1` samples and preserves the complete linear
-  convolution without hidden regrid.
-- `finite_record_circshift` applies every FFE tap as a circular shift on
-  `cfg.link`, matching the SiCoPR finite-record convention and bypassing the
-  linear-tail guard.
-
-Stage 5 does not resolve NUM-003. Its reporting PSDs reuse the exact
-`imp.pre_dte.record_cfg` and apply the completed RX FFE there. ALG-011 separately
-resolves the time-domain post-FFE response grid; neither grid changes the other.
+Stage 5 does not resolve NUM-003. Reporting PSDs reuse
+`imp.pre_dte.record_cfg`; that PSD record does not determine response grids.
 
 ```text
-pre-FFE cfg.link
-├── imp_pre responses and PSDs
-├── Stage 4 w_lim / H_rxffe
-└── Stage 5 ALG-011 owner
-    ├── response_cfg
-    │   ├── h_w
-    │   ├── h_XTs_w[*]
-    │   ├── h_ISI
-    │   └── h_w_J
-    └── reporting record_cfg = imp.pre_dte.record_cfg
-        └── filtered post-FFE reporting PSDs only
+pre-FFE victim response cfg → h_w / h_ISI / h_w_J
+pre-FFE each XT response cfg → h_XTs_w[*]
+imp.pre_dte.record_cfg → filtered post-FFE reporting PSDs
 ```
 
 The post-FFE component PSDs are reporting quantities. Their construction
@@ -89,19 +71,18 @@ does not change DTE MSE or DFE COM.
 - validate `w_lim` shape and finite values;
 - retain the full vector for run-level-grid convolution/filter use;
 - require the matching `dte_status.H_rxffe` constructed by Stage 4;
-- construct `w_lim_pre` on the run-level link grid.
+- construct `w_lim_pre` on the pre-DTE PSD record grid.
 
 ### 2. Build one resolved set of equivalent responses
 
 ```text
-eq_ch.pre_dte.h_dsamp + w_lim -> _apply_rxffe_response -> h_w on response_cfg
+eq_ch.pre_dte.h_dsamp + w_lim -> _apply_rxffe_response -> h_w on input cfg
 for every eq_ch.pre_dte.h_XTs_dsamp
-    apply the same selected record method -> h_XTs_w[k] on response_cfg
-pre-FFE h_J + w_lim -> same owner/method -> h_w_J on response_cfg
+    circular FFE -> h_XTs_w[k] on that input cfg
+pre-FFE h_J + w_lim -> circular FFE -> h_w_J on victim cfg
 ```
 
-The victim、every aggressor、DDJ and residual ISI share `response_cfg`. No
-downstream stage selects the realization again.
+Responses may use different grids. No downstream stage selects a realization.
 
 ### 3. Build residual ISI
 
@@ -113,7 +94,7 @@ The exact residual-ISI equation and sign convention remain subject to specificat
 
 The stage calls `_calculate_h_J()` only for the pre-FFE adjacent-phase derivative,
 then passes that response through the same `_apply_rxffe_response()` owner used by
-victim and XT. `_calculate_h_J()` does not own an ALG-011 selector.
+victim and XT. `_calculate_h_J()` does not select a grid mode.
 
 This preserves the implementation's adjacent-phase construction through the selected FFE. Its equation and units still require independent reference validation.
 
@@ -155,8 +136,6 @@ from complete equivalent-channel responses.
 ```text
 COMStatus Stage 5 additions
 ├── eq_ch.post_ffe: COMPostFFEEqChannelStatus
-│   ├── record_realization
-│   ├── response_cfg
 │   ├── h_w
 │   ├── h_XTs_w
 │   ├── h_ISI
@@ -220,10 +199,8 @@ The stage rejects or propagates errors for these conditions:
 
 - `w_lim` is not finite or does not have shape `(N_max,)`;
 - cursor `d` or the configured DFE feedback range exceeds `h_w`;
-- a `linear_fixed_grid` response tail exceeds the fixed-grid peak or energy limit;
-- `linear_expanded_grid` cannot cover the complete response or a consumer changes the resolved grid;
 - pre-DTE PSDs/responses required for the selected phase are absent;
-- response objects do not share `response_cfg`, or PSD objects do not share `record_cfg`;
+- a response lacks a valid cfg, or PSD objects do not share `record_cfg`;
 - ADC-input exact PMF construction fails or produces invalid clipping material;
 - any derived response, PSD, or scalar fails its utility/dataclass validation.
 
@@ -245,13 +222,13 @@ Reporting reads the stored fixed-grid objects and must not reconstruct this stag
 `tests/test_com_model_178A_post_ffe.py` currently supplies one fixed-case integration test with five checks:
 
 1. selected MSE is finite;
-2. every response shares `response_cfg` and every post-FFE PSD reuses pre-DTE `record_cfg`;
+2. each response retains its input cfg and every post-FFE PSD reuses pre-DTE `record_cfg`;
 3. stored crosstalk PSD equals the filtered pre-DTE crosstalk PSD;
 4. stored quantization PSD equals the filtered pre-DTE quantization PSD;
 5. zeroing display PSDs leaves recomputed DFE COM unchanged to 12 decimal places.
 
-Additional focused tests cover all three ALG-011 methods, the expanded response
-grid, and the invariant that Stage 5 never becomes a NUM-003 owner. Stage 7
+Focused tests cover the fixed circular operation, independent response grids,
+and the invariant that Stage 5 never becomes a NUM-003 owner. Stage 7
 NUM-003 behavior is tested independently. This is implementation-regression
 evidence, not independent specification validation.
 

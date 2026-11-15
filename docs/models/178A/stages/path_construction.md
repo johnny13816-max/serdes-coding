@@ -2,14 +2,18 @@
 
 > **Review state:** the software boundary, configuration ownership, data flow, status output, and failure behavior below are confirmed from current source. The individual S-parameter and filter equations have not been independently revalidated by this documentation change.
 
+> **Adaptive grid in progress:** `_select_response_windows()` and
+> `_trim_response_to_window()` are connected to the Stage 1 two-pass flow.
+> Adaptive mode is under integration and numerical validation; it is not yet
+> closed or reference-aligned. The fixed-grid flow below remains available.
+
 ## Purpose and ownership
 
 This stage converts workbook-derived channel, package, and filter configuration into the ordered `COMPath` objects used by every later 178A stage.
 
-The complete implementation lives in
-`src/serdes_coding/models/com_178a/path_stage.py`. `com_model_178A.py` imports
-and re-exports its established symbols for compatibility, but does not own the
-path algorithms.
+`COM.build_all_paths()` owns grid-mode dispatch and the complete Stage 1 result;
+the path builders and adaptive group execution live in
+`src/serdes_coding/models/com_178a/path_stage.py`.
 
 It owns:
 
@@ -52,7 +56,21 @@ next indices             NEXT paths in workbook/config order
 remaining indices        FEXT paths in workbook/config order
 ```
 
-`COM._run_once()` assigns this list to `status.paths`, selects `paths[0]` as the victim, treats `paths[1:]` as crosstalk paths, and then performs the victim time-alignment guard before entering pre-DTE processing.
+`COM._run_once()` assigns this list to `status.paths`, selects `paths[0]` as the victim and treats `paths[1:]` as crosstalk paths. The fixed-grid branch executes the victim time-alignment guard inside `build_all_paths()`; adaptive uses its window contract instead.
+
+```text
+build_all_paths() [grid mode owner]
+├─ fixed: _build_shared_path → _build_paths → victim guard
+└─ adaptive: victim _build_adaptive_group → XT _build_adaptive_group
+   ├─ effective_range → 整數 UI 理想窗＋FFE margin
+   ├─ _select_response_windows：選共同 cfg 長度 → 延伸各自的窗
+   └─ rebuild → _trim_response_to_window → paths
+```
+
+Adaptive fine-grid arrays and window/shift data are local intermediates. Each
+XT may shift its own origin by whole UI to accommodate FFE margin. Output
+responses use victim, XT, or report cfg; production integration and reference
+validation are still in progress.
 
 ## COM call-tree hierarchy
 
@@ -135,9 +153,9 @@ class is required.
 
 ```text
 _prepare_ctle_pulse_realization(
-    method,
     link_cfg,
     filter_cfg,
+    method,
 ) -> ctle_iir | None
     # caller stores method and result in COMSharedPath
 
@@ -153,13 +171,15 @@ _realize_ctle_pulse(
     link_cfg,
     out_of_measured,  # resolved ALG-006 policy; not an ALG-007 selector
     include_txffe=True,
-) -> LinkSegment  # stored path pulse
+    pre_ctle_shift=None,  # preset receives actual shift in fine-grid method
+) -> (LinkSegment, pre_ctle_shift | None)
+    # shift is local path-construction data; the LinkSegment is the stored pulse
 ```
 
 | Boundary | Inputs | Output / responsibility |
 |---|---|---|
-| L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; `bilinear_iir` creates the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
-| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; already selected rectangular pulse `X`; whether TX FFE is included | Per-path execution decision within the L3 ALG-007 owner block. It performs any required measured-grid reconstruction, CTLE formula and one-UI pulse application, then returns one stored full-rate pulse. |
+| L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; both bilinear methods create the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
+| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; pulse `X`; TX FFE flag; optional concrete pre-CTLE shift | Per-path execution decision within the L3 ALG-007 owner block. Returns the full-rate pulse and, for fine-grid realization, the locally chosen or supplied shift. |
 
 The call site must not pass an ALG-007 selector into
 `_realize_ctle_pulse()`; CTLE method selection is complete in shared state
@@ -364,6 +384,11 @@ IFFT finite record、保留 3Tr 時間原點、停用 causality correction，並
 `1e-3` peak threshold 截尾，再通過共用 `COMBilinearCTLE` 與 boxcar unit pulse。
 其中 measured-to-Nyquist extension 由獨立 ALG-006 policy 控制；CTLE IIR、
 raw IFFT、時間原點與截尾仍是 ALG-007 該具名方法的固定定義，不拆成額外欄位。
+新增 `bilinear_fine_grid` 將 measured-domain composite TF 重採樣到輸入 cfg
+頻率網格並執行完整 Nfft IFFT；不做 IIR 前截尾。Actual pre-CTLE IR 選擇
+causal shift，victim preset 套用同一 shift；XT 各自決定 shift，然後以
+zero-state IIR 和 boxcar 各自輸出 Nfft samples。Shift 僅為建立 path 的
+局部資料，已對齊 pulse 不再於 adaptive 裁切時套用第二次。此路徑仍在驗證。
 後者依前者的 frequency／finite-record 表示法保留原本的 convolution semantics，
 但不引入額外 project policy。
 

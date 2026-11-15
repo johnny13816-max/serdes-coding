@@ -1,9 +1,10 @@
 # Utility grid 契約
 
-`LinkConfig(fb, per_ui, target_df)` 在一次 COM run 只建立一次。正式的
-`LinkSegment`、`SampledResponse`、`ContinuousPSD` 與 `SampledPSD` 運算沿用同一
-物件；`ContinuousPSD` 的原始任意量測 grid 可以尚未綁定 `cfg`，對齊到 run-level
-grid 後才綁定。`SampledPSD.filtered_by()` 只接受相同格點，不暗中 regrid。
+`LinkConfig(fb, per_ui, target_df)` 描述一個 concrete grid；fixed run 可共用
+單一物件，178A adaptive run 可有 victim／XT／report grids。每個
+`LinkSegment`、`SampledResponse` 與 `SampledPSD` 維持自己所屬 cfg；
+`ContinuousPSD` 的原始任意量測 grid 可以尚未綁定 cfg。
+`SampledPSD.filtered_by()` 只接受相同格點，不暗中 regrid。
 
 `cascade_ir(..., force_grid=True)` 先計算完整線性卷積；連續時間
 `LinkSegment` 仍乘 `dt`，離散時間 `SampledResponse` 不乘 `dt`。正式輸出保留
@@ -20,8 +21,7 @@ grid，無論尾端大小都直接報錯。量測響應才使用上述數值界�
 長度、完整卷積長度及兩個實測比值。界限是工程數值品質政策，不是 IEEE 規範
 或普遍的 COM 誤差保證。`force_grid=False` 可回傳完整卷積的新 grid，或在 caller
 明示 `output_cfg` 時保存到該共同 grid；這是 diagnostic/caller-owned utility
-contract，不是獨立 selectable branch。178A ALG-011 的 Stage 5 owner 可在
-`linear_expanded_grid` 方法中明示使用。量測 TF/IFFT 尾端未必精確為零，因此通過檢查只表示
+contract，不是獨立 selectable branch。量測 TF/IFFT 尾端未必精確為零，因此通過檢查只表示
 目前記錄的裁除量在政策內，不證明未量測的物理尾端為零。
 
 同 grid 的 TF 串接與固定 grid 的 IR 串接，僅在卷積完整落入 grid、時間
@@ -30,13 +30,23 @@ view；比較複數 TF 前須對齊 `raw_ir` 與該 shift。PSD 功率閉環為
 `SampledPSD.to_sigma()**2 == to_autocorrelation()[0]`；連續時間 PSD 的
 sampling aliasing 不宣稱可逆。
 
-178A ALG-011 的 `linear_fixed_grid` 與 `finite_record_circshift` 正式 response
-沿用 `cfg.link`；`linear_expanded_grid` 由 Stage 5 依 input record 與 RX FFE tap
-support 明示建立共同 output grid，並把 resolved grid 寫入 status。Stage 6／7
-只消費該 status，不再自行決定 grid。若 fixed-grid run 發生 overflow，該 run
-報錯；search final 將 candidate 記為 `grid_overflow`、不給有效 COM，並依 MSE
-順序補位。所有候選均超界時才使整個 search 因 grid 容量失敗。expanded grid
-只保存既有 finite input record 的完整卷積，不得宣稱補回量測記錄之外的物理尾端。
+178A Stage 5 使用 fixed circular shift-sum，每條 response 保留自己的 input
+cfg，不套用 `cascade_ir` 的 linear overflow guard。Stage 2 與 Stage 7 的
+NUM-003 PSD owner 分別決定 PSD record；`full` 容納所有輸入，較短者補零。
+一般 utility 若拋出 `GridOverflowError`，search 的失敗處理仍適用；這不代表
+Stage 5 circular FFE 會產生 linear overflow。
+
+## Effective IR range
+
+`LinkSegment.effective_range()` 以目前 `.ir` 的時間參考檢測雙邊 amplitude
+範圍，回傳 sample 半開區間 `[start, stop)`；`effective_length()` 回傳其
+sample 數。兩者接受 optional relative／absolute threshold，須 finite 且
+非負；relative 以同一 response peak amplitude 為準。兩者啟用時採 OR，
+嚴格大於任一門檻為有效；未啟用任何 threshold 時回傳完整 record，沒有
+sample 通過時回傳空範圍及零長度。工具不決定 COM grid、FFE margin 或
+跨 response 時間對齊。
+TF-originated `raw_ir` 只計算與驗證未平移的 IFFT，不會因此選擇 causal
+shift；只有讀取 `ir`／`causal_ir` 才依既有邏輯進行 causal alignment。
 
 ## SBR-to-eye contract
 

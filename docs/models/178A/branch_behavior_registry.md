@@ -11,6 +11,17 @@ execution detail；`call_tree.md` 只保存 pipeline flow，不再各自維護 b
 
 範圍包含 178A runtime 及其實際呼叫的 shared utility 分支；不把 178A 選項自動視為 93A 行為。若 93A 新增平行算法，應建立或更新對應的 `docs/models/93A/branch_behavior_registry.md`。
 
+## 實作中：Stage 1 adaptive grid
+
+`num.path_grid_mode`（`fixed`／`adaptive`）的候選 owner 為
+`COM.build_all_paths()`；fixed 與 adaptive 已進入實作及整合驗證，尚未結案。
+`num.fine_grid_df`、`num.relative_threshold`、
+`num.absolute_threshold` 為 adaptive controls，不各自構成 branch；runtime
+defaults 分別為 `1e6` Hz、`1e-3`、`None`。完整設計與待完成驗證見
+[adaptive grid change contract](../../planning/178A_adaptive_grid_change_contract.md)。
+原 ALG-011 selector 已由 Stage 5 固定 circular convolution 取代；完整清理
+及整合驗證仍進行中。
+
 ## 判定規則
 
 branch behavior、一般 config、execution strategy、input boundary、固定行為與
@@ -75,15 +86,15 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | MLSD fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
-| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | **Closed 2026-11-11** |
-| `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | **Closed 2026-11-12** |
+| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | 新增 fine-grid 方法：實作驗證中 |
+| `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 修改驗證中 |
+| `NUM-007` | numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 實作與整合驗證中；尚未結案 |
 | `SRCH-001` | approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
 | `ALG-008` | approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `NUM-006` | approved branch | Stages 2／5 ADC-input FIR-PMF convergence | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
 | `ALG-010` | approved branch | Stage 4 DTE solver | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
-| `ALG-011` | unreviewed existing selector | Stage 5 Post-FFE model | `alg.rxffe_record_realization`：`linear_fixed_grid`／`linear_expanded_grid`／`finite_record_circshift` | `finite_record_circshift` | **provisional L3** `_apply_rxffe_response()` | 待完整初次審查 |
 | `ALG-012` | unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
 | `ALG-013` | unreviewed existing selector | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
 | `ALG-014` | unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
@@ -105,14 +116,13 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-004` | fixed-grid scalar-PMF scaling；signed scale 保持同一 `abs(scale)` output grid，負值鏡射 ordinates | FIR tap construction；`mass_deposit` 使用 ALG-002 placement 但不擁有它；grid spacing、retained mass 與 PDF construction |
 | `ALG-006` | effective measured grid 上的 scalar transfer function 重採樣至目標 frequency grid；目前涵蓋 analysis-grid H21，以及 bilinear CTLE path／victim no-TX-FFE finite record | `S_ch`、`S_all`、boundary-in interpolation、case frequency limit、missing-DC completion、CTLE realization／IIR／IFFT／截尾 |
 | `ALG-007` | CTLE pulse method-specific shared state，以及 victim／NEXT／FEXT `pulse` 與 victim `pulse_no_txffe` 的完整 CTLE realization | TX FFE、continuous `H_all`、ALG-006 transfer extension、Pre-DTE TX-noise sampling policy |
-| `NUM-003` | 在 pre-DTE／pre-MLSD PSD owner 內建立 `full` 或固定 `num_trunc_ui` record；truncated 的 XT 先選完整 response phase，再選最大能量 window，其他 response 取前段；過短補零，再建 PSD 並加總 | Path response、完整 `eq_ch` status、Sampling search、DTE solve、Post-FFE reporting transform、ALG-011 response realization／grid |
+| `NUM-003` | 在 pre-DTE／pre-MLSD PSD owner 內建立 `full` 或固定 `num_trunc_ui` record；truncated 的 XT 先選完整 response phase，再選最大能量 window，其他 response 取前段；過短補零，再建 PSD 並加總 | Path response、完整 `eq_ch` status、Sampling search、DTE solve、Post-FFE reporting transform、response grid |
 | `SRCH-001` | 要評估的 phase schedule、coarse/fine visit order、最低 MSE complete bundle 與 per-phase run status | Pre-DTE model、DTE solver／ALG-010、XT independent-phase preparation、post-selection domains |
 | `ALG-008` | per-phase `V_qc → delta → S_qn → R_n` clipping convention | final ADC PMF；後續結果只可能經 selected phase/taps 間接受影響 |
 | `NUM-004` | Pre-DTE 與 selected-phase Post-FFE ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
 | `NUM-005` | DFE component／combined PMFs 與 MLSD added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 DFE PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、MLSD PSD record grid |
 | `NUM-006` | 每個 tap convolution 後對 intermediate PMF 做對稱尾端截斷並重新正規化；`1.0` 關閉截斷。Stage 2／5 是 direct consumers | NUM-004／005 grid spacing、tap threshold、ALG-002 projection、ALG-003 PDF discretization、ALG-008 clipping、NUM-003 PSD record；Stage 6 final PMF 固定 `keep_mass=1.0`，不是此 branch consumer |
 | `ALG-010` | floating tap/group selection strategy；owner 依 resolved selector dispatch，並控制該 placement 的完整 solve／limit／MSE／`COMDTEStatus` lifecycle | fixed-tap limiter definition、MMSE/KKT equations、coefficient limits、phase search、equal-score tie-break implementation |
-| `ALG-011` | victim、all XT、DDJ 的 post-FFE response record/grid | RX FFE taps、MMSE solve、pre-FFE responses、NUM-003 record length |
 | `ALG-012` | final-COM clipping voltage convention | final-quantization main-tap accumulation issue |
 | `ALG-013` | final ADC quantization PMF projection/support | pre-DTE ADC PMF；reference option 對 ALG-012 有相依但不合併 owner |
 | `ALG-014` | added-noise PDF construction | `S_isi`、`S_ni` definitions |
@@ -132,6 +142,7 @@ review 尚未完成。Retired／fixed non-branches 不放入本樹，統一列�
 ```text
 COM model
 ├─ L1 Stage 1 / Domain — Path realization
+│  ├─ COM.build_all_paths()                                  [NUM-007 L1 owner: fixed / adaptive]
 │  └─ L2 path-realization function set
 │     ├─ _build_shared_path()                                [ALG-007 config resolver / shared coordinator]
 │     │  └─ CTLE pulse-realization block                     [ALG-007 L3 owner: shared setup]
@@ -146,6 +157,7 @@ COM model
 │           └─ CTLE pulse-realization block                  [same ALG-007 L3 owner: per-path]
 │              └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 L4 execution decision]
 │                 ├─ continuous_tf                           [uses analysis-grid H21; ALG-006 upstream-folded]
+│                 ├─ bilinear_fine_grid                     [full-grid IFFT → shared pre-IIR shift → IIR → pulse]
 │                 └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
 │                    └─ resample_tf()                        [same ALG-006 L5 owner]
 ├─ L1 Stage 2 / Domain — Pre-DTE model
@@ -187,7 +199,7 @@ COM model
 │  │  └─ solve／limit／MSE／COMDTEStatus lifecycle
 │  └─ COMDTEStatus.H_rxffe                                   [bound to pre-DTE record after solve; non-owner]
 ├─ L1 Stage 5 / Domain — Post-FFE model
-│  ├─ _apply_rxffe_response()                                [ALG-011 provisional owner]
+│  ├─ _apply_rxffe_response()                                [fixed circular operation]
 │  │  └─ COMPostFFEEqChannelStatus                           [DFE／MLSD consumer record]
 │  ├─ _resolve_adc_input_pmf_config()                        [same NUM-004 L4 owner; execution point 2]
 │  │  └─ COMPMFGridControl.resolve_dy()                      [same L5 shared grid kernel]
@@ -289,7 +301,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | final quantization FIR 是否「包含 main tap」 | **不是 `ALG-012` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
 | B-009 `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供 B-009 selector。 |
 | `SampledPSD.filtered_by()` grid matching | **固定 utility contract**。輸入 grid 不一致即由 caller 先處理；沒有隱藏 auto-regrid branch。 |
-| `cascade_ir(force_grid=False)` | **診斷／caller-owned utility behavior**。可回傳完整 linear-convolution record，或由 caller 明示 `output_cfg`；它不是獨立 Project Config branch。ALG-011 only uses it behind the Stage 5 owner after the record grid is resolved. |
+| `cascade_ir(force_grid=False)` | **診斷／caller-owned utility behavior**。可回傳完整 linear-convolution record，或由 caller 明示 `output_cfg`；它不是獨立 Project Config branch，也不是 Stage 5 circular RX FFE。 |
 
 ### `ALG-002` 二次審查證據
 
@@ -337,7 +349,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | Channel representation normalization（fixed/input dispatch） | `models/com_178a/path_stage.py::_build_channel_under_test()` + `utilities/sparam.py` 的具名 representation methods | `tests/test_channel_renormalization.py`、`tests/test_sparam_synthetic_s4p.py` |
 | High-frequency handling | `LinkSegment.from_tf()`、`_reference_fd_to_td_record()`、`utilities/link.py::resample_tf()` | `tests/test_sparam_out_of_measured.py`、`tests/test_com_model_178A_ctle_pulse.py` |
 | CTLE pulse realization | `_build_shared_path()`、`_prepare_ctle_pulse_realization()`、`_realize_ctle_pulse()`；`COMPath.pulse_no_txffe` | `tests/test_com_model_178A_ctle_pulse.py` |
-| RX FFE record | `COM._resolve_post_ffe_response_cfg()`、`_apply_rxffe_response()`；DFE/MLSD consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
+| RX FFE record | `_apply_rxffe_response()` 在每條輸入 response cfg 做 circular FFE；DFE/MLSD consume recorded grids | `tests/test_com_model_178A_post_ffe.py`、`test_com_model_178A_mlsd_noise.py`、CTLE pulse tests |
 | Eq-channel impairment record／MMSE inputs | Pre-DTE `COM._build_pre_dte_psd()`；MLSD `COM.build_mlsd_noise()`；`_select_xtalk_path_phase()` 明確是 non-owner | policy ownership test、`tests/test_com_model_178A_mlsd_noise.py`、SiCoPR golden |
 | Floating FFE strategy | L3 `COM_MMSE_DTE.run()`；`COM.calculate_MMSE_DTE()` 只注入 `cfg.alg.floating_mode` | `tests/test_com_model_178A_floating_mode.py` |
 | PMF branches | `_build_pmf_interference_178A()`、`_build_pmf_G()`、ADC/final PMF builders | `tests/test_pmf_reference_methods.py`、policy tests |

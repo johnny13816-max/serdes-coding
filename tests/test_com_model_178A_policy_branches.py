@@ -196,11 +196,9 @@ def test_178a_out_of_measured_rejects_unknown_method(reference_cfg):
 def test_178a_ctle_pulse_realization_defaults_and_rejects_unknown_method(reference_cfg):
     fields = COMAlgorithmPolicyConfig.__dataclass_fields__
     assert fields["ctle_pulse_realization"].default == "continuous_tf"
-    assert fields["rxffe_record_realization"].default == "linear_fixed_grid"
+    assert "rxffe_record_realization" not in fields
     with pytest.raises(ValueError, match="ctle_pulse_realization"):
         _with_methods(reference_cfg, ctle_pulse_realization="other")
-    with pytest.raises(ValueError, match="rxffe_record_realization"):
-        _with_methods(reference_cfg, rxffe_record_realization="other")
 
 
 def test_178a_eq_ch_imp_length_contract_and_reference_profile(reference_cfg):
@@ -241,30 +239,15 @@ def test_178a_num003_has_exactly_two_production_owners():
     assert owners == {"_build_pre_dte_psd", "build_mlsd_noise"}
 
 
-def test_178a_rxffe_record_realization_resolves_only_stage5_response_grid(reference_cfg):
-    fixed_cfg = replace(reference_cfg, alg=COMAlgorithmPolicyConfig())
-    fixed_model = COM(fixed_cfg)
-    assert fixed_model._resolve_post_ffe_response_cfg() is fixed_cfg.link
-
-    expanded_cfg = replace(
-        reference_cfg,
-        alg=COMAlgorithmPolicyConfig(rxffe_record_realization="linear_expanded_grid"),
-        num=COMNumericalControlConfig(),
-    )
-    expanded_model = COM(expanded_cfg)
-    expanded = expanded_model._resolve_post_ffe_response_cfg()
-    expected = expanded_cfg.link.sampled_nfft + expanded_cfg.dte.N_max - 1
-    if expected % 2:
-        expected += 1
-    assert expanded.sampled_nfft == expected
-    assert COM(reference_cfg)._resolve_post_ffe_response_cfg() is reference_cfg.link
+def test_178a_rxffe_has_no_record_realization_selector():
+    assert "rxffe_record_realization" not in COMAlgorithmPolicyConfig.__dataclass_fields__
 
 
 def test_178a_eq_ch_imp_length_changes_only_psd_input_record(reference_cfg):
     truncated_model = COM(reference_cfg)
     paths = truncated_model.build_all_paths()
     victim = paths[0]
-    h_XTs = [path.pulse.ir for path in paths[1:]]
+    h_XTs = [path.pulse for path in paths[1:]]
     common = truncated_model.calculate_pre_dte_imp_common(victim)
     common, h_XTs_dsamp = truncated_model.prepare_pre_dte_phase_inputs(common, h_XTs)
     truncated_eq, truncated_imp = truncated_model.calculate_pre_dte_imp_at_pos(
@@ -309,7 +292,7 @@ def test_178a_pre_dte_adc_clipping_policy_changes_only_quantization_input(
     model = COM(reference_cfg)
     common = model.calculate_pre_dte_imp_common(victim)
     common, h_xt_dsamp = model.prepare_pre_dte_phase_inputs(
-        common, [path.pulse.ir for path in xtalks]
+        common, [path.pulse for path in xtalks]
     )
     num_cfg = replace(
         reference_cfg.num,
@@ -408,7 +391,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert alg.pre_dte_adc_clipping_convention == "rj_only_full_tail_reference"
     assert alg.final_com_vqc_convention == "sicopr_final_reconstruction"
     assert alg.ctle_pulse_realization == "bilinear_iir"
-    assert alg.rxffe_record_realization == "finite_record_circshift"
+    assert not hasattr(alg, "rxffe_record_realization")
     assert aligned.num.eq_ch_imp_len == "truncated"
     assert aligned.num.num_trunc_ui == 4096
     assert alg.pmf_projection_method == "nearest"
@@ -455,11 +438,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
         "effective": "bilinear_iir",
         "overridden_by_profile": "sicopr_reference_v1",
     }
-    assert overrides["alg.rxffe_record_realization"] == {
-        "raw": "linear_fixed_grid",
-        "effective": "finite_record_circshift",
-        "overridden_by_profile": "sicopr_reference_v1",
-    }
+    assert "alg.rxffe_record_realization" not in overrides
     assert overrides["alg.pdf_to_pmf_method"] == {
         "raw": "bin_integral",
         "effective": "pmf_sample",

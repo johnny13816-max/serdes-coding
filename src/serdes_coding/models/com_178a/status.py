@@ -25,19 +25,19 @@ class COMSharedPath(COMDataclassText):
     H_r: Any
     H_ctf: Any
     ctle_iir: Optional[Any] = None
-    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir"] = "continuous_tf"
+    ctle_pulse_realization: Literal["continuous_tf", "bilinear_iir", "bilinear_fine_grid"] = "continuous_tf"
 
     def __post_init__(self) -> None:
         if self.ctle_pulse_realization == "continuous_tf":
             if self.ctle_iir is not None:
                 raise ValueError("continuous_tf realization must not store ctle_iir.")
             return
-        if self.ctle_pulse_realization == "bilinear_iir":
+        if self.ctle_pulse_realization in {"bilinear_iir", "bilinear_fine_grid"}:
             if self.ctle_iir is None:
-                raise ValueError("bilinear_iir realization requires ctle_iir.")
+                raise ValueError(f"{self.ctle_pulse_realization} realization requires ctle_iir.")
             return
         raise ValueError(
-            "ctle_pulse_realization must be continuous_tf or bilinear_iir."
+            "ctle_pulse_realization must be continuous_tf, bilinear_iir or bilinear_fine_grid."
         )
 
     def _text_sections(self) -> tuple[TextSection, ...]:
@@ -432,40 +432,14 @@ class COMPreDTEEqChannelStatus(COMDataclassText):
 class COMPostFFEEqChannelStatus(COMDataclassText):
     """Selected sampling phase's equivalent responses after RX FFE."""
 
-    record_realization: Literal[
-        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
-    ] = "linear_fixed_grid"
-    response_cfg: Optional[LinkConfig] = None
     h_ISI: Optional[SampledResponse] = None
     h_w_J: Optional[SampledResponse] = None
     h_w: Optional[SampledResponse] = None
     h_XTs_w: Optional[list[SampledResponse]] = None
 
-    def __post_init__(self) -> None:
-        allowed = {
-            "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
-        }
-        if self.record_realization not in allowed:
-            raise ValueError(
-                "COMPostFFEEqChannelStatus.record_realization must be one of "
-                f"{sorted(allowed)}."
-            )
-        responses = [self.h_ISI, self.h_w_J, self.h_w]
-        responses.extend(self.h_XTs_w or [])
-        responses = [response for response in responses if response is not None]
-        if self.response_cfg is None and responses:
-            self.response_cfg = responses[0].cfg
-        for response in responses:
-            if self.response_cfg is not None and response.cfg is not self.response_cfg:
-                raise ValueError(
-                    "All COMPostFFEEqChannelStatus responses must share response_cfg."
-                )
-
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Post-FFE responses", (
-                self._field("record_realization", "RX FFE record realization", stored_unit="policy"),
-                self._field("response_cfg", "post-FFE response grid", stored_unit="configuration"),
                 self._field("h_ISI", "ISI response", stored_unit="V"),
                 self._field("h_w_J", "equalized jitter response", stored_unit="V/UI"),
                 self._field("h_w", "equalized victim response", stored_unit="V"),
@@ -475,7 +449,6 @@ class COMPostFFEEqChannelStatus(COMDataclassText):
 
     def _repr_fields(self) -> tuple[TextField, ...]:
         return (
-            self._field("record_realization", "RX FFE record realization", stored_unit="policy"),
             self._field("h_w", "equalized victim response", stored_unit="V"),
         )
 

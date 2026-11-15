@@ -44,7 +44,6 @@ class TestMLSDNoise178A(unittest.TestCase):
                 h_J=SampledResponse.from_ir(np.array([0.3, -0.1]), self.grid),
             ),
             post_ffe=COMPostFFEEqChannelStatus(
-                response_cfg=self.grid,
                 h_ISI=self.h_isi,
             ),
         )
@@ -135,8 +134,6 @@ class TestMLSDNoise178A(unittest.TestCase):
     def test_full_mlsd_uses_expanded_post_ffe_response_grid(self) -> None:
         expanded = LinkConfig.from_Nfft(self.fb, 1, 18)
         self.eq_ch.post_ffe = COMPostFFEEqChannelStatus(
-            record_realization="linear_expanded_grid",
-            response_cfg=expanded,
             h_ISI=SampledResponse.from_ir(np.array([0.0, 0.2, -0.1]), expanded),
         )
         result = self.model.build_mlsd_noise(
@@ -145,6 +142,17 @@ class TestMLSDNoise178A(unittest.TestCase):
         self.assertIs(result.record_cfg, expanded)
         self.assertIs(result.S_isi.cfg, expanded)
         self.assertIs(result.S_ni.cfg, expanded)
+
+    def test_full_mlsd_selects_longest_xt_grid_and_keeps_inputs(self) -> None:
+        xt_cfg = LinkConfig.from_Nfft(self.fb, 1, 32)
+        xt = SampledResponse.from_ir(np.array([0.1, -0.05]), xt_cfg)
+        self.eq_ch.pre_dte.h_XTs_dsamp = [xt]
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        self.assertIs(result.record_cfg, xt_cfg)
+        self.assertIs(self.eq_ch.post_ffe.h_ISI.cfg, self.grid)
+        self.assertIs(self.eq_ch.pre_dte.h_XTs_dsamp[0].cfg, xt_cfg)
 
     def test_truncated_mlsd_changes_only_psd_record(self) -> None:
         self.model.cfg.num = COMNumericalControlConfig(

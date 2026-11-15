@@ -41,7 +41,7 @@ calculate_pre_dte_imp_common(victim)
     -> common_imp: COMImpairmentStatus
 
 prepare_pre_dte_phase_inputs(common_imp, h_XTs)
-    -> (common_imp: COMImpairmentStatus, h_XTs_dsamp: list[np.ndarray])
+    -> (common_imp: COMImpairmentStatus, h_XTs_dsamp: list[SampledResponse])
 
 calculate_pre_dte_imp_at_pos(victim, pos, common_imp, h_XTs_dsamp)
     -> (COMEqChannelStatus, COMImpairmentStatus)
@@ -118,9 +118,9 @@ The common return values are run-local cache objects. They are not a separate `C
 
 | Input | Required data | Use |
 |---|---|---|
-| `COMConfig.link` | sampled grid and `per_ui` | response sampling |
+| response `cfg` | each response's grid and `per_ui` | response sampling |
 | `COMConfig.L` | PAM order | normalized symbol standard deviation |
-| `h_XTs` | full oversampled aggressor pulse arrays | Pre-DTE per-path phase selection and full sampled eq-channel records |
+| `h_XTs` | full oversampled aggressor `LinkSegment` objects | per-path phase selection; preserve each source cfg |
 
 The `victim` argument is accepted by the current public method but is not read inside the common calculation.
 
@@ -131,7 +131,7 @@ The `victim` argument is accepted by the current public method but is not read i
 | `victim` | `pulse.ir`, `pulse_no_txffe.ir` | victim samples, jitter response, and TX-noise sampling; all CTLE/ALG-006/ALG-007 work is already complete in Stage 1 |
 | `pos` | integer in `[0, per_ui)` | victim phase selection |
 | `common` | `sigma_X` | reused phase-independent scalar |
-| `h_XTs_dsamp` | one-dimensional sampled response for each aggressor | selected candidate equivalent-channel status |
+| `h_XTs_dsamp` | `SampledResponse` for each aggressor | selected candidate equivalent-channel status and source grid |
 | `COMConfig.imp` | `SNR_TX`, `sigma_RJ`, `A_DD`, `N_qb`, `P_qc`, `R_LM` | phase-specific impairment and optional quantization controls |
 | `COMConfig.pmf` | PMF support/tap/mass defaults | ADC-input PMF construction |
 | `COMConfig.num` | `eq_ch_imp_len/num_trunc_ui`, `pmf_keep_mass`, effective `adc_input_pmf_grid` | NUM-003 record plus independent PMF numerical controls |
@@ -147,7 +147,7 @@ calculate_pre_dte_imp_common(...)
 prepare_pre_dte_phase_inputs(...)
 └── for each aggressor
     ├── select phase from the full oversampled response
-    └── retain the full one-sample/UI eq-channel response
+    └── retain the full one-sample/UI response with its source cfg
 ```
 
 The aggressor phase selection is independent of the victim `pos` loop. It is

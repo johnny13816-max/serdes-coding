@@ -18,7 +18,7 @@ from typing import Any, Literal, Optional, Sequence
 import numpy as np
 
 try:
-    from ..utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, SampledPSD, SampledResponse
+    from ..utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
     from ..utilities.pmf import Pmf1D
     from ..search.com_search_178A import (
         COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus,
@@ -42,7 +42,7 @@ try:
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
         _build_H_ctf, _build_H_ffe,
         _build_H_ffe_next, _build_H_r, _build_H_t,
-        _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
+        _build_adaptive_group, _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
         _build_shared_path, _build_txpkg,
     )
 except ImportError:
@@ -51,7 +51,7 @@ except ImportError:
     source_root = str(Path(__file__).resolve().parents[2])
     if source_root not in sys.path:
         sys.path.insert(0, source_root)
-    from serdes_coding.utilities.link import ContinuousPSD, GridOverflowError, LinkConfig, SampledPSD, SampledResponse
+    from serdes_coding.utilities.link import ContinuousPSD, LinkConfig, LinkSegment, SampledPSD, SampledResponse
     from serdes_coding.utilities.pmf import Pmf1D
     from serdes_coding.search.com_search_178A import (
         COMSearchCandidate, COMSearchConfig, COMSearchRow, COMSearchStatus,
@@ -75,7 +75,7 @@ except ImportError:
         COMBilinearCTLE, IEEECOMFilter, IEEECOMSparam,
         _build_H_ctf, _build_H_ffe,
         _build_H_ffe_next, _build_H_r, _build_H_t,
-        _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
+        _build_adaptive_group, _build_channel_under_test, _build_path, _build_paths, _build_rxpkg,
         _build_shared_path, _build_txpkg,
     )
 
@@ -222,41 +222,12 @@ def _apply_fir_finite_record(response: np.ndarray, taps: np.ndarray) -> np.ndarr
 def _apply_rxffe_response(
     response: SampledResponse,
     taps: np.ndarray,
-    output_cfg: LinkConfig,
-    realization: Literal[
-        "linear_fixed_grid", "linear_expanded_grid", "finite_record_circshift"
-    ],
-    context: str,
 ) -> SampledResponse:
-    """Apply the selected post-FFE record convention on one resolved grid."""
+    """Apply circular RX FFE on the input response's own grid."""
     taps = np.asarray(taps, dtype=float)
-    if realization == "finite_record_circshift":
-        if output_cfg is not response.cfg:
-            raise ValueError("finite_record_circshift must preserve the input response grid.")
-        return SampledResponse.from_ir(
-            _apply_fir_finite_record(response.ir, taps),
-            output_cfg,
-        )
-    if realization not in {"linear_fixed_grid", "linear_expanded_grid"}:
-        raise ValueError(
-            "RxFFE record realization must be linear_fixed_grid, "
-            "linear_expanded_grid, or finite_record_circshift."
-        )
     if response.cfg is None:
         raise ValueError("RxFFE response must be bound to a LinkConfig.")
-    tap_response = SampledResponse.from_ir(taps, response.cfg)
-    try:
-        if realization == "linear_fixed_grid":
-            if output_cfg is not response.cfg:
-                raise ValueError("linear_fixed_grid must preserve the input response grid.")
-            return response.cascade_ir(tap_response, force_grid=True)
-        return response.cascade_ir(
-            tap_response,
-            force_grid=False,
-            output_cfg=output_cfg,
-        )
-    except GridOverflowError as error:
-        raise error.with_context(context) from error
+    return SampledResponse.from_ir(_apply_fir_finite_record(response.ir, taps), response.cfg)
 
 
 def _calculate_h_J(
@@ -1515,24 +1486,6 @@ class COM:
         self.cfg = cfg
         self.status: Optional[COMStatus | COMSearchStatus] = None
 
-    def _resolve_post_ffe_response_cfg(self) -> LinkConfig:
-        """Resolve the one time-domain response grid owned by the Post-FFE model."""
-        realization = self.cfg.alg.rxffe_record_realization
-        if realization in {"linear_fixed_grid", "finite_record_circshift"}:
-            return self.cfg.link
-        if realization != "linear_expanded_grid":
-            raise ValueError(
-                f"Unsupported RX FFE record realization: {realization!r}."
-            )
-        sampled_nfft = self.cfg.link.sampled_nfft + int(self.cfg.dte.N_max) - 1
-        if sampled_nfft % 2 != 0:
-            sampled_nfft += 1
-        return LinkConfig.from_Nfft(
-            fb=self.cfg.link.fb,
-            per_ui=self.cfg.link.per_ui,
-            Nfft=sampled_nfft * self.cfg.link.per_ui,
-        )
-
     @staticmethod
     def _validate_victim_time_alignment(victim: COMPath) -> None:
         """Guard the victim H21 and pulse against IFFT precursor wrap."""
@@ -1601,8 +1554,7 @@ class COM:
         self._assign_paths(paths)
         victim = paths[0]
         xtalk_paths = paths[1:]
-        self._validate_victim_time_alignment(victim)
-        h_XTs = [path.pulse.ir for path in xtalk_paths]
+        h_XTs = [path.pulse for path in xtalk_paths]
         report(f"build_all_paths: done ({len(paths)} paths)")
 
         # Stage 2 — Pre-DTE model: calculate phase-independent receiver impairment cache.
@@ -1896,8 +1848,33 @@ class COM:
         3. build every path-specific model
         """
         channels = _build_channel_under_test(self.cfg.src, self.cfg.channel)
-        shared = _build_shared_path(self.cfg, channels[0].freqs)
-        return _build_paths(self.cfg, shared, channels)
+        if self.cfg.num.path_grid_mode == "fixed":
+            shared = _build_shared_path(self.cfg, channels[0].freqs)
+            paths = _build_paths(self.cfg, shared, channels)
+            self._validate_victim_time_alignment(paths[0])
+            return paths
+        if self.cfg.num.path_grid_mode == "adaptive":
+            fine_cfg = LinkConfig(fb=self.cfg.link.fb, per_ui=self.cfg.link.per_ui,
+                                  target_df=self.cfg.num.fine_grid_df)
+            report_cfg = LinkConfig(fb=self.cfg.link.fb, per_ui=self.cfg.link.per_ui,
+                                    target_df=1e8)
+            report_shared = _build_shared_path(self.cfg, channels[0].freqs, link_cfg=report_cfg)
+            victim, _ = _build_adaptive_group(
+                self.cfg, [("victim", self.cfg.txpkg_victim, channels[0])],
+                fine_cfg, report_cfg, report_shared, victim_group=True,
+            )
+            next_count = len(self.cfg.src.channel.next)
+            xt_specs = (
+                [("next", self.cfg.txpkg_next, ch) for ch in channels[1:1 + next_count]]
+                + [("fext", self.cfg.txpkg_fext, ch) for ch in channels[1 + next_count:]]
+            )
+            if not xt_specs:
+                return victim
+            xtalk, _ = _build_adaptive_group(
+                self.cfg, xt_specs, fine_cfg, report_cfg, report_shared, victim_group=False,
+            )
+            return victim + xtalk
+        raise ValueError(f"unsupported path grid mode: {self.cfg.num.path_grid_mode!r}")
 
     def calculate_pre_dte_imp_common(
         self,
@@ -1930,8 +1907,8 @@ class COM:
     def prepare_pre_dte_phase_inputs(
         self,
         common: COMImpairmentStatus,
-        h_XTs: list[np.ndarray],
-    ) -> tuple[COMImpairmentStatus, list[np.ndarray]]:
+        h_XTs: list[LinkSegment],
+    ) -> tuple[COMImpairmentStatus, list[SampledResponse]]:
         """Select each full XT response phase without constructing a PSD."""
         common_stage = common.pre_dte
         common_psd = None if common_stage is None else common_stage.psd
@@ -1939,13 +1916,13 @@ class COM:
             raise ValueError(
                 "common must be the complete output of calculate_pre_dte_imp_common()."
             )
-        if any(np.asarray(h_xt).ndim != 1 for h_xt in h_XTs):
-            raise ValueError("Each crosstalk pulse response must be one-dimensional.")
+        if any(not isinstance(h_xt, LinkSegment) for h_xt in h_XTs):
+            raise TypeError("Each crosstalk pulse must be a LinkSegment.")
 
-        h_XTs_dsamp: list[np.ndarray] = []
+        h_XTs_dsamp: list[SampledResponse] = []
         for h_XT in h_XTs:
-            _, h_XT_dsamp = _select_xtalk_path_phase(h_XT, self.cfg.link.per_ui)
-            h_XTs_dsamp.append(h_XT_dsamp)
+            _, h_XT_dsamp = _select_xtalk_path_phase(h_XT.ir, h_XT.cfg.per_ui)
+            h_XTs_dsamp.append(SampledResponse.from_ir(h_XT_dsamp, h_XT.cfg))
         return common, h_XTs_dsamp
 
     def _build_pre_dte_psd(
@@ -1965,7 +1942,8 @@ class COM:
         if eq_ch.h_dsamp is None or eq_ch.h_tn is None or eq_ch.h_J is None:
             raise ValueError("pre-DTE PSD construction requires complete eq_ch responses.")
         if self.cfg.num.eq_ch_imp_len == "full":
-            record_cfg = self.cfg.link
+            responses = [eq_ch.h_tn, eq_ch.h_J] + list(eq_ch.h_XTs_dsamp or [])
+            record_cfg = max(responses, key=lambda response: response.cfg.sampled_nfft).cfg
         else:
             record_cfg = LinkConfig.from_Nfft(
                 fb=self.cfg.link.fb,
@@ -2078,7 +2056,7 @@ class COM:
         victim: COMPath,
         pos: int,
         common: COMImpairmentStatus,
-        h_XTs_dsamp: list[np.ndarray],
+        h_XTs_dsamp: list[SampledResponse],
     ) -> tuple[COMEqChannelStatus, COMImpairmentStatus]:
         """
         Calculate complete pre-DTE impairment status for one phase candidate.
@@ -2103,7 +2081,7 @@ class COM:
         and the derived oversampled main-cursor index ``ts`` are stored only
         by the subsequent COMDTEStatus.
         """
-        link_cfg = self.cfg.link
+        link_cfg = victim.pulse.cfg
         imp_cfg = self.cfg.imp
         pos = int(pos)
         if pos < 0 or pos >= link_cfg.per_ui:
@@ -2118,11 +2096,11 @@ class COM:
                 "prepare_pre_dte_phase_inputs()."
             )
         if not isinstance(h_XTs_dsamp, list) or any(
-            np.asarray(h_xt_dsamp).ndim != 1 for h_xt_dsamp in h_XTs_dsamp
+            not isinstance(h_xt_dsamp, SampledResponse) for h_xt_dsamp in h_XTs_dsamp
         ):
             raise ValueError(
-                "h_XTs_dsamp must be the list of one-dimensional sampled "
-                "crosstalk responses returned by prepare_pre_dte_phase_inputs()."
+                "h_XTs_dsamp must be the sampled crosstalk responses "
+                "returned by prepare_pre_dte_phase_inputs()."
             )
         h_dsamp = victim.pulse.ir[pos::link_cfg.per_ui]
         if len(h_dsamp) == 0:
@@ -2149,7 +2127,7 @@ class COM:
         eq_ch = COMEqChannelStatus(
             phase_index=pos,
             pre_dte=COMPreDTEEqChannelStatus(
-                h_XTs_dsamp=[SampledResponse.from_ir(h_xt, link_cfg) for h_xt in h_XTs_dsamp],
+                h_XTs_dsamp=h_XTs_dsamp,
                 h_dsamp=SampledResponse.from_ir(h_dsamp, link_cfg),
                 h_tn=SampledResponse.from_ir(h_tn, link_cfg),
                 h_J=SampledResponse.from_ir(h_J, link_cfg),
@@ -2275,14 +2253,9 @@ class COM:
         if eq_ch_imp_record_cfg is None:
             raise ValueError("Post-FFE model requires the resolved pre-DTE PSD record grid.")
         w_lim_pre = SampledResponse.from_ir(w_lim_ndarray, eq_ch_imp_record_cfg)
-        post_ffe_response_cfg = self._resolve_post_ffe_response_cfg()
-
         h_w = _apply_rxffe_response(
             eq_ch.pre_dte.h_dsamp,
             w_lim_ndarray,
-            post_ffe_response_cfg,
-            self.cfg.alg.rxffe_record_realization,
-            "post_ffe victim",
         )
         H_rxffe = w_lim_pre
 
@@ -2291,9 +2264,6 @@ class COM:
             h_XT_w = _apply_rxffe_response(
                 h_XT_dsamp,
                 w_lim_ndarray,
-                post_ffe_response_cfg,
-                self.cfg.alg.rxffe_record_realization,
-                f"post_ffe XT{path_index}",
             )
             h_XTs_w.append(h_XT_w)
 
@@ -2307,7 +2277,7 @@ class COM:
             )
         h_ISI_ndarray[d] = 0.0
         h_ISI_ndarray[d + 1:dfe_stop] -= dte_status.b_lim
-        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, post_ffe_response_cfg)
+        h_ISI = SampledResponse.from_ir(h_ISI_ndarray, h_w.cfg)
         sigma_ISI = float(imp_pre.sigma_X * np.sqrt(np.sum(h_ISI.ir**2)))
 
         # DDJ uses the original selected-phase construction: take the two
@@ -2315,15 +2285,12 @@ class COM:
         h_J_pre_ndarray = _calculate_h_J(
             h,
             dte_status.pos,
-            self.cfg.link,
+            eq_ch.pre_dte.h_dsamp.cfg,
         )
-        h_J_pre = SampledResponse.from_ir(h_J_pre_ndarray, self.cfg.link)
+        h_J_pre = SampledResponse.from_ir(h_J_pre_ndarray, eq_ch.pre_dte.h_dsamp.cfg)
         h_w_J = _apply_rxffe_response(
             h_J_pre,
             w_lim_ndarray,
-            post_ffe_response_cfg,
-            self.cfg.alg.rxffe_record_realization,
-            "post_ffe DDJ",
         )
 
         # Gaussian DFE-COM branch. Reuse the Pre-DTE PSD record; Post-FFE does
@@ -2381,8 +2348,6 @@ class COM:
 
         return (
             COMPostFFEEqChannelStatus(
-                record_realization=self.cfg.alg.rxffe_record_realization,
-                response_cfg=post_ffe_response_cfg,
                 h_w=h_w,
                 h_XTs_w=h_XTs_w,
                 h_ISI=h_ISI,
@@ -2440,9 +2405,11 @@ class COM:
             raise ValueError("build_mlsd_noise requires finite non-negative sigma_X.")
 
         if self.cfg.num.eq_ch_imp_len == "full":
-            record_cfg = eq_ch.post_ffe.response_cfg
-            if record_cfg is None:
-                raise ValueError("full MLSD PSD construction requires post-FFE response_cfg.")
+            responses = [eq_ch.pre_dte.h_tn, eq_ch.pre_dte.h_J,
+                         eq_ch.post_ffe.h_ISI] + list(eq_ch.pre_dte.h_XTs_dsamp or [])
+            if any(response is None or response.cfg is None for response in responses):
+                raise ValueError("full MLSD PSD construction requires response grids")
+            record_cfg = max(responses, key=lambda response: response.cfg.sampled_nfft).cfg
         else:
             record_cfg = LinkConfig.from_Nfft(
                 fb=self.cfg.link.fb,

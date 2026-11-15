@@ -133,8 +133,7 @@ COM._run_once()
     │   └── return selected pre-DTE/DTE status
     ├── dfe
     │   ├── Stage 5 — Post-FFE model: calculate_post_ffe_imp(...)
-    │   │   ├── _resolve_post_ffe_response_cfg() for ALG-011
-    │   │   ├── _apply_rxffe_response(...) once per victim, XT, and DDJ
+    │   │   ├── _apply_rxffe_response(...) on each victim, XT, and DDJ input grid
     │   │   ├── _resolve_adc_input_pmf_config() for NUM-004 selected-phase material
     │   │   ├── _build_adc_input_pmf_exact() with NUM-006 keep_mass
     │   │   │   └── Pmf1D.fir_filter() [same NUM-006 L5 owner]

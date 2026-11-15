@@ -202,9 +202,12 @@ listed in [the migration contract](../../planning/comconfig_domain_migration.md#
 | `pre_dte_adc_clipping_convention` | `COMConfig.alg` | `full_jitter_half_tail` |
 | `final_com_vqc_convention` | `COMConfig.alg` | `selected_phase_adc_input` |
 | `ctle_pulse_realization` | `COMConfig.alg`（workbook 不單獨曝露） | `continuous_tf` |
-| `rxffe_record_realization` | `COMConfig.alg`（workbook `fixed_config` 可明示；profile 可覆蓋） | `linear_fixed_grid` |
 | `eq_ch_imp_len` | `COMConfig.num`（workbook 獨立曝露） | `full` |
 | `num_trunc_ui` | `COMConfig.num`（僅 `truncated` 適用） | blank / `None` |
+| `path_grid_mode` | `COMConfig.num`（runtime 實作中；adaptive 驗證中） | `fixed` |
+| `fine_grid_df` | `COMConfig.num`（adaptive fine-grid target df，Hz） | `1e6` |
+| `relative_threshold` | `COMConfig.num`（adaptive 相對 amplitude 門檻） | `1e-3` |
+| `absolute_threshold` | `COMConfig.num`（adaptive 絕對 amplitude 門檻） | `None` |
 | `pmf_projection_method` | `COMConfig.alg`（workbook 獨立曝露） | `linear` |
 | `pdf_to_pmf_method` | `COMConfig.alg`（由 profile 或 Python 設定） | `bin_integral` |
 
@@ -236,7 +239,7 @@ template. Pre-DTE ADC-input clipping uses the fixed exact-PMF flow owned by
 `custom` 讀取 workbook 明示的 advanced/legacy method；`sicopr_reference_v1` 由
 `com_excel_io_178A` 在建構 runtime config 前展開為 SiCoPR／MATLAB 4.17
 具名方法：`mag_phase_trend_to_dc`、`zero_padding`、`bilinear_iir`、
-`finite_record_circshift`、pre-DTE/final ADC reference 分支，
+固定 circular RX FFE、pre-DTE/final ADC reference 分支，
 `truncated` eq-channel impairment record（本案 4096 UI）、
 以及 `COMAlgorithmPolicyConfig` 中的離散 tap 最近格點、原子干擾卷積、逐路徑
 XT、Gaussian grid sampling（支撐範圍由 `NormalDist().inv_cdf(1-DER_0)`
@@ -256,14 +259,15 @@ Reference profile 以 preset 覆蓋；adapter 的 export-only
 `ctle_pulse_realization="bilinear_iir"` 是完整且不可拆分的 pulse-realization
 方法：measured composite pre-CTLE TF、reference frequency grid、raw IFFT、
 停用 causality correction、固定 `1e-3` peak 截尾、兩級 bilinear IIR 與一 UI
-unit pulse。這些步驟沒有額外 config 欄位。`rxffe_record_realization` 是另一個
-Stage 5 post-FFE record policy：`linear_fixed_grid` 保留 run grid 與 overflow guard；
-`linear_expanded_grid` 建立足以容納完整 linear convolution 的共同 response grid；
-`finite_record_circshift` 在原有限 record 做 shift-sum，供 reference preset 使用。
-Stage 5 為 ALG-011 唯一 branch owner，Stage 6 DFE 與 Stage 7 MLSD 只消費 status
-中已解析的 response。`num.eq_ch_imp_len`（NUM-003）由 Stage 2 pre-DTE 與
-Stage 7 pre-MLSD 的兩個 PSD-sum owners 各自解析 full／truncated record；Stage 5
-reporting PSD 只沿用 pre-DTE record，不改變 ALG-011 response realization。
+unit pulse。這些步驟沒有額外 config 欄位。Stage 5 RX FFE 固定在每條輸入
+response 的 grid 上做 circular shift-sum，不再有 realization selector。
+新增 `bilinear_fine_grid` 使用 full-grid IFFT，不做 IIR 前 amplitude 截尾；
+先對 pre-CTLE IR 選擇時間 shift，victim actual/preset 共用該 shift，再
+各自以零 state 等長執行 IIR 和 unit pulse。此方法仍在驗證中，reference
+profile 維持 `bilinear_iir`。
+`num.eq_ch_imp_len`（NUM-003）由 Stage 2 pre-DTE 與 Stage 7 pre-MLSD 的
+PSD-sum owners 各自解析 full／truncated record；Stage 5 reporting PSD
+沿用 pre-DTE record，不改變 response grid。
 
 `out_of_measured` 控制 terminated scalar `H_21` 從量測 S-parameter grid
 轉到 analysis grid 時的頻帶外處理。`cosine_decay` 保留原本的 cosine
