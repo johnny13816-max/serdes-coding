@@ -5,16 +5,32 @@ from typing import Literal, Optional
 from math import erf, sqrt
 
 
-def _convolve_probability_mass(left: np.ndarray, right: np.ndarray) -> np.ndarray:
-    """Convolve two normalized PMF arrays through the common FFT backend."""
+def _convolve_probability_mass(left: np.ndarray, right: np.ndarray, *, method: Literal["fft", "linear"] = "fft") -> np.ndarray:
+    """Convolve two normalized PMF arrays using the selected backend."""
     left = np.asarray(left, dtype=float)
     right = np.asarray(right, dtype=float)
     if left.ndim != 1 or right.ndim != 1:
         raise ValueError("PMF convolution inputs must be one-dimensional.")
 
-    from scipy.signal import fftconvolve
-
-    result = np.asarray(fftconvolve(left, right, mode="full"), dtype=float)
+    if method == "fft":
+        from scipy.signal import fftconvolve
+        result = np.asarray(fftconvolve(left, right, mode="full"), dtype=float)
+    elif method == "linear":
+        result = np.zeros(left.size + right.size - 1, dtype=float)
+        nz_left = np.flatnonzero(left)
+        nz_right = np.flatnonzero(right)
+        if nz_left.size and nz_right.size:
+            if nz_right.size * 8 <= right.size:
+                for index in nz_right:
+                    result[index:index + left.size] += right[index] * left
+            else:
+                left_start, left_end = int(nz_left[0]), int(nz_left[-1]) + 1
+                right_start, right_end = int(nz_right[0]), int(nz_right[-1]) + 1
+                start = left_start + right_start
+                values = np.convolve(left[left_start:left_end], right[right_start:right_end])
+                result[start:start + values.size] = values
+    else:
+        raise ValueError("PMF convolution method must be 'fft' or 'linear'.")
     if not np.all(np.isfinite(result)):
         raise FloatingPointError("FFT PMF convolution produced non-finite probability mass.")
 
@@ -949,6 +965,7 @@ class Pmf1D:
         projection_method: Literal["linear", "nearest"] = "linear",
         initial_bin_range: Optional[tuple[int, int]] = None,
         scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
+        convolution_method: Literal["fft", "linear"] = "fft",
     ) -> 'Pmf1D':
         """
         Return the FIR-filtered PMF.
@@ -987,6 +1004,8 @@ class Pmf1D:
             Concrete tap scaling operation. The default preserves the usual FIR behavior.
         """
         keep_mass = float(keep_mass)
+        if convolution_method not in {"fft", "linear"}:
+            raise ValueError("PMF convolution method must be 'fft' or 'linear'.")
         if not np.isfinite(keep_mass) or not 0.0 < keep_mass <= 1.0:
             raise ValueError("keep_mass must be finite and in (0, 1].")
 
@@ -1031,7 +1050,7 @@ class Pmf1D:
                     keep_dx=True, dx_ref=dx_ref, method=scaling_method,
                     projection_method=projection_method,
                 )
-                out_pmf = _convolve_probability_mass(out_pmf, term.pmf)
+                out_pmf = _convolve_probability_mass(out_pmf, term.pmf, method=convolution_method)
                 out_st_idx += term.st_idx
 
                 if keep_mass < 1.0:
@@ -1055,7 +1074,7 @@ class Pmf1D:
 
         return filtered
 
-    def combine(self, other: 'Pmf1D', *, name: Optional[str]=None) -> 'Pmf1D':
+    def combine(self, other: 'Pmf1D', *, name: Optional[str]=None, convolution_method: Literal["fft", "linear"] = "fft") -> 'Pmf1D':
         """
         Return the convolution with another independent PMF.
 
@@ -1084,7 +1103,7 @@ class Pmf1D:
         return Pmf1D(
             dx=self.dx,
             st_idx=self.st_idx + other.st_idx,
-            pmf=self._validate_pmf(_convolve_probability_mass(self.pmf, other.pmf)),
+            pmf=self._validate_pmf(_convolve_probability_mass(self.pmf, other.pmf, method=convolution_method)),
             unit=self.unit or other.unit,
             name=self.name if name is None else name,
         )

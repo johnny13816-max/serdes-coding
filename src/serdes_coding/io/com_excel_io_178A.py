@@ -379,6 +379,9 @@ def _resolve_project_profile_178A(
         for field_name, value in vars(methods).items()
         if value != getattr(general_methods, field_name)
     }
+    overrides["num.pmf_convolution_method"] = override_record(
+        numerical_control.pmf_convolution_method, "linear"
+    )
 
     reference_adc_grid = replace(
         numerical_control.adc_input_pmf_grid,
@@ -439,6 +442,7 @@ def _resolve_project_profile_178A(
             effective_numerical,
             eq_ch_imp_len="truncated",
             num_trunc_ui=4096,
+            pmf_convolution_method="linear",
             adc_input_pmf_grid=reference_adc_grid,
             final_pmf_grid=reference_final_grid,
         ),

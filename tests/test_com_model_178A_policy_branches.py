@@ -89,6 +89,16 @@ def test_178a_runtime_domains_are_canonical_and_legacy_names_are_absent(referenc
     assert not hasattr(reference_cfg, "execution")
 
 
+def test_pmf_convolution_profile_and_resolvers(reference_cfg):
+    assert COMNumericalControlConfig().pmf_convolution_method == "fft"
+    assert reference_cfg.num.pmf_convolution_method == "linear"
+    As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
+    assert _resolve_adc_input_pmf_config(reference_cfg.pmf, As, reference_cfg.num).convolution_method == "linear"
+    assert _resolve_final_com_pmf_config(reference_cfg.pmf, As, reference_cfg.num).convolution_method == "linear"
+    with pytest.raises(ValueError, match="pmf_convolution_method"):
+        COMNumericalControlConfig(pmf_convolution_method="invalid")
+
+
 @pytest.fixture(scope="module")
 def reference_cfg():
     root = Path(__file__).resolve().parents[1]

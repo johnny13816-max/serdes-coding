@@ -100,6 +100,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `NUM-003` | active — approved branch | Stages 2／7 Pre-DTE 與 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num.num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證並完成遠端整合 |
 | `ALG-008` | active — approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-006` | active — approved branch | Stages 2／5 ADC-input FIR-PMF convergence; direct consumers `_build_psd_adc_qn()` and `_build_adc_input_pmf_exact()` | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
+| `NUM-007` | active — implemented; integration pending | Stages 2／5／6／7 PMF convolution | `num.pmf_convolution_method`：`fft`／`linear`；project 預設 `fft` | `linear` | **L5 owner set** `Pmf1D.fir_filter()`／`Pmf1D.combine()` | focused 78 passed；FFT golden passed；linear fixed case 完成；未宣稱全面 reference 對齊 |
 | `NUM-004` | active — approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `ALG-009` | retired — approved branch | Stage 2 Pre-DTE PMF method | none — retired; exact PMF is fixed | none — fixed exact-PMF contract | — (retired; former execution point `_build_psd_adc_qn()`) | Retired: Gaussian approximation altered `V_qc`, MSE and selected phase for only 1.5–2% evaluation savings; exact PMF is fixed |
 | `SRCH-001` | active — approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
@@ -136,6 +137,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `NUM-004` | Pre-DTE 與 selected-phase Post-FFE ADC-input PMF 的 voltage spacing；override／relative／capped-relative resolution | NUM-005 final PMF grid、NUM-006 retained mass、PMF projection／PDF discretization、NUM-003 PSD record grid |
 | `NUM-005` | DFE component／combined PMFs 與 MLSD added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 DFE PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、MLSD PSD record grid |
 | `NUM-006` | 每個 tap convolution 後對 intermediate PMF 做對稱尾端截斷並重新正規化；`1.0` 關閉截斷。Stage 2／5 是 direct consumers | NUM-004／005 grid spacing、tap threshold、ALG-002 projection、ALG-003 PDF discretization、ALG-008 clipping、NUM-003 PSD record；Stage 6 final PMF 固定 `keep_mass=1.0`，不是此 branch consumer |
+| `NUM-007` | PMF FIR 及 PMF 加總使用 FFT 或直接線性卷積；Stages 2／5／6／7 | PMF grid、tap threshold、keep mass、projection 與 93A default 獨立 |
 | `ALG-010` | floating tap/group selection strategy；owner 依 resolved selector dispatch，並控制該 placement 的完整 solve／limit／MSE／`COMDTEStatus` lifecycle | fixed-tap limiter definition、MMSE/KKT equations、coefficient limits、phase search、equal-score tie-break implementation |
 | `ALG-012` | final-COM clipping voltage convention | final-quantization main-tap accumulation issue |
 | `ALG-013` | final ADC quantization PMF projection/support | pre-DTE ADC PMF；reference option 對 ALG-012 有相依但不合併 owner |
@@ -241,6 +243,8 @@ COM model
    │     └─ Pmf1D._project_to_grid()                         [private kernel; non-owner]
    ├─ Pmf1D.fir_filter(..., keep_mass)                       [NUM-006 L5 owner]
    │  └─ _truncate_keep_mass()                               [private executor; non-owner]
+   ├─ Pmf1D.fir_filter()/combine()                           [NUM-007 L5 owner set]
+   │  └─ _convolve_probability_mass()                        [private executor; non-owner]
    ├─ `_calculate_V_qc()`／`_build_psd_adc_qn()`／`_build_adc_input_pmf_exact()`／`_build_pmf_G()`／`_reconstruct_final_vqc_sicopr()`／`evaluate_delta_com_an()`／`solve_g_an()`／`calculate_der_mlsd()` [ALG-003 consumers]
    │  └─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
    └─ MLSD scalar-PMF scaling

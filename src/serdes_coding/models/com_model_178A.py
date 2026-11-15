@@ -300,7 +300,7 @@ def _calculate_V_qc(
         pdf_to_pmf_method=pdf_to_pmf_method,
     )
 
-    pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal")
+    pmf_sn = pmf_s.combine(pmf_ga, name="Noisy signal", convolution_method=pmf_cfg.convolution_method)
     # Annex 178A.1.7.6 uses P_qc/2; the reference-only pre-DTE branch
     # supplies P_qc explicitly from the _build_pre_dte_psd() owner.
     V_qc = -(pmf_sn.quantile(P_qc / 2 if cdf_tail is None else cdf_tail))
@@ -710,6 +710,7 @@ def _resolve_adc_input_pmf_config(
         resolved,
         dy=num_cfg.adc_input_pmf_grid.resolve_dy(As),
         keep_mass=num_cfg.pmf_keep_mass,
+        convolution_method=num_cfg.pmf_convolution_method,
     )
 
 
@@ -724,6 +725,7 @@ def _resolve_final_com_pmf_config(
         resolved,
         dy=num_cfg.final_pmf_grid.resolve_dy(As),
         keep_mass=1.0,
+        convolution_method=num_cfg.pmf_convolution_method,
     )
 
 
@@ -759,6 +761,7 @@ def _build_pmf_interference_178A(
         name=name,
         output_unit="volt",
         projection_method=projection_method,
+        convolution_method=pmf_cfg.convolution_method,
     )
 
 
@@ -788,6 +791,7 @@ def _build_pmf_w_XT_all(
                 name="XT",
             ),
             name="XT_all",
+            convolution_method=pmf_cfg.convolution_method,
         )
     return result
 
@@ -838,9 +842,12 @@ def _build_adc_input_pmf_exact(
         name="Gaussian Noise",
         pdf_to_pmf_method=pdf_to_pmf_method,
     )
-    pmf_n = pmf_XT.combine(pmf_DD).combine(pmf_ga, name="ADC-input noise")
+    method = pmf_cfg.convolution_method
+    pmf_n = pmf_XT.combine(pmf_DD, convolution_method=method).combine(
+        pmf_ga, name="ADC-input noise", convolution_method=method,
+    )
 
-    pmf_sn = pmf_s.combine(pmf_n, name="Noisy signal")
+    pmf_sn = pmf_s.combine(pmf_n, name="Noisy signal", convolution_method=pmf_cfg.convolution_method)
     V_qc = -(pmf_sn.quantile(P_qc/2))
 
     delta = 2.0 * V_qc / (2**N_qb - 1)
@@ -947,8 +954,13 @@ def _reconstruct_final_vqc_sicopr(
         name="ADC reference Gaussian",
         pdf_to_pmf_method=pdf_to_pmf_method,
     )
-    p_noise = p_isi.combine(p_xt).combine(p_dd).combine(p_ga)
-    p_sn = p_s.combine(p_noise)
+    method = clip_cfg.convolution_method
+    p_noise = (
+        p_isi.combine(p_xt, convolution_method=method)
+        .combine(p_dd, convolution_method=method)
+        .combine(p_ga, convolution_method=method)
+    )
+    p_sn = p_s.combine(p_noise, convolution_method=clip_cfg.convolution_method)
     return -float(p_sn.quantile(P_qc)), clip_cfg, p_noise
 
 
@@ -1047,10 +1059,10 @@ def evaluate_delta_com_an(
     )
     p_an = (
         pmf_dfe.p_ISI
-        .combine(pmf_dfe.p_XT)
-        .combine(pmf_dfe.p_DD)
-        .combine(pmf_dfe.p_qn)
-        .combine(p_G_an, name="MLSD added-noise total")
+        .combine(pmf_dfe.p_XT, convolution_method=pmf_cfg.convolution_method)
+        .combine(pmf_dfe.p_DD, convolution_method=pmf_cfg.convolution_method)
+        .combine(pmf_dfe.p_qn, convolution_method=pmf_cfg.convolution_method)
+        .combine(p_G_an, name="MLSD added-noise total", convolution_method=pmf_cfg.convolution_method)
     )
 
     a_ref = abs(float(pmf_dfe.p_combined.quantile(der_0)))
@@ -1315,6 +1327,7 @@ def calculate_der_mlsd(
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
     pmf_projection_method: Literal["linear", "nearest"] = "linear",
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum",
+    convolution_method: Literal["fft", "linear"] = "fft",
 ) -> tuple[float, np.ndarray]:
     """Evaluate the truncated Annex 178A MLSD detector error ratio.
 
@@ -1400,12 +1413,12 @@ def calculate_der_mlsd(
         if j == 1:
             # Eq. (178A-52): convolve p_an with the scaled first term.
             # scale_x includes the PDF's 1 / |b_1| normalization.
-            p_j = p_an.combine(p_1_term, name="MLSD p_1")
+            p_j = p_an.combine(p_1_term, name="MLSD p_1", convolution_method=convolution_method)
         else:
             assert p_j is not None and p_later_term is not None
             # Eq. (178A-53): recur with the scaled later term; scale_x
             # includes the PDF's 1 / |1 - b_1| normalization.
-            p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}")
+            p_j = p_j.combine(p_later_term, name=f"MLSD p_{j}", convolution_method=convolution_method)
 
         # Eq. (178A-49), including its one-based i=j+1 final element.
         u_j = _build_mlsd_sequence_vector(j, b_lim_1)
@@ -1449,7 +1462,7 @@ def calculate_der_mlsd(
                 )
             elif j < trunc_len:
                 assert p_later_term is not None
-                p_trunc = p_trunc.combine(p_later_term, name=f"MLSD p_trunc_{j}")
+                p_trunc = p_trunc.combine(p_later_term, name=f"MLSD p_trunc_{j}", convolution_method=convolution_method)
 
     if not np.all(np.isfinite(der_by_j)) or np.any(der_by_j < 0.0):
         raise COMError("MLSD DER contributions must be finite and non-negative.")
@@ -2636,6 +2649,7 @@ class COM:
                 max_taps = None,
                 name = "ADC_QN",
                 projection_method=self.cfg.alg.pmf_projection_method,
+                convolution_method=pmf_cfg_for_com.convolution_method,
                 initial_bin_range=(
                     (p_noise_adc.st_idx, p_noise_adc.st_idx + len(p_noise_adc.pmf) - 1)
                     if self.cfg.alg.final_adc_pmf_projection == "reference_support"
@@ -2718,7 +2732,13 @@ class COM:
         )
 
         # combined pmf, A_ni
-        p_combined = p_ISI.combine(p_w_XT_all).combine(p_w_DD).combine(p_qn).combine(p_G)
+        method = pmf_cfg_for_com.convolution_method
+        p_combined = (
+            p_ISI.combine(p_w_XT_all, convolution_method=method)
+            .combine(p_w_DD, convolution_method=method)
+            .combine(p_qn, convolution_method=method)
+            .combine(p_G, convolution_method=method)
+        )
         y0 = p_combined.quantile(self.cfg.DER_0)
         A_ni = abs(y0)
 
@@ -2822,6 +2842,7 @@ class COM:
             pmf_scaling_method=self.cfg.alg.pmf_scaling_method,
             pmf_projection_method=self.cfg.alg.pmf_projection_method,
             sequence_termination=self.cfg.alg.sequence_termination,
+            convolution_method=self.cfg.num.pmf_convolution_method,
         )
         if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:
             raise COMError(

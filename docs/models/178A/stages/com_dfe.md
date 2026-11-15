@@ -133,6 +133,11 @@ below; this reference-only behavior is not the complete FIR model. Both V_qc
 conventions share the selected phase, FFE/DFE, and non-quantization final PMFs.
 
 ALG-013 的 concrete owner 是 `COM._build_final_adc_quantization()`。
+
+PMF 卷積方法由 NUM-007 獨立控制：`fft` 是 project 預設，reference profile
+使用 `linear`。`Pmf1D.fir_filter()` 和 `Pmf1D.combine()` 為 operation owners；
+此選擇不改變 ALG-013 的 support、tap threshold 或 grid 定義。完整 reference
+對照範圍與限制記錄於 `docs/validation/178A_pmf_convolution_evidence.md`。
 `annex_d3` 保留原本的 tap threshold 與 mass-deposit scaling；
 `reference_support` 使用 ADC-input noise PMF 的 amplitude grid 和 ordinate
 interpolation，並要求 `pdf_to_pmf_method=pmf_sample`。此 reference 數值
@@ -163,8 +168,8 @@ counterfactual，以相同 noise、FFE、`delta` 隔離兩個數值選擇：
 兩側 PMF 都有 33567 bins，逐格最大差 `8.413408858487514e-17`、L1 差
 `2.5034663500457392e-14`。這是 fixed-input 的 PMF 對照，不是完整 SiCoPR
 COM run；兩側 clipping 先固定為相同值，ALG-012 的差異未包含。
-SiCoPR 1.2.1 使用 direct convolution，而本專案使用 FFT convolution；
-低機率尾部的數值差異尚未獨立解決，不能由逐格最大絕對誤差推論尾端相對精度。
+SiCoPR 1.2.1 使用 direct convolution；專案可由 NUM-007 選擇 FFT 或 linear。
+有限資料的尾端對照記錄於 `docs/validation/178A_pmf_convolution_evidence.md`。
 
 The pre-DTE quantization PSD exists to support the MMSE solve. It is not substituted for this final quantization PMF.
 

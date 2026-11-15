@@ -370,6 +370,11 @@ ADC-input FIR-PMF：每個 tap convolution 後保留對稱的目標機率質量�
 `1.0`。L5 `Pmf1D.fir_filter()` 是 NUM-006 owner；profile adapter 與
 `_resolve_adc_input_pmf_config()` 只解析／注入數值。
 
+`num.pmf_convolution_method` 選擇 PMF 卷積的 `fft` 或 `linear`，project 預設為
+`fft`，`sicopr_reference_v1` 使用 `linear`。實際影響 Stages 2／5／6／7；
+兩個 L5 owner 為 `Pmf1D.fir_filter()` 和 `Pmf1D.combine()`。此選項不改 93A 預設。
+固定案例已完成 FFT golden 與 linear 完整 run；不代表所有案例 reference 等價。
+
 ## Requiredness and runtime fallback
 
 - A required Ad Hoc intrinsic absent from the source is a conversion failure; do not fill it from the template.

@@ -115,6 +115,7 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                     pmf_scaling_method="mass_deposit",
                     pmf_projection_method="linear",
                     sequence_termination="fixed_length_sum",
+                    convolution_method="fft",
                 )
 
                 A_MLSD = -float(p_an.quantile(der))

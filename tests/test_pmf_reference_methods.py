@@ -4,6 +4,31 @@ import pytest
 from serdes_coding.utilities.pmf import Pmf1D
 
 
+@pytest.mark.parametrize("method", ["fft", "linear"])
+def test_convolution_methods_preserve_full_support_and_mass(method):
+    source = Pmf1D(dx=1.0, st_idx=-1, pmf=np.array([0.25, 0.5, 0.25]))
+    result = source.combine(source, convolution_method=method)
+    filtered = source.fir_filter(np.array([1.0, 1.0]), keep_mass=1.0, convolution_method=method)
+    np.testing.assert_allclose(result.pmf, [0.0625, 0.25, 0.375, 0.25, 0.0625], atol=1e-14)
+    np.testing.assert_allclose(filtered.pmf, result.pmf, atol=1e-14)
+    assert result.st_idx == filtered.st_idx == -2
+
+
+def test_invalid_convolution_methods_are_rejected_even_for_empty_fir():
+    source = Pmf1D(dx=1.0, st_idx=0, pmf=np.array([1.0]))
+    with pytest.raises(ValueError, match="convolution"):
+        source.combine(source, convolution_method="invalid")
+    with pytest.raises(ValueError, match="convolution"):
+        source.fir_filter(np.array([]), convolution_method="invalid")
+
+
+def test_linear_convolution_preserves_tiny_probability_mass():
+    source = Pmf1D(dx=1.0, st_idx=0, pmf=np.array([1e-20, 0.5, 0.5]))
+    result = source.combine(source, convolution_method="linear")
+    np.testing.assert_allclose(result.pmf, np.convolve(source.pmf, source.pmf), rtol=1e-15, atol=0)
+    assert result.pmf[0] > 0.0
+
+
 def test_reference_atom_deposition_rounds_half_away_from_zero():
     values = np.array([-0.375, -0.125, 0.125, 0.375])
     masses = np.array([0.1, 0.2, 0.3, 0.4])

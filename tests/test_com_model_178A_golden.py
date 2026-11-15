@@ -32,6 +32,8 @@ def test_akinwale_178a_project_production_golden() -> None:
         == "sicopr_reference_v1"
     )
 
+    cfg = replace(cfg, num=replace(cfg.num, pmf_convolution_method="fft"))
+
     status = COM(replace(cfg, exe=exe_cfg)).run(progress=False)
 
     assert len(status.paths) == 6

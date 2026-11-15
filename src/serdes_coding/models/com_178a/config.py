@@ -372,6 +372,7 @@ class COMNumericalControlConfig(COMDataclassText):
     absolute_threshold: Optional[float] = None
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
+    pmf_convolution_method: Literal["fft", "linear"] = "fft"
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -391,6 +392,7 @@ class COMNumericalControlConfig(COMDataclassText):
                 self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("pmf_grid_quality", "legacy PMF grid quality", stored_unit="policy"),
                 self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
+                self._field("pmf_convolution_method", "PMF convolution method", stored_unit="policy"),
             )),
         )
 
@@ -406,6 +408,8 @@ class COMNumericalControlConfig(COMDataclassText):
         )
 
     def __post_init__(self) -> None:
+        if self.pmf_convolution_method not in {"fft", "linear"}:
+            raise ValueError("pmf_convolution_method must be 'fft' or 'linear'.")
         self.fine_grid_df = float(self.fine_grid_df)
         if not np.isfinite(self.fine_grid_df) or self.fine_grid_df <= 0.0:
             raise ValueError("fine_grid_df must be finite and positive.")
@@ -539,8 +543,11 @@ class COMPMFRuntimeConfig(_LeafConfigText):
     tap_abs_th: float                 # unit: V, resolved absolute tap threshold
     keep_mass: float                  # unit: probability
     gaussian_n_sigma: float           # unit: sigma
+    convolution_method: Literal["fft", "linear"] = "fft"
 
     def __post_init__(self) -> None:
+        if self.convolution_method not in {"fft", "linear"}:
+            raise ValueError("convolution_method must be 'fft' or 'linear'.")
         for name in ("dy", "gaussian_n_sigma"):
             value = float(getattr(self, name))
             if not np.isfinite(value) or value <= 0.0:
