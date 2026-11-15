@@ -1,4 +1,7 @@
-"""Production-path regression anchor for the maintained 178A reference case."""
+"""Project regression anchor for the 178A SiCoPR-derived input case.
+
+The XT maximum-energy PSD window intentionally differs from SiCoPR.
+"""
 
 from dataclasses import replace
 import hashlib
@@ -20,7 +23,7 @@ def _quantized_digest(values: np.ndarray, *, decimals: int = 12) -> str:
     return hashlib.sha256(array.tobytes()).hexdigest()
 
 
-def test_sicopr_akinwale_178a_production_golden() -> None:
+def test_akinwale_178a_project_production_golden() -> None:
     cfg = excel_to_config_178A(str(CONFIG))
     exe_cfg = replace(cfg.exe, target="all_enabled")
 
@@ -39,8 +42,8 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     assert status.eq_ch.h_dsamp.ir.shape == (10_626,)
     assert status.imp.R_n.shape == (4_096,)
 
-    np.testing.assert_allclose(status.dte.mse, 0.0061912610245255335, rtol=0.0, atol=1e-14)
-    np.testing.assert_allclose(status.dte.b, [0.8420106292760028], rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(status.dte.mse, 0.006191300963670364, rtol=0.0, atol=1e-14)
+    np.testing.assert_allclose(status.dte.b, [0.8420100592512799], rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.imp.As, 0.31666666666666665, rtol=0.0, atol=1e-15)
     assert status.imp.pre_dte.adc_input.method == "pmf_exact"
     np.testing.assert_allclose(
@@ -52,8 +55,8 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
         rtol=0.0, atol=1e-15,
     )
     assert status.pmf.final_vqc_convention == "sicopr_final_reconstruction"
-    np.testing.assert_allclose(status.pmf.final_V_qc, 0.043139428270345365, rtol=0.0, atol=1e-15)
-    np.testing.assert_allclose(status.pmf.final_delta, 0.0013695056593760434, rtol=0.0, atol=1e-15)
+    np.testing.assert_allclose(status.pmf.final_V_qc, 0.0431394595332117, rtol=0.0, atol=1e-15)
+    np.testing.assert_allclose(status.pmf.final_delta, 0.0013695066518479905, rtol=0.0, atol=1e-15)
     np.testing.assert_allclose(status.pmf.A_ni, 0.2656833333333335, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.pmf.COM, 1.5247607834259893, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(status.mlsd.delta_COM, 1.3711379014472564, rtol=0.0, atol=1e-12)
@@ -61,11 +64,11 @@ def test_sicopr_akinwale_178a_production_golden() -> None:
     np.testing.assert_allclose(status.final_COM, 2.895898684873246, rtol=0.0, atol=1e-12)
 
     assert _quantized_digest(status.dte.w) == (
-        "aedef2cbd02deb6cdd0868c60c8ce46fe927867fcc8a3d5429dc6802e74241f1"
+        "9d17061fb1a2452a8977539db36c8249eb300f19fb37e1171d523e43794e1c75"
     )
     assert _quantized_digest(status.eq_ch.h_dsamp.ir) == (
         "8ebb13b0646c7b83fc39e93a3b36b9cf3758825e0316619beca9b1a204d26971"
     )
     assert _quantized_digest(status.imp.R_n) == (
-        "5aef52dee259d6b94fd6ccda4d738a4a299527b1157220e1620b750d45c55871"
+        "47733d82d2aa97e7a68360a0a9bb16fa5b65a528d924a73892c61ad6e2b019e3"
     )

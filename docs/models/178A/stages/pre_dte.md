@@ -298,8 +298,10 @@ Until these exist, this document makes no specification-accuracy or numerical-to
 - The implemented equations and unit conversions listed in the governing-reference table still require independent comparison with the accepted 178A reference.
 - The common method accepts an unused `victim` argument; this is an API cleanup opportunity and does not change current calculations.
 - `full` 保留完整 impairment equivalent-channel 記錄；`truncated` 明確採用
-  `num_trunc_ui` 的有限 circular DFT record。這是可稽核的 policy，不由 tail
-  threshold 自動切換。Akinwale 4096-UI 分支已
-  對 SiCoPR total `R_n[0:87]` 至 `3.71e-21 V²`。
+  `num_trunc_ui` 的有限 circular DFT record。XT 先以完整 response 選 phase，
+  再選最大能量 window；其他 response 仍取前段。同能量取最早 window。
+  這是可稽核的 policy，不由 tail
+  threshold 自動切換。Akinwale 4096-UI 舊前段截取的 SiCoPR 對照差為
+  `3.71e-21 V²`；最大能量 window 已改變此 reference 行為。
 - Pre-DTE ADC PMF construction is fixed exact behavior; search profiles may still differ through independent retained-mass, grid, floating-tap, and phase-scheduling controls.
 - Interference sources outside the currently represented receiver, crosstalk, TX noise, jitter, and quantization components require an explicit specification and config/status change before inclusion.

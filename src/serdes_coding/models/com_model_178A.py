@@ -1975,6 +1975,7 @@ class COM:
 
         def build_response_psd(
             response: np.ndarray, variance: float, *, source_name: str,
+            max_energy_window: bool = False,
         ) -> SampledPSD:
             response = np.asarray(response, dtype=float)
             if response.ndim != 1:
@@ -1984,7 +1985,12 @@ class COM:
             else:
                 record = np.zeros(record_cfg.sampled_nfft, dtype=float)
                 count = min(len(response), len(record))
-                record[:count] = response[:count]
+                if max_energy_window and len(response) > count:
+                    energy = np.concatenate(([0.0], np.cumsum(response * response)))
+                    start = int(np.argmax(energy[count:] - energy[:-count]))
+                else:
+                    start = 0
+                record[:count] = response[start:start + count]
             return _build_psd_from_DFT_response(record, record_cfg, variance)
 
         S_rn = _build_psd_rx_noise(record_cfg, self.cfg.imp, self.cfg.filter)
@@ -1994,6 +2000,7 @@ class COM:
                 response.ir,
                 sigma_X**2,
                 source_name=f"XT{path_index} eq-channel",
+                max_energy_window=True,
             ))
         S_tn = build_response_psd(
             eq_ch.h_tn.ir,
@@ -2445,6 +2452,7 @@ class COM:
 
         def build_response_psd(
             response: np.ndarray, variance: float, *, source_name: str,
+            max_energy_window: bool = False,
         ) -> SampledPSD:
             response = np.asarray(response, dtype=float)
             if response.ndim != 1:
@@ -2454,7 +2462,12 @@ class COM:
             else:
                 record = np.zeros(record_cfg.sampled_nfft, dtype=float)
                 count = min(len(response), len(record))
-                record[:count] = response[:count]
+                if max_energy_window and len(response) > count:
+                    energy = np.concatenate(([0.0], np.cumsum(response * response)))
+                    start = int(np.argmax(energy[count:] - energy[:-count]))
+                else:
+                    start = 0
+                record[:count] = response[start:start + count]
             return _build_psd_from_DFT_response(record, record_cfg, variance)
 
         w_lim = np.asarray(dte_status.w_lim, dtype=float)
@@ -2467,6 +2480,7 @@ class COM:
                 response.ir,
                 sigma_X**2,
                 source_name=f"MLSD XT{path_index} eq-channel",
+                max_energy_window=True,
             ))
         S_tn_pre = build_response_psd(
             eq_ch.pre_dte.h_tn.ir,

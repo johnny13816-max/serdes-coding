@@ -6,6 +6,9 @@ import unittest
 from types import SimpleNamespace
 
 import numpy as np
+from unittest.mock import patch
+
+from serdes_coding.models import com_model_178A as model_module
 
 from serdes_coding.models.com_model_178A import (
     COM,
@@ -154,6 +157,21 @@ class TestMLSDNoise178A(unittest.TestCase):
         self.assertEqual(result.record_cfg.sampled_nfft, 8)
         self.assertEqual(result.R_ni.shape, (8,))
         np.testing.assert_array_equal(self.eq_ch.post_ffe.h_ISI.ir, original_h_isi)
+
+    def test_truncated_mlsd_xt_keeps_max_energy_window(self) -> None:
+        self.model.cfg.num = COMNumericalControlConfig(
+            eq_ch_imp_len="truncated", num_trunc_ui=8
+        )
+        xt_ir = np.zeros(16)
+        xt_ir[12:14] = [1.0, 0.5]
+        xt = SampledResponse.from_ir(xt_ir.copy(), self.grid)
+        self.eq_ch.pre_dte.h_XTs_dsamp = [xt]
+        original_builder = model_module._build_psd_from_DFT_response
+        with patch.object(model_module, "_build_psd_from_DFT_response", wraps=original_builder) as builder:
+            self.model.build_mlsd_noise(self.imp, self.eq_ch, self.dte, self.added_noise)
+        xt_record = builder.call_args_list[0].args[0]
+        self.assertAlmostEqual(float(np.sum(xt_record**2)), 1.25)
+        np.testing.assert_array_equal(xt.ir, xt_ir)
 
 
 if __name__ == "__main__":
