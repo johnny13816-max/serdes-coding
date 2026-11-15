@@ -373,10 +373,11 @@ pre-CTLE response + continuous H_ctf
 
 `ctle_pulse_realization` 控制完整的 pre-CTLE-to-pulse realization。
 TX FFE 在上游依 path kind 選定並完成串接，不屬於 CTLE 分支。
-`_realize_ctle_pulse()` 是 L3 owner block 的 per-path execution decision point，
-負責 method-specific pulse formation；shared setup decision 已由同一 block 的
-`_prepare_ctle_pulse_realization()` 完成。任一 L4 function 都不是單獨的完整
-semantic owner；`_apply_rectangular_unit_pulse()` 只是無 policy 的數值 helper。
+ALG-007 由兩個 L4 owner 分別負責不同時間點的操作：
+`_prepare_ctle_pulse_realization()` 準備每個 shared grid 的 CTLE，
+`_realize_ctle_pulse()` 使用同一 resolved 選項建立每條 path 的 pulse。
+後者檢查選項與 shared CTLE 一致；共用 IIR 不會逐 path 重建。
+`_apply_rectangular_unit_pulse()` 是無 policy 的數值 helper。
 `continuous_tf` 直接在 analysis grid 串接 continuous CTF 與 unit-pulse TF。
 `bilinear_iir` 則由 `_evaluate_pre_ctle_on_measured_grid()` 直接接收 ALG-001
 已完成的 scalar `H_21` 並建立 measured-domain composite TF，不再從 `S_all`

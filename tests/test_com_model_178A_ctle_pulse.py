@@ -47,7 +47,7 @@ def test_bilinear_fine_grid_keeps_full_input_and_zero_state(monkeypatch):
         raise AssertionError("fine-grid method must not use reference truncation")
     monkeypatch.setattr(path_stage, "_reference_fd_to_td_record", forbidden)
     result, shift = _realize_ctle_pulse(shared, None, cfg.freqs, tf, None, "victim",
-                                        None, 1.0, cfg, "zero_padding", pre_ctle_shift=0)
+                                        None, 1.0, cfg, "zero_padding", realization="bilinear_fine_grid", pre_ctle_shift=0)
     expected = lfilter(np.ones(cfg.per_ui), [1.0],
                        lfilter(ctle.b2, ctle.a2, lfilter(ctle.b1, ctle.a1, kernel)))
     assert len(result.ir) == cfg.Nfft
@@ -71,14 +71,21 @@ def test_bilinear_fine_grid_preset_reuses_actual_pre_iir_shift(monkeypatch):
         return np.roll(kernel, 7), 7
     actual_response, shift = _realize_ctle_pulse(
         shared, SimpleNamespace(causalize_ir=causalize), cfg.freqs, None, None,
-        "victim", None, 1.0, cfg, "zero_padding")
+        "victim", None, 1.0, cfg, "zero_padding", realization="bilinear_fine_grid")
     preset_response, preset_shift = _realize_ctle_pulse(
         shared, None, cfg.freqs, None, None, "victim", None, 1.0, cfg,
-        "zero_padding", include_txffe=False, pre_ctle_shift=shift)
+        "zero_padding", realization="bilinear_fine_grid", include_txffe=False, pre_ctle_shift=shift)
     assert decisions == [7] and shift == preset_shift == 7
     np.testing.assert_allclose(actual_response.ir, lfilter(np.ones(4), [1.0], np.roll(actual, 7)), atol=1e-12)
     np.testing.assert_allclose(preset_response.ir, lfilter(np.ones(4), [1.0], np.roll(preset, 7)), atol=1e-12)
     assert actual_response.causal_shift_samples == preset_response.causal_shift_samples == 0
+
+
+def test_pulse_realization_rejects_mismatched_shared_method():
+    shared = SimpleNamespace(ctle_pulse_realization="continuous_tf", ctle_iir=None)
+    with pytest.raises(ValueError, match="must match"):
+        _realize_ctle_pulse(shared, None, None, None, None, "victim", None,
+                            1.0, None, "zero_padding", realization="bilinear_iir")
 
 
 def test_bilinear_ctle_sections_have_expected_gain_and_stable_poles():

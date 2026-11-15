@@ -101,7 +101,7 @@ def test_adaptive_group_rebuilds_victim_and_preserves_cfg(monkeypatch):
         dte=SimpleNamespace(d_w=2, N_max=5),
         num=SimpleNamespace(relative_threshold=1e-3, absolute_threshold=None),
         channel=None, filter=SimpleNamespace(A_v=1.0, A_ne=1.0, A_fe=1.0),
-        alg=SimpleNamespace(missing_dc_policy="error", out_of_measured="zero_padding"),
+        alg=SimpleNamespace(missing_dc_policy="error", out_of_measured="zero_padding", ctle_pulse_realization="continuous_tf"),
     )
     calls = []
 
@@ -144,7 +144,7 @@ def test_xt_group_moves_time_origin_to_fit_pre_ffe_margin(monkeypatch):
         dte=SimpleNamespace(d_w=6, N_max=10),
         num=SimpleNamespace(relative_threshold=1e-3, absolute_threshold=None),
         channel=None, filter=SimpleNamespace(A_v=1.0, A_ne=1.0, A_fe=1.0),
-        alg=SimpleNamespace(missing_dc_policy="error", out_of_measured="zero_padding"),
+        alg=SimpleNamespace(missing_dc_policy="error", out_of_measured="zero_padding", ctle_pulse_realization="continuous_tf"),
     )
     def make_path(link_cfg, *args):
         ir = np.zeros(link_cfg.Nfft)

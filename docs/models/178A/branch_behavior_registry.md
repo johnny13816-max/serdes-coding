@@ -93,7 +93,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | ID | Branch classification / lifecycle | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
 | `ALG-018` | active — algorithm_policy branch | Stage 1 path response grid | `alg.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 numerical parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作；分類遷移及 project golden 已驗證，遠端整合待完成 |
-| `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
+| `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L4 owner set** `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | shared setup 與 per-path realization 各自決策；focused 104 passed、project golden passed；remote 待整合 |
 | `ALG-001` | active — approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-006` | active — approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-005` | retired — approved branch | Stage 1 channel renormalization | none — retired; S4P order fixed by D3.2 and S2P uses representation dispatch | none — fixed contract | — (retired; former owner `COM._build_channel_under_test()`) | Retired: fixed specification behavior and input representation dispatch; no runtime selector |
@@ -159,21 +159,19 @@ COM model
 │  ├─ COM.build_all_paths()                                  [ALG-018 L1 owner: fixed / adaptive]
 │  └─ L2 path-realization function set
 │     ├─ _build_shared_path()                                [ALG-007 config resolver / shared coordinator]
-│     │  └─ CTLE pulse-realization block                     [ALG-007 L3 owner: shared setup]
-│     │     └─ _prepare_ctle_pulse_realization()             [ALG-007 L4 setup decision]
-│     │        ├─ continuous_tf → ctle_iir=None
-│     │        └─ bilinear_iir → COMBilinearCTLE
+│     │  └─ _prepare_ctle_pulse_realization()                [ALG-007 L4 owner: shared setup]
+│     │     ├─ continuous_tf → ctle_iir=None
+│     │     └─ bilinear_iir / bilinear_fine_grid → COMBilinearCTLE
 │     └─ _build_paths()                                      [ALG-001/006 config resolver / fanout]
 │        └─ _build_path() × victim / NEXT / FEXT
 │           ├─ SparamModel.completed_voltage_transfer_function() [ALG-001 L5 owner]
 │           ├─ LinkSegment.from_tf()                         [ALG-006 analysis-grid direct injector]
 │           │  └─ resample_tf()                              [ALG-006 L5 owner]
-│           └─ CTLE pulse-realization block                  [same ALG-007 L3 owner: per-path]
-│              └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 L4 execution decision]
-│                 ├─ continuous_tf                           [uses analysis-grid H21; ALG-006 upstream-folded]
-│                 ├─ bilinear_fine_grid                     [full-grid IFFT → shared pre-IIR shift → IIR → pulse]
-│                 └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
-│                    └─ resample_tf()                        [same ALG-006 L5 owner]
+│           └─ _realize_ctle_pulse() × pulse / victim pulse_no_txffe [ALG-007 L4 owner: per-path]
+│              ├─ continuous_tf                           [uses analysis-grid H21; ALG-006 upstream-folded]
+│              ├─ bilinear_fine_grid                     [full-grid IFFT → shared pre-IIR shift → IIR → pulse]
+│              └─ bilinear_iir → _reference_fd_to_td_record() [ALG-006 finite-record direct injector]
+│                 └─ resample_tf()                        [same ALG-006 L5 owner]
 ├─ L1 Stage 2 / Domain — Pre-DTE model
 │  ├─ calculate_pre_dte_imp_common()
 │  ├─ prepare_pre_dte_phase_inputs()

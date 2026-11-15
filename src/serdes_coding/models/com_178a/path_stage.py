@@ -821,13 +821,14 @@ def _prepare_ctle_pulse_realization(link_cfg: LinkConfig, ft_cfg: COMFilterConfi
     """Prepare the shared CTLE state for one resolved pulse-realization method."""
     if realization == 'continuous_tf':
         return None
-    if realization not in {'bilinear_iir', 'bilinear_fine_grid'}:
+    elif realization in {'bilinear_iir', 'bilinear_fine_grid'}:
+        required = {'g_1': ft_cfg.g_1, 'g_2': ft_cfg.g_2, 'f_z1': ft_cfg.f_z1, 'f_z2': ft_cfg.f_z2, 'f_p1': ft_cfg.f_p1, 'f_p2': ft_cfg.f_p2, 'f_p3': ft_cfg.f_p3}
+        missing = [name for name, value in required.items() if value is None]
+        if missing:
+            raise ValueError('COMFilterConfig178A is missing required bilinear CTF fields: ' + ', '.join(missing))
+        return IEEECOMFilter.build_rx_equalizer_bilinear(link_cfg, g_1=required['g_1'], g_2=required['g_2'], f_z1=required['f_z1'], f_z2=required['f_z2'], f_p1=required['f_p1'], f_p2=required['f_p2'], f_p3=required['f_p3'])
+    else:
         raise ValueError('unsupported CTLE pulse realization.')
-    required = {'g_1': ft_cfg.g_1, 'g_2': ft_cfg.g_2, 'f_z1': ft_cfg.f_z1, 'f_z2': ft_cfg.f_z2, 'f_p1': ft_cfg.f_p1, 'f_p2': ft_cfg.f_p2, 'f_p3': ft_cfg.f_p3}
-    missing = [name for name, value in required.items() if value is None]
-    if missing:
-        raise ValueError('COMFilterConfig178A is missing required bilinear CTF fields: ' + ', '.join(missing))
-    return IEEECOMFilter.build_rx_equalizer_bilinear(link_cfg, g_1=required['g_1'], g_2=required['g_2'], f_z1=required['f_z1'], f_z2=required['f_z2'], f_p1=required['f_p1'], f_p2=required['f_p2'], f_p3=required['f_p3'])
 
 def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_cfg: LinkConfig, amplitude: float, domain: Literal['frequency_tf', 'finite_record_ir']) -> LinkSegment:
     """Apply the common one-UI rectangular symbol pulse after CTLE realization."""
@@ -845,9 +846,11 @@ def _apply_rectangular_unit_pulse(post_ctle: LinkSegment, X: LinkSegment, link_c
     pulse_record[:len(pulse_ir)] = pulse_ir
     return IEEECOMFilter._from_finite_record_ir(pulse_record, link_cfg)
 
-def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding'], *, include_txffe: bool=True, pre_ctle_shift: Optional[int]=None) -> tuple[LinkSegment, Optional[int]]:
+def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured_freqs: np.ndarray, H_21_measured_tf: np.ndarray, ft_cfg: COMFilterConfig, kind: Literal['victim', 'next', 'fext'], X: LinkSegment, amplitude: float, link_cfg: LinkConfig, out_of_measured: Literal['cosine_decay', 'zero_padding'], *, realization: Literal['continuous_tf', 'bilinear_iir', 'bilinear_fine_grid'], include_txffe: bool=True, pre_ctle_shift: Optional[int]=None) -> tuple[LinkSegment, Optional[int]]:
     """Realize one complete path pulse at the Stage 1 ALG-007 owner."""
-    if shared.ctle_pulse_realization == 'continuous_tf':
+    if realization != shared.ctle_pulse_realization:
+        raise ValueError('CTLE pulse realization must match the shared CTLE realization.')
+    if realization == 'continuous_tf':
         return _apply_rectangular_unit_pulse(
             H_pre.cascade_tf(shared.H_ctf),
             X,
@@ -855,7 +858,7 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
             amplitude,
             'frequency_tf',
         ), None
-    if shared.ctle_pulse_realization not in {'bilinear_iir', 'bilinear_fine_grid'}:
+    elif realization not in {'bilinear_iir', 'bilinear_fine_grid'}:
         raise ValueError('unsupported CTLE pulse realization.')
     if shared.ctle_iir is None:
         raise ValueError('bilinear_iir realization requires shared.ctle_iir.')
@@ -869,7 +872,7 @@ def _realize_ctle_pulse(shared: COMSharedPath, H_pre: LinkSegment, H_21_measured
         kind=kind,
         include_txffe=include_txffe,
     )
-    if shared.ctle_pulse_realization == 'bilinear_fine_grid':
+    if realization == 'bilinear_fine_grid':
         grid_tf = resample_tf(measured_pre_ctle, measured_freqs, link_cfg.freqs,
                               out_of_measured=out_of_measured)
         kernel = np.fft.irfft(grid_tf, n=link_cfg.Nfft)
@@ -953,6 +956,7 @@ def _build_path(
         'error', 'hold', 'skrf', 'mag_phase_trend_to_dc'
     ],
     out_of_measured: Literal['cosine_decay', 'zero_padding'],
+    ctle_pulse_realization: Literal['continuous_tf', 'bilinear_iir', 'bilinear_fine_grid'],
 ) -> COMPath:
     """
     Build one 178A COM signal path from a measured-domain channel-under-test model.
@@ -993,7 +997,7 @@ def _build_path(
     )
     H_pre = H_ffe.cascade_tf(shared.H_t).cascade_tf(H_21).cascade_tf(shared.H_r)
     H_all = H_pre.cascade_tf(shared.H_ctf)
-    pulse, pre_ctle_shift = _realize_ctle_pulse(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured)
+    pulse, pre_ctle_shift = _realize_ctle_pulse(shared, H_pre, H_21_measured_freqs, H_21_measured_tf, ft_cfg, kind, X, amplitude, link_cfg, out_of_measured, realization=ctle_pulse_realization)
     pulse_no_txffe = None
     if kind == 'victim':
         # Main-only TXFIR uses the same filter convention with unit main tap.
@@ -1011,6 +1015,7 @@ def _build_path(
             amplitude,
             link_cfg,
             out_of_measured,
+            realization=ctle_pulse_realization,
             include_txffe=False,
             pre_ctle_shift=pre_ctle_shift,
         )
@@ -1060,6 +1065,7 @@ def _build_adaptive_group(
         path = _build_path(
             fine_cfg, cfg.channel, cfg.filter, txpkg_cfg, fine_shared, kind,
             channel, cfg.alg.missing_dc_policy, cfg.alg.out_of_measured,
+            cfg.alg.ctle_pulse_realization,
         )
         start, stop = path.pulse.effective_range(
             relative_threshold=cfg.num.relative_threshold,
@@ -1100,6 +1106,7 @@ def _build_adaptive_group(
         path = _build_path(
             fine_cfg, cfg.channel, cfg.filter, txpkg_cfg, fine_shared, kind,
             channel, cfg.alg.missing_dc_policy, cfg.alg.out_of_measured,
+            cfg.alg.ctle_pulse_realization,
         )
         if shift:
             aligned_pulse = IEEECOMFilter._from_finite_record_ir(
@@ -1160,6 +1167,7 @@ def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamMod
         S_ch=channels[0],
         missing_dc_policy=cfg.alg.missing_dc_policy,
         out_of_measured=cfg.alg.out_of_measured,
+        ctle_pulse_realization=cfg.alg.ctle_pulse_realization,
     )]
     next_count = len(source_cfg.next)
     next_channels = channels[1:1 + next_count]
@@ -1175,6 +1183,7 @@ def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamMod
             S_ch=S_ch,
             missing_dc_policy=cfg.alg.missing_dc_policy,
             out_of_measured=cfg.alg.out_of_measured,
+            ctle_pulse_realization=cfg.alg.ctle_pulse_realization,
         ))
     for S_ch in fext_channels:
         paths.append(_build_path(
@@ -1187,6 +1196,7 @@ def _build_paths(cfg: COMConfig, shared: COMSharedPath, channels: list[SparamMod
             S_ch=S_ch,
             missing_dc_policy=cfg.alg.missing_dc_policy,
             out_of_measured=cfg.alg.out_of_measured,
+            ctle_pulse_realization=cfg.alg.ctle_pulse_realization,
         ))
     return paths
 
