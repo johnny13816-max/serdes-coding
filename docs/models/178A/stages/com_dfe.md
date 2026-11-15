@@ -92,12 +92,12 @@ calculate_COM_DFE(...)
 ├── build p_ISI from h_ISI
 ├── build p_XT from all h_XTs_w
 ├── build p_DD from A_DD and h_w_J
-├── build p_qn
+├── _build_final_adc_quantization() → p_qn, V_qc, delta [ALG-012 owner]
 │   ├── disabled -> zero-amplitude unit-mass PMF
 │   └── enabled
-│       ├── require post-FFE method="pmf_exact" and delta
-│       ├── build uniform one-sample quantization-error PMF
-│       └── FIR-filter it by full w_lim
+│       ├── require post-FFE method="pmf_exact"; spec mode requires delta
+│       ├── select V_qc / delta and quantization taps by convention
+│       └── build uniform PMF and FIR-filter with selected taps
 ├── build p_G from sigma_G
 ├── combine p_ISI, p_XT, p_DD, p_qn, and p_G
 ├── evaluate configured DER_0 quantile -> y0
