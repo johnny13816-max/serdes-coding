@@ -93,7 +93,6 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | ID | Branch classification / lifecycle | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
 | `ALG-018` | active — algorithm_policy branch | Stage 1 path response grid | `alg.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 numerical parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作；分類遷移及 project golden 已驗證，遠端整合待完成 |
-| `NUM-007` | retired — approved branch | Stage 1 path response grid | none — retired；方法選擇已遷移至 algorithm policy | none — retired | — | Retired：原 numerical selector 已移除，由 ALG-018 提供相同方法選擇。 |
 | `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
 | `ALG-001` | active — approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-006` | active — approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
