@@ -3,6 +3,18 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261115-001 — Stable branch IDs and legacy-ID cleanup
+
+- 日期／狀態：2026-11-15／Implemented；待 handoff/state reconciliation 後 Closed。
+- 問題：registry 允許 ID 隨 Stage 重排，退役分支與 legacy mapping 混存，且退役項目離開主表，造成 ID 不穩定與設計理由可能被一併清除。
+- 依據：使用者核准的 change contract；要求核定 ID 固定、不重用，總表按 Stage／call tree 排序，保留曾核准分支的 retired 紀錄，並把舊 ID mapping 與退役設計紀錄分開。
+- 衝突檢查：原 branch registry ID 重排規則已移除。HANDOFF 有較寬的歷史紀錄清除文字，與保留 canonical retired record 衝突；該檔案目前含專案 dirty state，依核准 contract 保留原樣，待可安全同步後再更新。
+- 決策：接受。現行規則與權威 registry 僅使用 canonical ID；現有舊代號依既定 review 完成時點清理，不改寫 Git history。退役 branch 保留原 canonical ID、原因與固定／替代行為；從未核准的 non-branch 不納入主表。
+- 評估者／授權依據：本規則維護對話；使用者明確核准 change contract。
+- 修改範圍：`branch_behavior_contract.md`、178A `branch_behavior_registry.md`、本紀錄與暫存 active contract；不修改 runtime、workbook 或 project task files。
+- 驗證：`git diff --check` 通過；四份修改文件的本地連結 target 通過；registry 分類表欄位數一致、Stage/call-tree 順序符合 owner tree、canonical ID 無重複；authoritative registry 無舊 B/E ID 或 mapping；active／retired 情境與未核准 non-branch 排除規則核對通過。既有 project dirty files 均未覆寫或納入本次規則範圍。HANDOFF cleanup 文字仍待安全同步，因此尚未 Closed。
+- Commit evidence：待規則變更完成後記錄；不包含專案 dirty files。
+
 ## RC-20261106-002 — Repository workbook batch maintenance
 
 - 日期／狀態：2026-11-06／Closed。

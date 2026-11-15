@@ -117,6 +117,30 @@ Branch Registry 負責。每個核准 branch 至少記錄：
 7. verified implementation coverage、exclusions 與 validation evidence；
 8. review status、pending decision 或下一個 validation gate。
 
+## Branch ID lifecycle and legacy ID cleanup
+
+核准並登錄的 branch ID 是穩定識別碼，不因新增、移除、合併、Stage 調整，或
+owner／consumer 位置改變而重編或重用。新 branch 只有在通過 eligibility 並核准時才
+核發該類別下一個 ID。既有 unreviewed selector 暫沿用已登錄 ID 完成審查；後續若判定
+從未成立為 branch，移除該列但不回退該類別的 ID 序號。已核發給核准分支的 ID，即使
+分支退役也不得重用。各類別序號只增不減；ID 前綴表示 runtime domain，不得編入 Stage
+或排序資訊。
+
+權威 registry 依 Stage 與 function call tree 的執行／ownership 順序排列，不依 ID
+數字排序。跨 Stage 或 shared utility 分支須列出 owner 與全部 consumers；項目依
+owner 在 call tree 中的位置列示，不為各 Stage 重複建立分支紀錄。
+
+曾核准的分支退役時，registry 保留原 canonical ID，標示 `retired`，並簡述退役原因
+及目前取代它的固定行為或替代分支。Retired 紀錄不得列出可選 runtime values，也
+不得出現在 active ownership tree。只有從未核准為 branch 的候選、設定、固定行為或
+non-branch control，不取得 branch ID，也不因本條加入分支總表。
+
+Legacy ID mapping 是過渡對照資料，不是分支生命週期紀錄。現行規則、權威 registry
+及操作文件只使用 canonical ID，不得新增 legacy ID 欄位、mapping、括號別名或搜尋
+用舊 ID。依既定審查後清理時點移除既有舊 ID 對照與現行文件中的舊代號；保留已核准
+退役分支的 canonical ID、退役原因及替代行為。Git history 不改寫；封存的歷史材料可
+保留其撰寫當時的識別碼。
+
 Declared impact 與 verified coverage 必須分開記錄。只有設定欄位或候選實作，
 但尚未定位 production consumer，不構成已驗證 coverage。
 
@@ -126,7 +150,7 @@ Declared impact 與 verified coverage 必須分開記錄。只有設定欄位或
 
 | Outcome | Meaning |
 |---|---|
-| Approved branch behavior | 保留或新增 selector，完成 ownership 與 registry record。 |
+| Approved branch behavior | 保留或新增 selector，完成 ownership 與 registry record；後續退役時依 ID lifecycle 保留 retired record。 |
 | Branch parameter | 附屬於已核准 branch，不取得獨立 ID。 |
 | Non-branch runtime control | 留在其 config domain，由該 workflow 記錄，不參加 branch-owner review。 |
 | Case/input/source boundary | 由 case、source 或 input contract 記錄。 |
@@ -153,7 +177,7 @@ reclassification 不要求重跑未改變的 production baseline。
 |---|---|
 | Configuration Architecture | Project/runtime config domains、資料結構與欄位放置。 |
 | Branch Behavior Contract | branch definition、eligibility、exclusions、ownership 與 validation obligations。 |
-| Version Branch Registry | **唯一**保存分支分類總表與 branch ownership/function-position tree；同時保存現存 branch、owner、consumer、impact、status、evidence 與 legacy mapping。 |
+| Version Branch Registry | **唯一**保存分支分類總表與 branch ownership/function-position tree；保存 active／retired canonical branch、owner、consumer、impact、status 與 evidence。不得保存 legacy ID mapping。 |
 | Stage/call-tree documents | 保存 stage I/O、一般 execution flow 與 material functions；可標註 branch ID 並連回 Registry，但不得重複保存 branch 分類、owner 結論、review status 或 closure evidence。 |
 | Active state/handoff | 目前 review 順序、stop point、blocker 與下一步；不重複 branch contract。 |
 

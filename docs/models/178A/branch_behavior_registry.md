@@ -1,7 +1,7 @@
 # 178A 分支行為登錄表
 
 狀態：**authoritative**  
-最後核對：2026-11-12
+最後核對：2026-11-15
 
 本文件是 178A model 分支行為的唯一權威紀錄，集中保存分類總表與
 ownership/function-position tree。新增、修改、重新命名、合併、移除或二次審查
@@ -20,8 +20,6 @@ execution detail；`call_tree.md` 只保存 pipeline flow，不再各自維護 b
 `num.absolute_threshold` 為 adaptive controls，不各自構成 branch；runtime
 defaults 分別為 `1e6` Hz、`1e-3`、`None`。完整設計與待完成驗證見
 [adaptive grid change contract](../../planning/178A_adaptive_grid_change_contract.md)。
-原 ALG-011 selector 已由 Stage 5 固定 circular convolution 取代；完整清理
-及整合驗證仍進行中。
 
 ## 判定規則
 
@@ -33,11 +31,19 @@ branch classes，也不能單憑 config container 判定它是 branch。Physical
 `cfg.src` 與 `cfg.exe` 不建立 `PHY`／`SRC`／`EXE` branch ID；它們只在
 「不是分支的項目」記錄必要 exclusion。
 
-號碼在同一 ID prefix 內依最早 behavioral owner／consumer 的 stage 排序。
-完全位於 COM pipeline 外的 shared utility 以 `Shared L5 utility` 表示，不虛構
-Stage 0 owner；跨多 stage 的 branch 必須列出全部 consumers。若後續 evidence
-改變 scope，ID 允許隨 stage order 重排，並須在同一變更同步本表與 legacy
-mapping。Stage 文件不另建平行分類表。
+branch ID 是穩定識別碼：核准並登錄後，不因新增、移除、合併、Stage 調整或
+owner／consumer 位置改變而重編或重用。新 branch 通過 eligibility 並核准後才核發
+同一 ID prefix 的下一號；既有 unreviewed selector 暫沿用已登錄 ID 完成審查。若這類
+項目後來判定為從未成立的 non-branch，移除該列但不回退序號。各類別序號只增不減，
+退役 ID 永不重用。ID prefix 記錄 selector 所在 runtime domain，不編入 Stage 或排序資訊。
+
+Next ID allocation cursor：`ALG-018`、`NUM-008`、`SRCH-002`。此 cursor 只記錄各類別
+下一個可核發號碼，不建立舊 ID 對照或歷史映射。
+
+本表依 Stage／function call tree 順序排列，不依 ID 數字排序。跨 Stage 或 shared
+utility branch 列出唯一 owner 與全部 consumers，依 owner 在 call tree 的位置登錄；
+不因 consumer 位於多個 Stage 而重複建立紀錄。完全位於 COM pipeline 外的 shared
+utility 以 `Shared L5 utility` 表示，不虛構 Stage 0 owner。Stage 文件不另建平行分類表。
 
 一個 branch behavior 對應某個 coding layer 的一個 semantic choice，並可由
 一個或多個 runtime fields 共同完整定義；field 數量本身不是分支數量。相反地，
@@ -51,9 +57,13 @@ function set 擁有、作用於不同 impact boundary，仍可能是不同 branc
   branch review；選項、eligibility、scope、owner 與 validation 都必須從頭確認；
 - `pending candidate`：尚缺 branch／non-branch 決定、scope、owner 或 evidence，
   暫留本表但不得宣稱已核准。
+- `retired branch`：曾核准並取得 canonical ID，現已移除 runtime 選擇；只保留
+  ID、退役原因與目前固定／替代行為，不提供可選 runtime values。
 
-一旦決定為 non-branch，就從本表與 ownership tree 移除，只在 legacy mapping
-或「不是分支的項目」保留必要的決策理由。
+從未核准為 branch 的候選一旦判定為 non-branch，就不取得 ID，也不列入本表或
+ownership tree；必要的分類理由可記於「不是分支的項目」。曾核准後退役的 branch
+仍保留於本表，但移出 active ownership tree。Legacy ID mapping 不屬於本 registry；
+依既定審查後清理時點，現行文件只保留 canonical ID，Git history 不改寫。
 
 `Selector domain` 只記錄 selector 位於 `cfg.alg`、`cfg.num` 或 `cfg.srch`。
 其中的欄位仍須逐項通過 eligibility：純 tolerance、resolution、candidate value、
@@ -75,34 +85,36 @@ function position 則由後面的 tree 表示。`Semantic owner` 是最低且不
 所選行為的 conceptual layer，不是 config container、forwarding caller 或結果
 consumer。尚未完成完整初次審查的 owner 只標為「provisional」，不得當成正式結論。
 
-`sicopr_reference_v1` 只記錄 adapter 對該 branch 解析出的 concrete choice；它
+`sicopr_reference_v1` 只記錄 adapter 對 active branch 解析出的 concrete choice；它
 不是另一套 branch 分類，也不建立新的 runtime owner。完整 profile 展開、override
-與 provenance contract 由 `config_tree.md` 維護。Legacy ID 只在後面的 mapping
-維護，不再占用分類總表欄位。
+與 provenance contract 由 `config_tree.md` 維護。Retired branch 的 selector 與 profile
+choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目前可選值。
 
-| ID | Branch classification | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
+| ID | Branch classification / lifecycle | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
-| `ALG-001` | approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
-| `ALG-002` | approved branch | Stages 3／5／6／7 target-grid PMF projection | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
-| `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
-| `ALG-004` | approved branch | MLSD fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
-| `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
-| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
-| `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證及 local commit；remote 整合待完成 |
-| `NUM-007` | numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作與主要驗證；remote 整合待完成 |
-| `SRCH-001` | approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
-| `ALG-008` | approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
-| `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
-| `NUM-005` | approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
-| `NUM-006` | approved branch | Stages 2／5 ADC-input FIR-PMF convergence | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
-| `ALG-010` | approved branch | Stage 4 DTE solver | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
-| `ALG-012` | unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
-| `ALG-013` | unreviewed existing selector | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
-| `ALG-014` | unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
-| `ALG-015` | unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
-| `ALG-016` | unreviewed existing selector | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **provisional L3** `calculate_der_mlsd()` | 待完整初次審查 |
-| `ALG-017` | unreviewed existing selector | Stage 7 MLSD reported DER | `alg.reported_der`：`raw_sequence_sum`／`baseline_pdf_re_evaluation` | `baseline_pdf_re_evaluation` | **provisional L3** `calculate_COM_MLSD()` reported-DER block | 待完整初次審查 |
-
+| `NUM-007` | active — numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作與主要驗證；remote 整合待完成 |
+| `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
+| `ALG-001` | active — approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
+| `ALG-006` | active — approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
+| `ALG-005` | retired — approved branch | Stage 1 channel renormalization | none — retired; S4P order fixed by D3.2 and S2P uses representation dispatch | none — fixed contract | — (retired; former owner `COM._build_channel_under_test()`) | Retired: fixed specification behavior and input representation dispatch; no runtime selector |
+| `NUM-003` | active — approved branch | Stages 2／7 Pre-DTE 與 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num.num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證及 local commit；remote 整合待完成 |
+| `ALG-008` | active — approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
+| `NUM-006` | active — approved branch | Stages 2／5 ADC-input FIR-PMF convergence; direct consumers `_build_psd_adc_qn()` and `_build_adc_input_pmf_exact()` | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
+| `NUM-004` | active — approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
+| `ALG-009` | retired — approved branch | Stage 2 Pre-DTE PMF method | none — retired; exact PMF is fixed | none — fixed exact-PMF contract | — (retired; former execution point `_build_psd_adc_qn()`) | Retired: Gaussian approximation altered `V_qc`, MSE and selected phase for only 1.5–2% evaluation savings; exact PMF is fixed |
+| `SRCH-001` | active — approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
+| `ALG-010` | active — approved branch | Stage 4 DTE solver | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
+| `ALG-011` | retired — approved branch | Stage 5 RX FFE record realization | none — retired; fixed circular convolution | none — fixed contract | — (retired; former Stage 5 owner `_apply_rxffe_response()`) | Retired: the Stage 5 contract now uses fixed circular convolution; former selectable realization methods were removed. |
+| `NUM-005` | active — approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
+| `ALG-012` | active — unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
+| `ALG-013` | active — unreviewed existing selector | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
+| `ALG-014` | active — unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
+| `ALG-015` | active — unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
+| `ALG-016` | active — unreviewed existing selector | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **provisional L3** `calculate_der_mlsd()` | 待完整初次審查 |
+| `ALG-017` | active — unreviewed existing selector | Stage 7 MLSD reported DER | `alg.reported_der`：`raw_sequence_sum`／`baseline_pdf_re_evaluation` | `baseline_pdf_re_evaluation` | **provisional L3** `calculate_COM_MLSD()` reported-DER block | 待完整初次審查 |
+| `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
+| `ALG-003` | active — approved branch | Cross-stage PDF→PMF shared utility; consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_build_pmf_G()`、`_reconstruct_final_vqc_sicopr()`、`evaluate_delta_com_an()`、`solve_g_an()`、`calculate_der_mlsd()` | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
+| `ALG-004` | active — approved branch | Stage 7 MLSD fixed-grid scalar-PMF scaling; consumers `_build_scaled_total_pdf_added_noise()` and `calculate_der_mlsd()` | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 ## Responsibility / impact boundaries
 
 本表將原本塞在 `Responsibility boundary` 單一欄位的內容拆成「允許改變」與
@@ -133,12 +145,12 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 
 ## 分支 ownership / function-position tree
 
-本樹是所有現存 178A closed branches、unreviewed selectors 與 pending candidates 在 semantic
-function call tree 中的位置總表。
+本樹是所有 active 178A branches、unreviewed selectors 與 pending candidates 在 semantic
+function call tree 中的位置總表。Retired branches 保留於上方分類總表，不出現在本 active tree；
+從未核准的 fixed/non-branch behavior 不取得 branch identity，也不列入本樹。
 `[owner]` 表示目前登錄的最低 semantic owner；`[injector]` 只解析或注入 concrete
 choice；`[consumer]` 使用結果但不擁有 branch；`[provisional]` 表示完整初次
-review 尚未完成。Retired／fixed non-branches 不放入本樹，統一列在後面的
-「不是分支的項目」。
+review 尚未完成。
 
 ```text
 COM model
@@ -226,12 +238,13 @@ COM model
 │  ├─ calculate_der_mlsd() recurrence termination            [ALG-016 provisional]
 │  └─ calculate_COM_MLSD() reported DER formation            [ALG-017 provisional]
 └─ Cross-domain L5 PMF operations
-   ├─ model helpers(..., pmf_projection_method)              [ALG-002 injectors]
+   ├─ `_calculate_V_qc()`／`_build_psd_adc_qn()`／`_build_adc_input_pmf_exact()`／`_reconstruct_final_vqc_sicopr()`／`calculate_der_mlsd()` [ALG-002 injectors]
    │  └─ Pmf1D.multi_dirac()/scale_x()/resample_dx()/fir_filter() [ALG-002 owner set]
    │     └─ Pmf1D._project_to_grid()                         [private kernel; non-owner]
    ├─ Pmf1D.fir_filter(..., keep_mass)                       [NUM-006 L5 owner]
    │  └─ _truncate_keep_mass()                               [private executor; non-owner]
-   ├─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
+   ├─ `_calculate_V_qc()`／`_build_psd_adc_qn()`／`_build_adc_input_pmf_exact()`／`_build_pmf_G()`／`_reconstruct_final_vqc_sicopr()`／`evaluate_delta_com_an()`／`solve_g_an()`／`calculate_der_mlsd()` [ALG-003 consumers]
+   │  └─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
    └─ MLSD scalar-PMF scaling
       ├─ _build_scaled_total_pdf_added_noise()               [ALG-004 direct injector]
       ├─ calculate_der_mlsd()                                [ALG-004 direct injector]
@@ -265,42 +278,25 @@ Outer runner 解析 candidate 後，同時把 scalar 值寫入 physical filter �
 scalar-only `cfg.srch`。`COM.run()` 拒絕未解析的 multi-candidate SRCH state；
 candidate ranking、Stage formulas 與 execution target 不屬於此 config migration。
 
-The former E-007 final-quantization tap-accumulation item has no selectable
-runtime control, so it receives no selectable-control ID. It remains a deferred
-technical issue: production ordering is frozen until PMF seed, main-tap
+The final-quantization tap-accumulation item has no selectable runtime control,
+so it receives no branch ID. It remains a deferred technical issue: production
+ordering is frozen until PMF seed, main-tap
 contribution, projection/support, and `ALG-013` interaction are resolved.
-
-### Legacy ID mapping
-
-| Legacy ID | Current ID | Note |
-|---|---|---|
-| B-001 / B-002 / B-003 | — / `ALG-006` / `ALG-007` | B-001 retired：178A S4P 固定依 D3.2 先做 single-ended renormalization；native S2P 僅為 input dispatch。B-002/B-003 仍是 Stage 1 branches。 |
-| B-004 / B-005 / B-006 / B-007 | `ALG-011` / `NUM-003` / `ALG-008` / `ALG-012` | Reordered by earliest stage and class |
-| B-008 | `ALG-002` | L5 public `Pmf1D` target-grid projection function set |
-| B-009 | — | Retired selector; historical ID only |
-| B-010/B-011 | `ALG-003` | Merged shared PDF→PMF control |
-| B-012 / B-013 / B-014 / B-015 | `ALG-004` / `NUM-005` / — / `ALG-013` | B-014 retired：178A Gaussian support 固定 8σ，不再是 Project Config；B-013 remains the independent final-domain grid resolver consumed in Stages 6／7 |
-| B-016 / B-017 / B-018 | `ALG-014` / `ALG-016` / `ALG-017` | Stage 7 ordering follows production flow |
-| B-019 / B-020 / B-021 | `ALG-001` / — / `ALG-015` | B-020 retired as a selectable control：`force_grid=False` is diagnostic utility behavior, not Project Config；B-021 remains Stage 7 PSD |
-| E-001 / E-002 / E-003 / E-004 | — / — / `NUM-004` / `NUM-006` | E-001 是 `cfg.exe.target` non-branch execution control；E-002 retired with ALG-009 after exact PMF became fixed behavior；E-003/E-004 依實際 function-set effect 歸入 NUM。 |
-| E-005 / E-006 / E-007 | — / `SRCH-001` / — | E-005 曾同時指 RX FFE tap-layout mapping defect 與 floating-mode inventory，存在 ID collision；不得作為 ALG-010 已審查證據。E-007 is a deferred non-selectable issue。 |
 
 ## 不是分支的項目
 
 | 項目 | 分類與原因 |
 |---|---|
 | `src.channel.victim/next/fext` binding | **Source/input configuration**。`path`、`representation`、`port_order` 選擇並解讀 artifact；`COMSourceConfig.ChannelBinding.load()` 負責載入與驗證，unsupported representation 不得 fallback。它不選擇同一 semantic operation 的平行方法，因此不建立 `SRC-001` branch。 |
-| `exe.target`（legacy E-001） | **Execution control**。`mse/dfe/mlsd/all_enabled` 只決定 pipeline 執行範圍；`COM._run_once()` 不因 target 改變任何已執行 stage 的公式或 method，因此不建立 `EXE-001` branch，也不參加 ownership review。 |
+| `exe.target` | **Execution control**。`mse/dfe/mlsd/all_enabled` 只決定 pipeline 執行範圍；`COM._run_once()` 不因 target 改變任何已執行 stage 的公式或 method，因此不建立 execution branch，也不參加 ownership review。 |
 | `channel.sparam_frequency_limit_Hz` | **輸入邊界**。描述實際送入 reader 的有效量測上限；execution profile 不得把任意 100 GHz 檔案暗中裁成 67 GHz。`ALG-006` 只決定此邊界外如何處理。 |
-| B-001／retired `ALG-005` channel renormalization selector | **固定規範行為＋input representation dispatch**。有 measured S4P 時，178A 依 D3.2 先將 single-ended S-parameters renormalize 至 `R0`，再轉 mixed-mode Sdd；只有 native differential S2P 才在 Sdd domain renormalize 至 `2*R0`。`_build_channel_under_test()` 是唯一語意 owner；失敗不得 fallback，`_build_path()` 不再 renormalize。 |
-| legacy E-002／retired `ALG-009` pre-DTE PMF method | **固定 exact-PMF 行為**。Cost/accuracy review 顯示 Gaussian approximation 僅節省約 1.5–2% candidate evaluation，卻實質改變 `V_qc`、MSE 與 selected phase，因此 selector 已移除；`_build_psd_adc_qn()` 固定執行 exact PMF。Legacy workbook `pmf_exact` row 僅維持 read compatibility。 |
 | `alg.xtalk_pmf_accumulation` | **固定行為**。目前唯一合法值是 `pathwise_convolution`，沒有 A/B 分支能力；保留是待清理的 API 欄位。 |
 | TX FFE discrete filter 與 `LinkSegment.cascade_ir()` | **等價實作**。對 oversampled pulse 做 shift-sum／convolution，不屬 CTLE branch。 |
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
 | RX package `reverse_ports()` | **共同正確流程**。die-to-channel network 建立後交換 two-port port orientation，不提供錯誤舊法作分支。 |
 | Eq. 178A-49 `(-1)^(j+1)` | **共同公式修正**。不是 Annex/reference 平行方法。 |
 | final quantization FIR 是否「包含 main tap」 | **不是 `ALG-012` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
-| B-009 `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供 B-009 selector。 |
+| `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供此 selector。 |
 | `SampledPSD.filtered_by()` grid matching | **固定 utility contract**。輸入 grid 不一致即由 caller 先處理；沒有隱藏 auto-regrid branch。 |
 | `cascade_ir(force_grid=False)` | **診斷／caller-owned utility behavior**。可回傳完整 linear-convolution record，或由 caller 明示 `output_cfg`；它不是獨立 Project Config branch，也不是 Stage 5 circular RX FFE。 |
 
@@ -310,7 +306,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 |---|---|
 | Status | **Closed 2026-11-11**。Helper ownership convergence 已由 isolated commit `b417b8c` 整合並推送；權威 owner tree 已由 `c804e3c` 整合。 |
 | Code convergence | `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()` 不再接收 `COMAlgorithmPolicyConfig`，只接收 concrete `pmf_projection_method`；`pdf_to_pmf_method` 維持獨立 concrete argument。 |
-| Preserved boundary | PAM source 保持 exact natural-grid atoms；B-009 不恢復；`tap_abs_th`、retained mass、ALG-003 與 ALG-004 都是獨立決策。 |
+| Preserved boundary | PAM source 保持 exact natural-grid atoms；已移除的 selector 不恢復；`tap_abs_th`、retained mass、ALG-003 與 ALG-004 都是獨立決策。 |
 | Validation | Focused `47 passed`；Python 3.7 export validation passed；固定 SiCoPR golden `1 passed`，DFE COM `1.5247607834259893 dB`、final COM `2.895898684873246 dB` 與 intermediate digests 不變。 |
 
 ### `ALG-003` 二次審查證據

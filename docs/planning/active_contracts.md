@@ -5,6 +5,12 @@ E/G/T 證據見 [`reference_alignment_contracts.md`](reference_alignment_contrac
 v1.0 release 狀態見
 [`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
 
+## Temporary rule contract — RC-20261115-001
+
+**Boundary:** 修改 branch ID lifecycle、registry ordering、retired records 與舊 ID cleanup 規則；不接管或修改 CP-BR project task。
+**Next gate:** 核對規則文件與 178A registry，完成 scoped commit。HANDOFF 的舊 cleanup 摘要待 project dirty state 可安全同步時更新。
+**Authorization:** 使用者已核准 change contract；本規則專用對話有明確規則維護授權。
+
 ## Workflow state
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
