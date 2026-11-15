@@ -525,7 +525,8 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert run_rows[("search_final", "target")] == "dfe"
     assert "eq_ch_imp_len" in fields
     assert "num_trunc_ui" in fields
-    assert "rxffe_record_realization" in fields
+    assert "rxffe_record_realization" not in fields
+    assert {"path_grid_mode", "fine_grid_df", "relative_threshold", "absolute_threshold"}.issubset(fields)
     assert "noise_grid_num_ui" not in fields
     canonical_grid_fields = {
         f"{family}.{field}"
