@@ -527,6 +527,9 @@ def test_178a_new_template_exposes_b005_and_versioned_execution_profile():
     assert "num_trunc_ui" in fields
     assert "rxffe_record_realization" not in fields
     assert {"path_grid_mode", "fine_grid_df", "relative_threshold", "absolute_threshold"}.issubset(fields)
+    groups = {row[1].value: row[0].value for row in book["fixed_config"].rows if len(row) > 1}
+    assert groups["path_grid_mode"] == "algorithm_policy"
+    assert groups["relative_threshold"] == "numerical_control"
     assert "noise_grid_num_ui" not in fields
     canonical_grid_fields = {
         f"{family}.{field}"
