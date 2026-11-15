@@ -130,11 +130,9 @@ reconstructs the final clipping distribution from the pre-FFE victim signal and
 post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE
 main gain, then applies the SiCoPR `P_qc` tail rule to obtain `V_qc` and `delta`.
 
-ALG-012 does not select whether the later FIR accumulation includes the main tap.
-That is a deferred realization issue involving the PMF seed and ALG-013
-projection/support. The current production ordering is frozen so that this
-reclassification cannot change COM. Both V_qc conventions share the selected
-phase, FFE/DFE, and non-quantization final PMFs.
+The reference path also follows the SiCoPR quantization-tap selection described
+below; this reference-only behavior is not the complete FIR model. Both V_qc
+conventions share the selected phase, FFE/DFE, and non-quantization final PMFs.
 
 The pre-DTE quantization PSD exists to support the MMSE solve. It is not substituted for this final quantization PMF.
 
@@ -210,6 +208,12 @@ Until these exist, this document makes no specification-accuracy claim.
 
 ## Known limitations and unresolved questions
 
+- **SiCoPR quantization tap indexing：** reference path 先找出 `w_lim` 的非零
+  係數，再跳過第 `d_w + 1` 個；不足該位置時不跳過。此方式重現 SiCoPR
+  4.17 的索引規則，不是完整 FIR 模型。Spec path 仍使用完整 taps；
+  `Pmf1D.fir_filter()` 不負責選擇要跳過的 tap。Stage 6 focused 7 passed、
+  3 subtests passed（涵蓋有／無前置零及非零 taps 不足）；project golden 1 passed。
+  其他 reference 數值細節仍需審查。
 - Shared 93A PMF helper reuse in the 178A stage needs explicit reference confirmation.
 - Final PMF mass retention remains hard-coded to 1.0; its voltage grid is owned by
   `cfg.num.final_pmf_grid`. There is no shared runtime `dy` override in the

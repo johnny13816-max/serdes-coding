@@ -106,7 +106,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-010` | active — approved branch | Stage 4 DTE solver | `alg.floating_mode`：`heuristic`／`simplified`／`spec-defined` | 不覆蓋 | **L3 semantic owner** `COM_MMSE_DTE`；**concrete owner** `COM_MMSE_DTE.run()` | **Closed 2026-11-12** |
 | `ALG-011` | retired — approved branch | Stage 5 RX FFE record realization | none — retired; fixed circular convolution | none — fixed contract | — (retired; former Stage 5 owner `_apply_rxffe_response()`) | Retired: the Stage 5 contract now uses fixed circular convolution; former selectable realization methods were removed. |
 | `NUM-005` | active — approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
-| `ALG-012` | active — unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | 待完整初次審查；D3p2 evidence pending |
+| `ALG-012` | active — unreviewed existing selector；evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **provisional L3** `calculate_COM_DFE()` final-`V_qc` block | reference quantization tap 跳過行為僅為對照 SiCoPR，不符合完整 FIR 模型；稀疏 tap 索引已依 reference 修改；D3.2 非零 `S_in` 延後；其餘審查未完成 |
 | `ALG-013` | active — unreviewed existing selector | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
 | `ALG-014` | active — unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
 | `ALG-015` | active — unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
@@ -277,10 +277,9 @@ Outer runner 解析 candidate 後，同時把 scalar 值寫入 physical filter �
 scalar-only `cfg.srch`。`COM.run()` 拒絕未解析的 multi-candidate SRCH state；
 candidate ranking、Stage formulas 與 execution target 不屬於此 config migration。
 
-The final-quantization tap-accumulation item has no selectable runtime control,
-so it receives no branch ID. It remains a deferred technical issue: production
-ordering is frozen until PMF seed, main-tap
-contribution, projection/support, and `ALG-013` interaction are resolved.
+The final-quantization reference tap selection follows the SiCoPR indexing rule
+within ALG-012's existing reference path, without introducing a separate branch.
+PMF projection/support and its interaction with `ALG-013` remain under review.
 
 ## 不是分支的項目
 
@@ -294,7 +293,7 @@ contribution, projection/support, and `ALG-013` interaction are resolved.
 | sinc／boxcar unit-pulse 表示 | **等價表示**。對齊 transfer function 與時間原點後不建立平行算法。 |
 | RX package `reverse_ports()` | **共同正確流程**。die-to-channel network 建立後交換 two-port port orientation，不提供錯誤舊法作分支。 |
 | Eq. 178A-49 `(-1)^(j+1)` | **共同公式修正**。不是 Annex/reference 平行方法。 |
-| final quantization FIR 是否「包含 main tap」 | **不是 `ALG-012` 分支**。它是 PMF seed／FIR accumulation 的等價實作問題；目前 production ordering 依 deferred final-quantization accumulation issue 凍結。 |
+| final quantization FIR 是否「包含 main tap」 | Spec path 傳入完整 FFE taps；reference path 為重現 SiCoPR，先移除零係數再按位置跳過一個 tap，不等同完整 FIR 模型。`Pmf1D.fir_filter()` 本身不執行此選擇。 |
 | `interference_pmf_method` | **已移除的非必要分支**。`signal_fir` 與 `pam_atoms` 的差異源自過早 grid projection；固定採 exact PAM atoms → tap scaling → grid projection → convolution。Runtime config、preset 與 workbook 不再提供此 selector。 |
 | `SampledPSD.filtered_by()` grid matching | **固定 utility contract**。輸入 grid 不一致即由 caller 先處理；沒有隱藏 auto-regrid branch。 |
 | `cascade_ir(force_grid=False)` | **診斷／caller-owned utility behavior**。可回傳完整 linear-convolution record，或由 caller 明示 `output_cfg`；它不是獨立 Project Config branch，也不是 Stage 5 circular RX FFE。 |
