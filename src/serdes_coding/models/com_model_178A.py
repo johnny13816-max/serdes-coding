@@ -2635,7 +2635,12 @@ class COM:
                 )
                 delta = 2.0 * V_qc / (2**imp_cfg.N_qb - 1)
                 quantization_taps = w_lim.copy()
-                quantization_taps[self.cfg.dte.d_w] = 0.0
+                # SiCoPR removes zero coefficients before applying its
+                # one-based precursor-position skip to the remaining taps.
+                nonzero_indices = np.flatnonzero(w_lim != 0.0)
+                skip_position = self.cfg.dte.d_w
+                if skip_position < len(nonzero_indices):
+                    quantization_taps[nonzero_indices[skip_position]] = 0.0
                 # The uniform error exists at the ADC input. Project each
                 # scaled tap to the final (post-FFE) PMF grid in fir_filter.
                 p_delta = Pmf1D.uniform(

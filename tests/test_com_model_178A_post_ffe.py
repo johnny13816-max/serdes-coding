@@ -3,12 +3,14 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import COM
 from serdes_coding.utilities.psd import SampledPSD
+from serdes_coding.utilities.pmf import Pmf1D
 
 
 class TestPostFFEImpairment178A(unittest.TestCase):
@@ -136,6 +138,58 @@ class TestPostFFEImpairment178A(unittest.TestCase):
         self.assertIsNotNone(alternate.final_delta)
         self.assertEqual(status.dte.mse, original_mse)
         self.assertEqual(status.imp.post_ffe.adc_input.delta, original_delta)
+
+    def test_reference_quantization_skips_compressed_tap_position(self) -> None:
+        cfg = replace(
+            self.cfg,
+            alg=replace(self.cfg.alg, final_com_vqc_convention="sicopr_final_reconstruction"),
+            num=replace(self.cfg.num, final_pmf_grid=replace(
+                self.cfg.num.final_pmf_grid, dy_override=1e-3,
+            )),
+        )
+        main = cfg.dte.d_w
+        original_fir = Pmf1D.fir_filter
+        for case in ("no_preceding_zero", "preceding_zero", "short_nonzero"):
+            with self.subTest(case=case):
+                taps = np.zeros(cfg.dte.N_max)
+                taps[main] = 1.0
+                if case != "short_nonzero":
+                    taps[:main] = 0.2
+                    taps[main + 1] = 0.3
+                if case == "preceding_zero":
+                    taps[0] = 0.0
+                expected = taps.copy()
+                indices = np.flatnonzero(taps != 0.0)
+                if main < len(indices):
+                    expected[indices[main]] = 0.0
+                captured = []
+
+                def recording_fir(pmf, fir, **kwargs):
+                    if kwargs.get("name") == "ADC_QN":
+                        captured.append(np.asarray(fir).copy())
+                    return original_fir(pmf, fir, **kwargs)
+
+                with patch.object(Pmf1D, "fir_filter", recording_fir):
+                    COM(cfg).calculate_COM_DFE(
+                        self.status.imp, self.status.eq_ch,
+                        replace(self.status.dte, w_lim=taps),
+                    )
+                self.assertEqual(len(captured), 1)
+                np.testing.assert_array_equal(captured[0], expected)
+
+        # The D3.2 path retains all taps, including the physical main tap.
+        spec_cfg = replace(cfg, alg=replace(cfg.alg, final_com_vqc_convention="selected_phase_adc_input"))
+        taps = np.zeros(cfg.dte.N_max)
+        taps[main] = 1.0
+        captured = []
+        def recording_spec(pmf, fir, **kwargs):
+            if kwargs.get("name") == "ADC_QN":
+                captured.append(np.asarray(fir).copy())
+            return original_fir(pmf, fir, **kwargs)
+        with patch.object(Pmf1D, "fir_filter", recording_spec):
+            COM(spec_cfg).calculate_COM_DFE(self.status.imp, self.status.eq_ch,
+                                           replace(self.status.dte, w_lim=taps))
+        np.testing.assert_array_equal(captured[0], taps)
 
 
 if __name__ == "__main__":
