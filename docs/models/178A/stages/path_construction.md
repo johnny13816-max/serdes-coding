@@ -4,7 +4,7 @@
 
 > **Adaptive grid:** fixed／adaptive path construction and both CTLE IIR
 > methods are implemented and have passed the recorded focused and case
-> checks. Local commits are complete; remote integration remains pending.
+> checks. Production commits are integrated into remote main.
 > This is not a claim of complete SiCoPR alignment.
 
 ## Purpose and ownership

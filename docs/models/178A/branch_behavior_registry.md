@@ -11,11 +11,11 @@ execution detail；`call_tree.md` 只保存 pipeline flow，不再各自維護 b
 
 範圍包含 178A runtime 及其實際呼叫的 shared utility 分支；不把 178A 選項自動視為 93A 行為。若 93A 新增平行算法，應建立或更新對應的 `docs/models/93A/branch_behavior_registry.md`。
 
-## 實作中：Stage 1 adaptive grid
+## Stage 1 adaptive grid
 
 `alg.path_grid_mode`（`fixed`／`adaptive`）的 owner 為
-`COM.build_all_paths()`；fixed 與 adaptive 已完成實作及主要驗證，local commits
-已建立，remote 整合待完成，尚未結案。
+`COM.build_all_paths()`；fixed 與 adaptive 已完成實作、適用驗證、受影響分支
+審查及 production 遠端整合。
 `num.fine_grid_df`、`num.relative_threshold`、
 `num.absolute_threshold` 為 adaptive controls，不各自構成 branch；runtime
 defaults 分別為 `1e6` Hz、`1e-3`、`None`。完整設計與待完成驗證見
@@ -92,12 +92,12 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 
 | ID | Branch classification / lifecycle | Scope | Selector 與 project choices | `sicopr_reference_v1` | Semantic owner | Ownership review |
 |---|---|---|---|---|---|---|
-| `ALG-018` | active — algorithm_policy branch | Stage 1 path response grid | `alg.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 numerical parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作；分類遷移及 project golden 已驗證，遠端整合待完成 |
-| `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L4 owner set** `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | shared setup 與 per-path realization 各自決策；focused 104 passed、project golden passed；remote 待整合 |
+| `ALG-018` | active — algorithm_policy branch | Stage 1 path response grid | `alg.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 numerical parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作；分類與 project golden 已驗證；production 已整合 |
+| `ALG-007` | active — approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L4 owner set** `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | shared setup 與 per-path realization 各自決策；focused 104 passed、project golden passed；production 已整合 |
 | `ALG-001` | active — approved branch | Stage 1 path construction | `alg.missing_dc_policy`：project default `skrf`；另有 `error`／`hold`／`mag_phase_trend_to_dc` | `mag_phase_trend_to_dc` | **L5** `SparamModel.completed_voltage_transfer_function()` | **二次審查已確認** |
 | `ALG-006` | active — approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
 | `ALG-005` | retired — approved branch | Stage 1 channel renormalization | none — retired; S4P order fixed by D3.2 and S2P uses representation dispatch | none — fixed contract | — (retired; former owner `COM._build_channel_under_test()`) | Retired: fixed specification behavior and input representation dispatch; no runtime selector |
-| `NUM-003` | active — approved branch | Stages 2／7 Pre-DTE 與 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num.num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證及 local commit；remote 整合待完成 |
+| `NUM-003` | active — approved branch | Stages 2／7 Pre-DTE 與 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num.num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證並完成遠端整合 |
 | `ALG-008` | active — approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-006` | active — approved branch | Stages 2／5 ADC-input FIR-PMF convergence; direct consumers `_build_psd_adc_qn()` and `_build_adc_input_pmf_exact()` | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
 | `NUM-004` | active — approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |

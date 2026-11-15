@@ -1,6 +1,6 @@
 # 178A Adaptive Response Grid 修改契約
 
-狀態：**已核准、已實作並完成主要驗證；remote 整合待完成**｜2026-11-15
+狀態：**已結案：實作、適用驗證、分支審查及 production 遠端整合完成**｜2026-11-15
 
 本文件保留已核准的 COM 數值流程修改契約。現行行為與 ownership 以
 [分支總表](../models/178A/branch_behavior_registry.md)、各 stage 文件和
@@ -20,7 +20,8 @@ production code 為準；實測與未完成的驗證邊界見
 
 歸檔不代表所有假設對所有 channels 均已證明；`1e-3`、有限 fine grid、
 `from_ir()` 對其他 XT 的適用性、記憶體及 circular wrap 仍以現有量測和
-限制為界。所有 production commits 尚待遠端整合，故尚未正式結案。
+限制為界。Production 與兩項受影響分支的審查已整合至遠端 main；
+ALG-007 focused 104 passed、project golden passed，ALG-018 分類及 golden 已驗證。
 
 ## 目的與邊界
 

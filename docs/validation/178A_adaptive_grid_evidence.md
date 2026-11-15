@@ -1,12 +1,12 @@
 # 178A adaptive grid 驗證紀錄
 
-狀態：**已實作並完成主要驗證；remote 整合待完成**｜更新至 2026-11-15
+狀態：**已實作、完成適用驗證及遠端整合**｜更新至 2026-11-15
 
 本紀錄只描述目前工作樹在指定 case 的結果；不得推廣為其他 case、IEEE
 compliance 或全面 SiCoPR 等價。契約見
 [adaptive grid change contract](../planning/178A_adaptive_grid_change_contract.md)。
 
-## XT 最大能量 PSD window 修改（未結案）
+## XT 最大能量 PSD window 修改與對照
 
 NUM-003 truncated 對完整 XT response 先選 phase，再於 pre-DTE／MLSD PSD
 owner 截取最大能量 window；其餘 noise 與 full 不變。針對性測試
