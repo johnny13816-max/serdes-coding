@@ -13,7 +13,7 @@
 - 評估者／授權依據：本規則維護對話；使用者明確核准 change contract。
 - 修改範圍：`branch_behavior_contract.md`、178A `branch_behavior_registry.md`、本紀錄與暫存 active contract；不修改 runtime、workbook 或 project task files。
 - 驗證：`git diff --check` 通過；四份修改文件的本地連結 target 通過；registry 分類表欄位數一致、Stage/call-tree 順序符合 owner tree、canonical ID 無重複；authoritative registry 無舊 B/E ID 或 mapping；active／retired 情境與未核准 non-branch 排除規則核對通過。既有 project dirty files 均未覆寫或納入本次規則範圍。HANDOFF cleanup 文字仍待安全同步，因此尚未 Closed。
-- Commit evidence：待規則變更完成後記錄；不包含專案 dirty files。
+- Commit evidence：規則文件／registry 實作 commit `d6ac0ba`（本機 `main`）；push 待處理，因 `origin/main` 落後 16 個既有 project commits，推送會超出本規則邊界。HANDOFF/state reconciliation 完成前維持 Implemented。
 
 ## RC-20261106-002 — Repository workbook batch maintenance
 
