@@ -14,7 +14,8 @@ execution detail；`call_tree.md` 只保存 pipeline flow，不再各自維護 b
 ## 實作中：Stage 1 adaptive grid
 
 `num.path_grid_mode`（`fixed`／`adaptive`）的候選 owner 為
-`COM.build_all_paths()`；fixed 與 adaptive 已進入實作及整合驗證，尚未結案。
+`COM.build_all_paths()`；fixed 與 adaptive 已完成實作及主要驗證，local commits
+已建立，remote 整合待完成，尚未結案。
 `num.fine_grid_df`、`num.relative_threshold`、
 `num.absolute_threshold` 為 adaptive controls，不各自構成 branch；runtime
 defaults 分別為 `1e6` Hz、`1e-3`、`None`。完整設計與待完成驗證見
@@ -86,9 +87,9 @@ consumer。尚未完成完整初次審查的 owner 只標為「provisional」，
 | `ALG-003` | approved branch | Shared PDF→PMF utility | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | approved branch | MLSD fixed-grid scalar-PMF scaling | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
 | `ALG-006` | approved branch | Stage 1 measured-grid scalar-transfer extension | `alg.out_of_measured`：project default `cosine_decay`；另有 `zero_padding` | `zero_padding` | **L5** `resample_tf()` | **Closed 2026-11-11** |
-| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | 新增 fine-grid 方法：實作驗證中 |
-| `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 修改驗證中 |
-| `NUM-007` | numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 實作與整合驗證中；尚未結案 |
+| `ALG-007` | approved branch | Stage 1 CTLE pulse realization | `alg.ctle_pulse_realization`：project default `continuous_tf`；另有 reference `bilinear_iir`／`bilinear_fine_grid` | `bilinear_iir` | **L3** CTLE pulse-realization functional block；L4 `_prepare_ctle_pulse_realization()`／`_realize_ctle_pulse()` | fine-grid 已實作與驗證；remote 整合待完成 |
+| `NUM-003` | approved branch | Stage 2 Pre-DTE 與 Stage 7 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證及 local commit；remote 整合待完成 |
+| `NUM-007` | numerical_control branch | Stage 1 path response grid | `num.path_grid_mode`：`fixed`／`adaptive`；fine df 與 thresholds 為 adaptive parameters | 不覆蓋；預設 `fixed` | **L1** `COM.build_all_paths()` | 已實作與主要驗證；remote 整合待完成 |
 | `SRCH-001` | approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
 | `ALG-008` | approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-004` | approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
