@@ -107,7 +107,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-011` | retired — approved branch | Stage 5 RX FFE record realization | none — retired; fixed circular convolution | none — fixed contract | — (retired; former Stage 5 owner `_apply_rxffe_response()`) | Retired: the Stage 5 contract now uses fixed circular convolution; former selectable realization methods were removed. |
 | `NUM-005` | active — approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `ALG-012` | active — approved branch；reference evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **L3** `COM._build_final_adc_quantization()` | owner 負責 V_qc／delta 與 p_qn；reference tap 跳過僅為對照 SiCoPR，非完整 FIR 模型；非零 `S_in` 延後，reference 逐項對齊尚待驗證 |
-| `ALG-013` | active — unreviewed existing selector | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **provisional L3** `calculate_COM_DFE()` final-ADC-PMF block | 待完整初次審查 |
+| `ALG-013` | active — approved branch；reference evidence bounded | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **L3** `COM._build_final_adc_quantization()` | 專案保留 tap numerical threshold；reference 使用 ADC input support 與 ordinate interpolation。SiCoPR 固定輸入 PMF 及 golden 通過；極低機率尾端的卷積差異尚未驗證 |
 | `ALG-014` | active — unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
 | `ALG-015` | active — unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
 | `ALG-016` | active — unreviewed existing selector | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **provisional L3** `calculate_der_mlsd()` | 待完整初次審查 |
@@ -223,7 +223,7 @@ COM model
 │  ├─ _resolve_final_com_pmf_config()                        [NUM-005 L4 owner; execution point 1]
 │  │  └─ COMPMFGridControl.resolve_dy()                      [L5 shared grid kernel]
 │  ├─ calculate_COM_DFE() component／combined PMFs           [NUM-005 direct consumer]
-│  └─ COM._build_final_adc_quantization()                    [ALG-012 L3 owner；ALG-013 projection provisional]
+│  └─ COM._build_final_adc_quantization()                    [ALG-012、ALG-013 L3 owner]
 ├─ L1 Stage 7 / Domain — MLSD model
 │  ├─ _resolve_final_com_pmf_config()                        [same NUM-005 L4 owner; execution point 2]
 │  │  └─ gaussian_addition → solve_g_an()／evaluate_delta_com_an()

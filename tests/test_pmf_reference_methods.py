@@ -165,6 +165,32 @@ def test_fir_filter_uses_mass_deposit_not_scalar_resampling():
     assert not np.array_equal(filtered.pmf, interpolated.pmf)
 
 
+@pytest.mark.parametrize("taps", [[0.5], [-0.5], [1.5], [0.5, -1.5], [0.25, 0.75], [0.5, 0.0]])
+def test_fir_reference_scaling_matches_independent_sampled_convolution(taps):
+    source = Pmf1D(dx=0.1, st_idx=-4, pmf=np.array([0, 0, 0, .2, .6, .2, 0, 0, 0]))
+    expected = np.zeros(9)
+    expected[4] = 1.0
+    start = -4
+    for tap in taps:
+        tap = abs(tap)
+        if tap == 0:
+            continue
+        term_start = int(np.floor(source.st_idx * tap))
+        x = np.arange(term_start, -term_start + 1) * source.dx
+        term = np.interp(x, source.x * tap, source.pmf, left=np.nan, right=np.nan)
+        term[0], term[-1] = term[1], term[-2]
+        term /= term.sum()
+        expected = np.convolve(expected, term)
+        start += term_start
+    actual = source.fir_filter(
+        np.abs(np.array(taps)), keep_mass=1.0, dx_ref=0.1,
+        tap_abs_th=np.nextafter(0.0, 1.0),
+        initial_bin_range=(-4, 4), scaling_method="interpolate_ordinates",
+    )
+    assert actual.st_idx == start
+    np.testing.assert_allclose(actual.pmf, expected, rtol=0, atol=1e-12)
+
+
 def test_fir_filter_keep_mass_truncates_each_intermediate_and_renormalizes():
     source = Pmf1D(
         dx=1.0,

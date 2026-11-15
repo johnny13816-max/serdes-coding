@@ -1306,6 +1306,14 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
                 "final_adc_pmf_projection='reference_support' requires "
                 "final_com_vqc_convention='sicopr_final_reconstruction'."
             )
+        if (
+            self.final_adc_pmf_projection == "reference_support"
+            and self.pdf_to_pmf_method != "pmf_sample"
+        ):
+            raise ValueError(
+                "final_adc_pmf_projection='reference_support' requires "
+                "pdf_to_pmf_method='pmf_sample'."
+            )
 @dataclass(repr=False)
 class COMConfig(COMDataclassText):
     """Top-level 178A COM configuration grouped by function."""

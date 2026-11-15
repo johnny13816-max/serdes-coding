@@ -3,10 +3,14 @@ from dataclasses import fields, replace
 from inspect import getsource, signature
 from pathlib import Path
 from shutil import copy2
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import openpyxl
 import pytest
+import serdes_coding.models.com_model_178A as com_178a_model
+from serdes_coding.utilities.pmf import Pmf1D
 
 from serdes_coding.io.com_excel_io import excel_to_config_178A
 from serdes_coding.models.com_model_178A import (
@@ -345,6 +349,36 @@ def test_178a_final_com_vqc_policy_rejects_unknown_method(reference_cfg):
 def test_178a_pdf_to_pmf_policy_rejects_unknown_method(reference_cfg):
     with pytest.raises(ValueError, match="pdf_to_pmf_method"):
         _with_methods(reference_cfg, pdf_to_pmf_method="unknown")
+
+
+def test_178a_reference_adc_support_rejects_bin_integral(reference_cfg):
+    with pytest.raises(ValueError, match="requires pdf_to_pmf_method='pmf_sample'"):
+        _with_methods(reference_cfg, pdf_to_pmf_method="bin_integral")
+
+
+def test_reference_final_adc_pmf_uses_adc_grid_with_ordinate_scaling(reference_cfg):
+    cfg = reference_cfg
+    runtime = _resolve_final_com_pmf_config(cfg.pmf, 0.3, cfg.num)
+    adc_runtime = replace(runtime, dy=runtime.dy / 5.0)
+    noise = Pmf1D(dx=adc_runtime.dy, st_idx=-100, pmf=np.full(201, 1.0 / 201))
+    taps = np.zeros(cfg.dte.N_max)
+    taps[cfg.dte.d_w] = 5.0
+    taps[cfg.dte.d_w + 1] = 0.5
+    imp = SimpleNamespace(post_ffe=SimpleNamespace(adc_input=SimpleNamespace(method="pmf_exact")))
+    dte = SimpleNamespace(w_lim=taps)
+    with patch.object(com_178a_model, "_reconstruct_final_vqc_sicopr", return_value=(0.01, adc_runtime, noise)):
+        actual, _, delta = COM(cfg)._build_final_adc_quantization(imp, None, dte, runtime)
+    quantizer = Pmf1D.uniform(delta, adc_runtime, pdf_to_pmf_method="pmf_sample", support=noise)
+    nonzero = np.flatnonzero(taps)
+    if cfg.dte.d_w < len(nonzero):
+        taps[nonzero[cfg.dte.d_w]] = 0.0
+    expected = quantizer.fir_filter(
+        np.abs(taps), keep_mass=1.0, dx_ref=runtime.dy,
+        tap_abs_th=np.nextafter(0.0, 1.0), initial_bin_range=(-100, 100),
+        scaling_method="interpolate_ordinates",
+    )
+    assert actual.st_idx == expected.st_idx
+    np.testing.assert_allclose(actual.pmf, expected.pmf, rtol=0.0, atol=1e-15)
 
 
 def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference_cfg, tmp_path):

@@ -948,6 +948,7 @@ class Pmf1D:
         output_unit: Optional[str] = None,
         projection_method: Literal["linear", "nearest"] = "linear",
         initial_bin_range: Optional[tuple[int, int]] = None,
+        scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
     ) -> 'Pmf1D':
         """
         Return the FIR-filtered PMF.
@@ -982,6 +983,8 @@ class Pmf1D:
             Optional inclusive support of the unit-mass seed on ``dx_ref``.
             Only the zero bin has mass; other bins retain the supplied support
             during subsequent convolutions.
+        scaling_method:
+            Concrete tap scaling operation. The default preserves the usual FIR behavior.
         """
         keep_mass = float(keep_mass)
         if not np.isfinite(keep_mass) or not 0.0 < keep_mass <= 1.0:
@@ -1025,7 +1028,7 @@ class Pmf1D:
             for c in coeff:
                 term = base.copy().scale_x(
                     c,
-                    keep_dx=True, dx_ref=dx_ref, method="mass_deposit",
+                    keep_dx=True, dx_ref=dx_ref, method=scaling_method,
                     projection_method=projection_method,
                 )
                 out_pmf = _convolve_probability_mass(out_pmf, term.pmf)

@@ -2623,7 +2623,9 @@ class COM:
                     pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
                 )
             p_qn = p_delta.fir_filter(
-                quantization_taps,
+                np.abs(quantization_taps)
+                if self.cfg.alg.final_adc_pmf_projection == "reference_support"
+                else quantization_taps,
                 keep_mass = pmf_cfg_for_com.keep_mass,
                 dx_ref = pmf_cfg_for_com.dy,
                 tap_abs_th = (
@@ -2640,6 +2642,11 @@ class COM:
                     and self.cfg.alg.final_com_vqc_convention
                     == "sicopr_final_reconstruction"
                     else None
+                ),
+                scaling_method=(
+                    "interpolate_ordinates"
+                    if self.cfg.alg.final_adc_pmf_projection == "reference_support"
+                    else "mass_deposit"
                 ),
             )
         if V_qc is not None and self.cfg.alg.final_com_vqc_convention == "sicopr_final_reconstruction":
@@ -2700,14 +2707,14 @@ class COM:
             name="Dual-Dirac",
         )
 
-        p_qn, final_V_qc, final_delta = self._build_final_adc_quantization(
-            imp_status, eq_ch, dte_status, pmf_cfg_for_com,
-        )
-
         # pmf of gaussian noise
         p_G = _build_pmf_G(
             imp_status, dte_status, self.cfg.link, pmf_cfg_for_com,
             pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
+        )
+
+        p_qn, final_V_qc, final_delta = self._build_final_adc_quantization(
+            imp_status, eq_ch, dte_status, pmf_cfg_for_com,
         )
 
         # combined pmf, A_ni

@@ -25,10 +25,8 @@ The current function does not provide a complete clause-by-clause 178A citation 
 TC-019 的 reference preset 會在 adapter 展開成具名 PMF methods。此 stage
 依這些方法讓 ISI／XT／DD 由原始 PAM 振幅乘 tap 後最近落格；Gaussian grid support
 固定為 internal 8σ，並依選定 PDF→PMF method 建構；ADC uniform
-使用最近端點和 clipping-noise PMF 的完整 support，RX FFE tap 縮放
-採 ALG-002 的 mass deposit 與 projection method。ALG-004 的 ordinate
-interpolation 僅適用於 MLSD direct scalar-PMF resampling，不傳入此 FIR
-construction。final `dy=dy_rel_As*As` 以未正規化的
+使用最近端點和 ADC-input clipping-noise PMF 的完整 support，RX FFE tap 縮放
+使用 ordinate interpolation；專案方法維持 mass deposit。final `dy=dy_rel_As*As` 以未正規化的
 RX FFE 電壓座標表示，除以主 tap gain 後即為 reference 的 grid。
 模型只傳遞已解析的方法，通用 PMF utility 與此 stage
 都不包含 SiCoPR 專用 boolean。此選用方法不替代 D3.0 一般模式。
@@ -92,13 +90,13 @@ calculate_COM_DFE(...)
 ├── build p_ISI from h_ISI
 ├── build p_XT from all h_XTs_w
 ├── build p_DD from A_DD and h_w_J
-├── _build_final_adc_quantization() → p_qn, V_qc, delta [ALG-012 owner]
+├── build p_G from sigma_G
+├── _build_final_adc_quantization() → p_qn, V_qc, delta [ALG-012／013 owner]
 │   ├── disabled -> zero-amplitude unit-mass PMF
 │   └── enabled
 │       ├── require post-FFE method="pmf_exact"; spec mode requires delta
 │       ├── select V_qc / delta and quantization taps by convention
 │       └── build uniform PMF and FIR-filter with selected taps
-├── build p_G from sigma_G
 ├── combine p_ISI, p_XT, p_DD, p_qn, and p_G
 ├── evaluate configured DER_0 quantile -> y0
 ├── derive A_ni and COM
@@ -133,6 +131,40 @@ main gain, then applies the SiCoPR `P_qc` tail rule to obtain `V_qc` and `delta`
 The reference path also follows the SiCoPR quantization-tap selection described
 below; this reference-only behavior is not the complete FIR model. Both V_qc
 conventions share the selected phase, FFE/DFE, and non-quantization final PMFs.
+
+ALG-013 的 concrete owner 是 `COM._build_final_adc_quantization()`。
+`annex_d3` 保留原本的 tap threshold 與 mass-deposit scaling；
+`reference_support` 使用 ADC-input noise PMF 的 amplitude grid 和 ordinate
+interpolation，並要求 `pdf_to_pmf_method=pmf_sample`。此 reference 數值
+路徑已通過固定輸入的 SiCoPR PMF 比較及現有 golden；不能由此推論完整 COM 對齊。
+固定 golden 首次驗證：MSE、`V_qc`、`delta` 既有斷言通過；
+`A_ni` 從 `0.2656833333333335 V` 變成約 `0.2694833333333335 V`，
+不符合原 `1e-12 V` 容差。測試在此停止，未驗證 final COM；未修改 golden。
+修正 ADC grid 後，固定 golden 重跑 `1 passed`，MSE、`A_ni`、DFE COM、
+final COM 均符合既有 tolerance，未變更 golden。
+同一 golden case、phase 5、MSE `0.006191300963670364` 的 Stage 6
+counterfactual，以相同 noise、FFE、`delta` 隔離兩個數值選擇：
+
+| Uniform PMF grid | Tap scaling | `p_qn` bins | `A_ni` (V) |
+|---|---|---:|---:|
+| ADC input (`5.374294198730745 µV`) | mass deposit | 33541 | 0.2656833333333335 |
+| ADC input | ordinate interpolation | 33567 | 0.2656833333333326 |
+| Final (`316.6666666666667 µV`) | mass deposit | 1420693 | 0.2685333333333233 |
+| Final | ordinate interpolation | 1420717 | 0.2694833333333406 |
+
+此對照表明本 case 的 `A_ni` 變化主要來自 grid；它不是 SiCoPR 實跑資料，
+不能單憑此表宣稱逐格對齊。先前 TC-019 的 SiCoPR 對照記錄顯示兩側
+電壓座標須經 main tap gain 換算；直接使用 final grid 的錯誤修改已依核准修正。
+
+進一步以 SiCoPR Python 1.2.1（`cb7c4be5c63d41e88b6ee7d04fb17e0046ab0f75`，
+模擬 COM 4.17）實際執行 quantization PMF：固定 golden case phase 5、
+共用 `V_qc=0.0431394595332117 V` 與同一組 noise／FFE；以 main gain
+`58.92246590100227` 轉換座標，ADC grid 加 ordinate interpolation 的
+兩側 PMF 都有 33567 bins，逐格最大差 `8.413408858487514e-17`、L1 差
+`2.5034663500457392e-14`。這是 fixed-input 的 PMF 對照，不是完整 SiCoPR
+COM run；兩側 clipping 先固定為相同值，ALG-012 的差異未包含。
+SiCoPR 1.2.1 使用 direct convolution，而本專案使用 FFT convolution；
+低機率尾部的數值差異尚未獨立解決，不能由逐格最大絕對誤差推論尾端相對精度。
 
 The pre-DTE quantization PSD exists to support the MMSE solve. It is not substituted for this final quantization PMF.
 
