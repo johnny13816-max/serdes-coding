@@ -5,14 +5,14 @@
 
 ## RC-20261116-001 — 子項完成與切換 gate
 
-- 日期／狀態：2026-11-16／Implemented；待提交與結案紀錄後 Closed。
+- 日期／狀態：2026-11-16／Implemented；active rule state reconciliation pending。
 - 問題：文件同步、狀態維護與 Git integration 雖有規定，卻分散於不同章節；執行 agent 可能完成子項後未即時更新權威文件／狀態，或未判定 commit/push 就開始下一項。
 - 依據：使用者指出實務上反覆發生基本收尾遺漏，包含無法判斷子項是否應 commit、技術文件及文件狀態未及時更新。
 - 評估／決策：接受在一般 workflow 加入單一 transition gate。每個子項完成／切換前核對 acceptance、同步 owner 文件及有變化的權威狀態、判斷獨立 boundary 的 Git 整合；未完成條件保持 pending。HANDOFF 仍依原 lifecycle 更新，避免每個子項重複複製摘要。
 - 修改範圍：`AGENTS.md`、`project_workflow.md`、個人 Codex `algorithm-development` skill、本紀錄；不修改 project code、tracker 資料列或既存 project dirty state。
 - 驗證：`git diff --check` 通過；AGENTS link 與 workflow heading 已核對；skill frontmatter 與新增轉換 gate 已人工核對。情境檢查確認技術文件不適用時需記錄理由、owner 狀態變動需即時更新、獨立完成 boundary 依既有 main-first 規則 commit/push、未完成項保持 pending，HANDOFF 不需逐子項複製。
 - 評估者／授權依據：本規則維護對話；使用者已明確授權本對話維護專案規則。
-- Commit evidence：待提交。
+- Commit evidence：規則 commit `2a8f6dc`；本次 session 未修改既存 dirty `active_contracts.md`，因此不標 Closed。
 - 下一 gate：active rule state 尚未收斂；`active_contracts.md` 有既存 project dirty changes，待可安全同步時更新並結案。
 
 ## RC-20261115-002 — 大型演算法契約完成與切換
