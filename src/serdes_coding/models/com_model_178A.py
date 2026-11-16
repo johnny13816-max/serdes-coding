@@ -983,7 +983,7 @@ def evaluate_delta_com_an(
     Parameters
     ----------
     g_an:
-        Non-negative PSD scale factor from Eq. (178A-50).
+        Non-negative PSD scale factor from D3.2 Eq. (178A-52).
     post_ffe:
         Post-FFE impairment stage from the DFE calculation.  Its ``S_rn``
         already includes the receiver FFE response.
@@ -1033,7 +1033,7 @@ def evaluate_delta_com_an(
             + "."
         )
 
-    # Eq. (178A-50).  post_ffe.S_rn already contains |H_rxffe|^2.
+    # D3.2 Eq. (178A-52): post_ffe.S_rn already contains |H_rxffe|^2.
     S_an = SampledPSD(
         theta=post_psd.S_rn.theta,
         psd=g_an * post_psd.S_rn.psd,
@@ -1041,12 +1041,12 @@ def evaluate_delta_com_an(
         cfg=post_psd.S_rn.cfg,
     )
     sigma_G = float(post_psd.sigma_G)
-    # Eq. (178A-51): to_sigma() integrates S_an on the SampledPSD one-sided grid;
+    # D3.2 Eq. (178A-53): to_sigma() integrates S_an on the SampledPSD one-sided grid;
     # hypot then forms sqrt(sigma_G^2 + sigma_added^2).
     sigma_added = float(S_an.to_sigma())
     sigma_an = float(np.hypot(sigma_G, sigma_added))
 
-    # Eq. (178A-51) and its following text: replace the Gaussian part of p_an
+    # D3.2 Eq. (178A-53) and its following text: replace the Gaussian part of p_an
     # with sigma_an, retaining the DFE-stage ISI/XT/DD/quantization PMFs.
     p_G_an = Pmf1D.gaussian(
         mu=0.0,
@@ -1096,7 +1096,7 @@ def solve_g_an(
     max_iter: int = 64,
     pdf_to_pmf_method: Literal["bin_integral", "pmf_sample"] = "bin_integral",
 ) -> COMAddedNoiseStatus:
-    """Solve Eq. (178A-50) scale factor for a target added-noise penalty.
+    """Solve D3.2 Eq. (178A-52) scale factor for a target added-noise penalty.
 
     The evaluator is numerical because it includes PMF convolution and an
     inverse-CDF measurement.  This solver therefore finds a non-negative
@@ -1260,10 +1260,10 @@ def _build_scaled_total_pdf_added_noise(
         method=scaling_method,
         projection_method=projection_method,
     )
-    variance_ref = _pmf_variance(p_ref)
-    variance_an = _pmf_variance(p_an)
+    moment_ref = float(np.sum(p_ref.pmf * p_ref.x ** 2))
+    moment_an = float(np.sum(p_an.pmf * p_an.x ** 2))
     receiver_variance = float(post_psd.S_rn.to_sigma() ** 2)
-    variance_added = variance_an - variance_ref
+    variance_added = moment_an - moment_ref
     if receiver_variance <= 0.0 or variance_added < -1e-15:
         raise COMError(
             "scaled_total_pdf produced invalid added-noise variance: "
@@ -2761,6 +2761,28 @@ class COM:
             COM=COM,
         )
 
+    def _build_mlsd_added_noise(
+        self,
+        post_ffe: COMImpStageStatus,
+        pmf_dfe: COMPMFStatus,
+        pmf_cfg: COMPMFRuntimeConfig,
+    ) -> COMAddedNoiseStatus:
+        """Select and build the complete MLSD added-noise result."""
+        target = self.cfg.mlsd.resolved_delta_com_an()
+        method = self.cfg.alg.added_noise_pdf
+        if method == "scaled_total_pdf":
+            return _build_scaled_total_pdf_added_noise(
+                target, post_ffe, pmf_dfe, self.cfg.DER_0,
+                scaling_method=self.cfg.alg.pmf_scaling_method,
+                projection_method=self.cfg.alg.pmf_projection_method,
+            )
+        if method == "gaussian_addition":
+            return solve_g_an(
+                target, post_ffe, pmf_dfe, pmf_cfg, self.cfg.DER_0,
+                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
+            )
+        raise ValueError("added_noise_pdf must be 'gaussian_addition' or 'scaled_total_pdf'.")
+
     def calculate_COM_MLSD(self) -> COMMLSDStatus:
         """Calculate the Annex 178A MLSD COM adjustment after COM_DFE.
 
@@ -2808,27 +2830,7 @@ class COM:
         pmf_cfg = _resolve_final_com_pmf_config(
             self.cfg.pmf, imp_status.As, self.cfg.num,
         )
-        # Eqs. (178A-50) and (178A-51): calibrate added receiver noise.
-        # The Annex realization replaces only the Gaussian component.  The
-        # reference realization scales the complete DFE PDF before deriving g_an.
-        if self.cfg.alg.added_noise_pdf == "scaled_total_pdf":
-            added_noise = _build_scaled_total_pdf_added_noise(
-                self.cfg.mlsd.resolved_delta_com_an(),
-                imp_status.post_ffe,
-                pmf_dfe,
-                self.cfg.DER_0,
-                scaling_method=self.cfg.alg.pmf_scaling_method,
-                projection_method=self.cfg.alg.pmf_projection_method,
-            )
-        else:
-            added_noise = solve_g_an(
-                self.cfg.mlsd.resolved_delta_com_an(),
-                imp_status.post_ffe,
-                pmf_dfe,
-                pmf_cfg,
-                self.cfg.DER_0,
-                pdf_to_pmf_method=self.cfg.alg.pdf_to_pmf_method,
-            )
+        added_noise = self._build_mlsd_added_noise(imp_status.post_ffe, pmf_dfe, pmf_cfg)
         # Eq. (178A-54): build the MLSD noise PSD and autocorrelation.
         noise = self.build_mlsd_noise(imp_status, eq_ch, dte_status, added_noise)
         # Eqs. (178A-48), (178A-49), (178A-52), (178A-53): calculate DER.

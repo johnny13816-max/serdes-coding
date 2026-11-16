@@ -3,15 +3,79 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
 from serdes_coding.models.com_model_178A import (
+    COM,
+    COMPMFStatus,
+    COMPMFRuntimeConfig,
+    _build_scaled_total_pdf_added_noise,
+    solve_g_an,
     _build_mlsd_sequence_vector,
     _reference_cdf_ev,
     calculate_der_mlsd,
 )
 from serdes_coding.utilities.pmf import Pmf1D
+from serdes_coding.utilities.psd import SampledPSD
+
+
+def test_reference_added_noise_uses_raw_second_moment_for_nonzero_mean():
+    source = Pmf1D(dx=1.0, st_idx=-2, pmf=np.array([0.05, 0.1, 0.15, 0.3, 0.4]))
+    receiver = SampledPSD.from_constant(np.linspace(0, np.pi, 5), 0.1, 8.0)
+    post = SimpleNamespace(psd=SimpleNamespace(S_rn=receiver, sigma_G=0.1))
+    result = _build_scaled_total_pdf_added_noise(
+        20 * np.log10(2.0), post, COMPMFStatus(dy=1.0, tap_abs_th=0.0, p_combined=source), 0.05,
+        scaling_method="interpolate_ordinates", projection_method="linear",
+    )
+    expected = 4.985714285714285 / receiver.to_sigma() ** 2
+    np.testing.assert_allclose(result.g_an, expected, rtol=0, atol=1e-12)
+    assert not np.isclose(result.g_an, 3.875510204081632 / receiver.to_sigma() ** 2)
+
+
+def test_added_noise_owner_selects_both_complete_results():
+    model = COM.__new__(COM)
+    model.cfg = SimpleNamespace(
+        mlsd=SimpleNamespace(resolved_delta_com_an=lambda: 1.0), DER_0=0.001,
+        alg=SimpleNamespace(added_noise_pdf="gaussian_addition", pmf_scaling_method="mass_deposit",
+                            pmf_projection_method="linear", pdf_to_pmf_method="bin_integral"),
+    )
+    post, pmf, cfg = object(), object(), object()
+    with patch("serdes_coding.models.com_model_178A.solve_g_an") as solve, patch(
+        "serdes_coding.models.com_model_178A._build_scaled_total_pdf_added_noise"
+    ) as scale:
+        assert model._build_mlsd_added_noise(post, pmf, cfg) is solve.return_value
+        solve.assert_called_once_with(1.0, post, pmf, cfg, 0.001, pdf_to_pmf_method="bin_integral")
+        scale.assert_not_called()
+        model.cfg.alg.added_noise_pdf = "scaled_total_pdf"
+        assert model._build_mlsd_added_noise(post, pmf, cfg) is scale.return_value
+        scale.assert_called_once_with(1.0, post, pmf, 0.001,
+                                      scaling_method="mass_deposit", projection_method="linear")
+        model.cfg.alg.added_noise_pdf = "invalid"
+        with np.testing.assert_raises_regex(ValueError, "added_noise_pdf"):
+            model._build_mlsd_added_noise(post, pmf, cfg)
+
+
+def test_gaussian_owner_matches_existing_solver():
+    receiver = SampledPSD.from_constant(np.linspace(0, np.pi, 5), 0.1, 8.0)
+    post = SimpleNamespace(psd=SimpleNamespace(S_rn=receiver, sigma_G=0.1))
+    cfg = COMPMFRuntimeConfig(dy=0.01, tap_abs_th=0.0, keep_mass=1.0, gaussian_n_sigma=8.0)
+    impulse = Pmf1D(dx=0.01, st_idx=0, pmf=np.array([1.0]))
+    gaussian = Pmf1D.gaussian(mu=0.0, sigma=0.1, dx=0.01, n_sigma=8.0, unit="volt")
+    pmf = COMPMFStatus(dy=0.01, tap_abs_th=0.0, p_ISI=impulse, p_XT=impulse,
+                       p_DD=impulse, p_qn=impulse, p_combined=gaussian)
+    model = COM.__new__(COM)
+    model.cfg = SimpleNamespace(
+        mlsd=SimpleNamespace(resolved_delta_com_an=lambda: 0.0), DER_0=0.01,
+        alg=SimpleNamespace(added_noise_pdf="gaussian_addition", pdf_to_pmf_method="bin_integral"),
+    )
+    baseline = solve_g_an(0.0, post, pmf, cfg, 0.01)
+    result = model._build_mlsd_added_noise(post, pmf, cfg)
+    assert result.g_an == baseline.g_an
+    assert result.delta_com_an_temp == baseline.delta_com_an_temp
+    np.testing.assert_array_equal(result.p_an.pmf, baseline.p_an.pmf)
 
 
 class TestMLSDFlow178A(unittest.TestCase):

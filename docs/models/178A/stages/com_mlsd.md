@@ -18,11 +18,23 @@ It owns:
 
 It does not modify the stored DFE PMF baseline. `status.pmf` remains the DFE result, and MLSD results are stored separately.
 
+ALG-014 owner 為 `COM._build_mlsd_added_noise()`：依 `cfg.alg.added_noise_pdf`
+選擇 Gaussian 校準或 reference total-PMF scaling，回傳完整 `COMAddedNoiseStatus`。
+Reference 以縮放前後的二階矩差（非中心化 variance 差）計算 added noise，
+以對齊 SiCoPR；our branch 的 Gaussian 計算不變。
+
+驗證：focused MLSD／policy tests `56 passed, 2 subtests passed`；非零平均
+PMF 的 SiCoPR 1.2.1 共同輸入對照中，`p_an` 最大差與 `g_an` 差皆為 0。
+固定 `sicopr_akinwale_vendorx_22db`、reference `linear`、`all_enabled`：
+phase 5，MSE `0.006191300963670364`，DFE COM `1.5247607834260184 dB`，
+final COM `2.895898684873275 dB`；符合既有 `1e-14` MSE／`1e-12 dB`
+COM golden 容差。此為固定案例證據，不表示所有案例與 reference 完全相同。
+
 ## Governing references
 
 Current source identifies:
 
-- Annex 178A.1.10.1 and Eq. 178A-50 for added-noise calibration;
+- D3.2 Annex 178A.1.10.1 and Eq. 178A-52／53 for added-noise calibration;
 - Eq. 178A-47 through Eq. 178A-53 for truncated MLSD detector-error calculation;
 - Eq. 178A-54 for MLSD input PSD/autocorrelation construction.
 
@@ -31,14 +43,15 @@ The implementation annotations and data flow are recorded here. Focused equation
 ## 逐式 spec review 索引
 
 下表是下一輪逐式核對的入口；「已驗」只代表所列不變量，並非整個 MLSD stage 與 reference 等價。
+本次 ALG-014 僅核對並標示 added-noise 的 D3.2 編號；其他未標 D3.2 的編號沿用舊版，待各自審查。
 
 | 178A 公式 | 目前程式責任 | 已驗證／待核對 |
 |---|---|---|
 | (47) | `calculate_COM_MLSD()`：`A_MLSD=-P_an^{-1}(DER_MLSD)`；`COM_DFE+20log10(A_MLSD/A_s)`，再套 DFE floor | TC-011 已驗分母與 floor；待跨 case |
 | (48) | `calculate_der_mlsd()`：逐 `j` 的 CDF 門檻、`((L-1)/L)^(j-1)` 權重與截斷加總 | 固定候選 65–128 項尾和 `2.05e-18`；門檻／無窮和一般情況待核對 |
 | (49) | `_build_mlsd_sequence_vector()`：建立 `u_j` 的首項、中間項、末項 | TC-023 已驗 `j=1,2,3`；末項為 `(-1)^(j+1)b_1` |
-| (50) | `evaluate_delta_com_an()`／`solve_g_an()`：`S_an=g_an S_rn |H_rxffe|²` 的校準 | post-FFE `S_rn` 已含 FFE；校準數值及 reference 邊界待核對 |
-| (51) | `evaluate_delta_com_an()`：`sigma_an²=sigma_G²+power(S_an)` 並重建 `p_an` | Gaussian／PMF 卷積與 quantile 細節待核對 |
+| D3.2 (52) | `evaluate_delta_com_an()`／`solve_g_an()`：`S_an=g_an S_rn |H_rxffe|²` 的校準 | post-FFE `S_rn` 已含 FFE |
+| D3.2 (53) | `evaluate_delta_com_an()`：`sigma_an²=sigma_G²+power(S_an)` 並重建 `p_an` | 其餘 PMF 保持不變 |
 | (52) | `calculate_der_mlsd()`：`p_1=conv(p_an,scale(p_an,+b_1))` | TC-012 非對稱 PMF 符號測試已驗；一般 PMF 網格誤差待核對 |
 | (53) | `calculate_der_mlsd()`：後續迭代卷積 `scale(p_an,1-b_1)` | 遞迴次數與 PMF 網格誤差待核對 |
 | (54) | `build_mlsd_noise()`：`S_ni=S_n|H_rxffe|²+S_an+S_isi`；`R_ni` 由同一 PSD 反轉換 | TC-009 已驗 pre-FFE 選源、one-sided `S_isi`、Parseval 與 PSD 和；跨 case 待核對 |
@@ -49,14 +62,14 @@ The implementation annotations and data flow are recorded here. Focused equation
 本節只描述**目前工作樹實作**，以便逐項與 178A 原文核對；程式註解或本節
 都不是「已符合 spec」的宣告。每一條的 review 結論應記回上表與對應 TC。
 
-### Eq. 178A-50：added receiver-noise PSD
+### D3.2 Eq. 178A-52：added receiver-noise PSD
 
 `evaluate_delta_com_an()` 收到的是 post-FFE `S_rn`，因此程式的 `S_an` 已在
 RX FFE output；此處不能再次乘 `|H_rxffe|²`：
 
 ```python
 # com_model_178A.py::evaluate_delta_com_an()
-# Eq. (178A-50). post_ffe.S_rn already contains |H_rxffe|^2.
+# D3.2 Eq. (178A-52). post_ffe.S_rn already contains |H_rxffe|^2.
 S_an = SampledPSD(
     theta=post_psd.S_rn.theta,
     psd=g_an * post_psd.S_rn.psd,
@@ -66,10 +79,10 @@ S_an = SampledPSD(
 ```
 
 `solve_g_an()` 不改變公式；它以 `g_an=0` 起始、倍增建立 bracket，然後二分
-求使 Eq. 178A-51 所得 penalty 接近 `delta_com_an` 的非負尺度。數值終止條件
+求使 D3.2 Eq. 178A-53 所得 penalty 接近 `delta_com_an` 的非負尺度。數值終止條件
 目前為絕對殘差 `<= 1e-2 dB`、最多 64 次，尚待確認是否應成為明示 policy。
 
-### Eq. 178A-51：added-noise PMF 與校準量測
+### D3.2 Eq. 178A-53：added-noise PMF 與校準量測
 
 目前將原 Gaussian sigma 與 `S_an` 積分出的 sigma 作 RSS，並只替換 Gaussian
 PMF；DFE 的 ISI／XT／DD／ADC quantization PMF 維持不變：
@@ -91,7 +104,7 @@ delta_com_an_temp = 20.0 * np.log10(a_an / a_ref)
 為 8σ；workbook、execution profile 與 reference profile 均不能覆寫。
 
 `Pmf1D.quantile()` 是離散右連續 CDF 的第一個 `CDF >= der_0` grid point；因此
-此處另有 PMF `dx` 量化誤差。Eq. 50/51 的 PMF 組成、ADC range 是否應重算、
+此處另有 PMF `dx` 量化誤差。Eq. 52/53 的 PMF 組成、ADC range 是否應重算、
 以及 quantile convention 仍是獨立 review 項目。
 
 ### Eq. 178A-54：MLSD input PSD 與 autocorrelation

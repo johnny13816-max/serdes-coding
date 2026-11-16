@@ -109,7 +109,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `NUM-005` | active — approved branch | Stages 6／7 final-domain PMF grid | `num.final_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As`；`dy_override=None` | **L4** `_resolve_final_com_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `ALG-012` | active — approved branch；reference evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **L3** `COM._build_final_adc_quantization()` | owner 負責 V_qc／delta 與 p_qn；reference tap 跳過僅為對照 SiCoPR，非完整 FIR 模型；非零 `S_in` 延後，reference 逐項對齊尚待驗證 |
 | `ALG-013` | active — review closed；reference evidence bounded | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **L3** `COM._build_final_adc_quantization()` | Stage 6 owner、兩種選項與互斥驗證已確認；SiCoPR fixed-input PMF 與 fixed-case COM 已對照。NUM-007 控制卷積；不宣稱通用 reference equivalence |
-| `ALG-014` | active — unreviewed existing selector | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **provisional L3** `solve_g_an()` | 待完整初次審查 |
+| `ALG-014` | active — implementation validated; integration pending | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **L3** `COM._build_mlsd_added_noise()` | Our branch Gaussian 增量；reference 以 PMF 二階矩差對齊 SiCoPR；focused 56 passed，fixed case 符合 golden 容差 |
 | `ALG-015` | active — unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
 | `ALG-016` | active — unreviewed existing selector | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **provisional L3** `calculate_der_mlsd()` | 待完整初次審查 |
 | `ALG-017` | active — unreviewed existing selector | Stage 7 MLSD reported DER | `alg.reported_der`：`raw_sequence_sum`／`baseline_pdf_re_evaluation` | `baseline_pdf_re_evaluation` | **provisional L3** `calculate_COM_MLSD()` reported-DER block | 待完整初次審查 |
@@ -231,7 +231,9 @@ COM model
 │  │  └─ gaussian_addition → solve_g_an()／evaluate_delta_com_an()
 │  │     [direct consumer; rebuild p_G_an on final-domain dy]
 │  ├─ scaled_total_pdf → reuse DFE COM PMFs                  [NUM-005 indirect consumer]
-│  ├─ solve_g_an() added-noise PDF                           [ALG-014 provisional]
+│  ├─ COM._build_mlsd_added_noise()                          [ALG-014 L3 owner]
+│  │  ├─ solve_g_an()                                       [Gaussian executor]
+│  │  └─ _build_scaled_total_pdf_added_noise()               [reference executor]
 │  ├─ build_mlsd_noise()                                     [NUM-003 L3 owner + ALG-015 provisional]
 │  │  ├─ resolve MLSD record_cfg and rebuild component PSDs
 │  │  └─ Eq. 178A-54 composition → S_ni／R_ni
