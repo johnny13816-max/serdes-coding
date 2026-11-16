@@ -171,6 +171,9 @@ counterfactual，以相同 noise、FFE、`delta` 隔離兩個數值選擇：
 兩側 PMF 都有 33567 bins，逐格最大差 `8.413408858487514e-17`、L1 差
 `2.5034663500457392e-14`。這是 fixed-input 的 PMF 對照，不是完整 SiCoPR
 COM run；兩側 clipping 先固定為相同值，ALG-012 的差異未包含。
+
+ALG-012 同輸入對照（2026-11-16）：Akinwale／SiCoPR 4.17 Python 實跑，固定 `L=4`、`P_qc=1e-7`、ADC grid `5.374290304014734 µV`，以同一組 signal、ISI、五條 XT、DDJ response 和 Gaussian sigma 執行完整 clipping reconstruction；專案 `V_qc=0.043139428270326276 V`，SiCoPR `0.04313942827032627 V`，差 `6.94e-18 V`。
+Component PMF：ISI L1 差 `6.06e-16`、五條 XT 最大 L1 差 `2.97e-16`、DDJ 完全相同；Gaussian support 約 ±7.08σ／±8σ，L1 差 `2.77e-12`。此為單案例 fixed-input 對照，不驗證 upstream response，亦不宣稱所有案例對齊；`S_in` 零係數問題依使用者決定延後。
 SiCoPR 1.2.1 使用 direct convolution；專案可由 NUM-007 選擇 FFT 或 linear。
 有限資料的尾端對照記錄於 `docs/validation/178A_pmf_convolution_evidence.md`。
 
