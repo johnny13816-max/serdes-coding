@@ -106,7 +106,7 @@ COM                                            [Root: model]
         │   │   └── _build_H_ctf()             [L4: continuous CTF]
         │   ├── RX package construction         [L3]
         │   │   └── _build_rxpkg()             [L4: RX package composite]
-        │   └── CTLE pulse realization          [L3: ALG-007 owner, shared-setup phase]
+        │   └── CTLE pulse realization          [ALG-007 shared-setup phase]
         │       └── _prepare_ctle_pulse_realization() [L4: shared setup decision]
         └── _build_paths()                     [L2: path-specific construction]
             └── _build_path() × victim/NEXT/FEXT [structural path coordinator]
@@ -121,7 +121,7 @@ COM                                            [Root: model]
                 │       └── resample_tf()                  [same L5 owner]
                 ├── scalar response cascade     [L3]
                 │   └── cascade_tf()           [L4: scalar transfer cascade]
-                ├── CTLE pulse realization      [same L3 ALG-007 owner, per-path phase]
+                ├── CTLE pulse realization      [ALG-007 per-path phase]
                 │   └── _realize_ctle_pulse() × pulse / victim pulse_no_txffe
                 │                                      [L4: execution decision]
                 └── COMPath()                  [L4: stage-output record]
@@ -129,28 +129,18 @@ COM                                            [Root: model]
 
 ### ALG-007 implementation mapping
 
-`_build_shared_path()` resolves `cfg.alg.ctle_pulse_realization` once and stores
-the resolved value plus method-specific shared state in `COMSharedPath`.
-`_build_path()` never receives or selects a realization method; it delegates
-each complete pulse to `_realize_ctle_pulse()`.
-
-The L3 `CTLE pulse realization` block owns one selector, shared realization
-state, and the CTLE realization contract. Its L4
-`_prepare_ctle_pulse_realization()` creates method-specific shared data once;
-its L4 `_realize_ctle_pulse()` accepts the path-specific pre-CTLE context and
-returns one complete pulse. The two L4 functions are the block's concrete setup
-and execution decision points; neither is the complete semantic owner alone.
-No lower helper receives the ALG-007 selector or returns a domain-selection
-token. `H_all` remains the common continuous VTF for reporting
-and is outside ALG-007 ownership.
+ALG-007 保留使用者核准的兩個 L4 decision owners：
+`_prepare_ctle_pulse_realization()` 決定並建立 shared CTLE state；
+`_realize_ctle_pulse()` 決定並建立每條 path 的 pulse。
+`_build_shared_path()` 讀取 `cfg.alg.ctle_pulse_realization` 並傳給前者，
+也把方法及 shared state 保存在 `COMSharedPath`。Path builders 另將同一
+resolved selector 傳給 `_build_path()`，再傳給後者；後者檢查方法與 shared
+state 一致。`H_all` 是供 reporting 的共同 continuous VTF，不屬於 ALG-007。
 
 ### ALG-007 interface contract
 
-The L3 block follows the existing function-oriented stage style. One prepare
-function writes the resolved method and method-specific shared fields
-into the existing `COMSharedPath`; one realization function consumes those
-fields for every victim, NEXT, and FEXT path. No new behavior class or state
-class is required.
+Shared setup 與 per-path realization 分別做必要決策；shared CTLE IIR 仍依
+同一 grid 建立一次並由 paths 共用，不引入 callable 或新的 behavior class。
 
 ```text
 _prepare_ctle_pulse_realization(
@@ -171,6 +161,8 @@ _realize_ctle_pulse(
     amplitude,
     link_cfg,
     out_of_measured,  # resolved ALG-006 policy; not an ALG-007 selector
+    *,
+    realization,      # resolved ALG-007 policy, must match shared state
     include_txffe=True,
     pre_ctle_shift=None,  # preset receives actual shift in fine-grid method
 ) -> (LinkSegment, pre_ctle_shift | None)
@@ -180,14 +172,11 @@ _realize_ctle_pulse(
 | Boundary | Inputs | Output / responsibility |
 |---|---|---|
 | L4 `_prepare_ctle_pulse_realization()` | one resolved `ctle_pulse_realization` selector; `LinkConfig`; CTLE filter parameters | Creates method-specific shared data for the existing `COMSharedPath`. `continuous_tf` produces no IIR state; both bilinear methods create the shared `COMBilinearCTLE`. No path-specific S-parameter or pulse data is read. |
-| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; pulse `X`; TX FFE flag; optional concrete pre-CTLE shift | Per-path execution decision within the L3 ALG-007 owner block. Returns the full-rate pulse and, for fine-grid realization, the locally chosen or supplied shift. |
+| L4 `_realize_ctle_pulse()` | `COMSharedPath` CTLE fields; resolved ALG-007 `realization`; analysis-grid `H_pre`; completed measured `H_21`; resolved ALG-006 `out_of_measured`; `kind`; pulse `X`; TX FFE flag; optional concrete pre-CTLE shift | Per-path ALG-007 decision owner. Checks the selector against shared state; returns the full-rate pulse and, for fine-grid realization, the locally chosen or supplied shift. |
 
-The call site must not pass an ALG-007 selector into
-`_realize_ctle_pulse()`; CTLE method selection is complete in shared state
-time. It does pass the independent resolved ALG-006 policy so every
-measured-to-Nyquist consumer uses one transfer-extrapolation method. A new CTLE
-realization method therefore adds only its shared preparation and per-path
-realization implementation under this L3 block.
+The path builder passes the explicit ALG-007 selector to `_realize_ctle_pulse()`
+and separately passes the resolved ALG-006 policy. Both decision owners must
+support any new CTLE method; the shared-state consistency check remains active.
 
 #### Non-ownership and invariants
 

@@ -123,16 +123,16 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 
 | 控制 | 現況與已知證據 | 後續狀態 |
 |---|---|---|
-| `num.eq_ch_imp_len`／`num_trunc_ui` | NUM-003；PSD record 長度。曾完成 owner 審查，後續另修改 XT 最大能量 window。 | 原 owner 已審；後續 window 有驗證，完整 numerical 精度與方法審查程度待核對。 |
-| `num.adc_input_pmf_grid.*` | NUM-004；ADC-input PMF 間距及 override。 | owner 審查已結束；數值選擇與精度的完整審查程度待核對。 |
-| `num.final_pmf_grid.*` | NUM-005；final PMF 間距及 override。 | owner 審查已結束；數值選擇、精度與成本的完整審查程度待核對。 |
+| `num.eq_ch_imp_len`／`num_trunc_ui` | NUM-003；PSD record 長度。 | owner、full／truncated 和後續 XT 先選 phase 再選最大能量 window 已討論、核准並驗證；不宣稱固定案例可證明所有數值設定的精度。 |
+| `num.adc_input_pmf_grid.*` | NUM-004；ADC-input PMF 間距及 override。 | 選項、override 優先權、scope、owner 與 fixed golden 已於 `e003_pmf_grid_numerical_control.md` 核准及驗證；不因欠缺跨案例精度研究而重列未審。 |
+| `num.final_pmf_grid.*` | NUM-005；final PMF 間距及 override。 | 選項、override 優先權、scope、owner 與 fixed golden 已於 `e003_pmf_grid_numerical_control.md` 核准及驗證；跨案例精度／成本不屬既有結案宣稱。 |
 | `num.pmf_keep_mass` | NUM-006；ADC-input PMF 卷積保留機率質量。 | 完整初次審查與驗證已完成。 |
 | `num.pmf_convolution_method` | NUM-007；FFT／linear。 | 已討論選項及 owner，核准實作並驗證；不因文件標籤不一致重列未審。 |
 | `num.mlsd_stop_method` | NUM-008；MLSD DER 加總停止方式。 | 與 ALG-016 一併討論、核准及驗證。 |
-| `num.fine_grid_df`、`num.relative_threshold`、`num.absolute_threshold` | ALG-018 adaptive grid 的數值參數；曾於 adaptive grid 設計契約討論，預設依現行 config。 | 設計與功能驗證已做；各參數的數值精度、成本及適用邊界是否需獨立審查待核對，不預設為新分支。 |
-| `num.pmf_grid_quality` | coarse／fine 的 legacy profile effective record；canonical grid 規則另見 NUM-004／005。 | ADC resolver 雖傳入 `COMPMFConfig.resolve()`，但隨即以 `adc_input_pmf_grid` 覆寫 dy；是否仍有其他有效路徑、需要保留或審查待追蹤。 |
-| `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | PMF tap 門檻；前者預設 `1e-3`，後者非 `None` 時覆蓋；現屬 `COMPMFConfig`，不是 `cfg.num` 欄位。 | 會影響哪些 tap 被計算；曾在 ALG-013 提及作為 numerical control，跨 consumer 的實際範圍及完整審查證據待核對。 |
-| `pmf.dy_override`／`dy_rel_As`／`dy_abs_max`／`keep_mass` | `COMPMFConfig` 的 legacy-compatible 欄位；canonical numerical families 和實際 override 邊界見 `config_tree.md`。 | 哪些仍影響 runtime、哪些只為相容而保留待逐項核對；不得僅憑命名視為獨立分支。 |
+| `num.fine_grid_df`、`num.relative_threshold`、`num.absolute_threshold` | ALG-018 adaptive grid 的數值參數；曾於 adaptive grid 設計契約討論，預設依現行 config。 | 設計、初始 1 MHz／relative `1e-3` 選擇與功能驗證已完成；門檻的跨案例收斂屬後續實驗，不因此重列為未審分支。 |
+| `num.pmf_grid_quality` | coarse／fine 的 legacy profile effective record。 | 178A 的 ADC resolver 隨即覆寫 dy，final resolver 固定 fine 後亦覆寫 dy；不改變這兩條 production resolver 的有效 dy。移除或相容性變更尚未核准。 |
+| `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | PMF tap 門檻；前者預設 `1e-3`，後者非 `None` 時覆蓋；現屬 `COMPMFConfig`，不是 `cfg.num` 欄位。 | resolved threshold 作用於 final ADC `annex_d3` FIR；共用 interference PMF 則固定用 `nextafter(dy,+∞)`，reference-support ADC 用極小非零門檻。設定歸屬及不同 consumer 的預期行為尚須獨立確定，不能假設全部共用同一門檻。 |
+| `pmf.dy_override`／`dy_rel_As`／`dy_abs_max`／`keep_mass` | `COMPMFConfig` 的 legacy-compatible 欄位；canonical numerical families 和實際 override 邊界見 `config_tree.md`。 | 178A ADC／final resolvers 會覆寫 resolved dy 與 keep_mass；這不代表外部直接呼叫 `COMPMFConfig.resolve()` 或 adapter compatibility 可無條件移除。 |
 
 ## Responsibility / impact boundaries
 

@@ -165,6 +165,8 @@ V_j = toeplitz(R_ni[:j + 1] / R_ni[0])
 
 `j=1,2,3` 的完整向量已有 equation-level test；`V_j` 的 lag ordering 由固定
 reference case 驗證，但跨 case 正定性仍由 runtime guard 保護。
+D3.2 Eq. 178A-51 末項的指數是 spec index `i`；代入 `i=j+1` 後，
+正是程式的 `(-1)^(j+1)`，不是符號差異。
 
 ### Eq. 178A-48：每個 sequence-length 的 detector error
 
