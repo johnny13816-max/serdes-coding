@@ -11,6 +11,13 @@ v1.0 release 狀態見
 **Next gate:** HANDOFF 的過寬 cleanup 摘要待 project dirty state 可安全同步時更新，之後關閉本 RC。push 暫緩，因 `origin/main` 落後的 16 個既有 project commits 超出本規則變更範圍。
 **Authorization:** 使用者已核准 change contract；本規則專用對話有明確規則維護授權。
 
+## Temporary rule contract — RC-20261116-001
+
+**Boundary:** 在子項完成或切換下一項前，核對驗收證據、權威技術文件與狀態來源、commit/push 邊界及 pending 條件。
+**Status:** Closed；Workflow rule implemented in commit `2a8f6dc`，本次 active-state reconciliation 與 closure 記錄已完成。
+**Evidence:** 規則詳細決策與驗證見 [`rule_changes.md`](rule_changes.md)。HANDOFF 未變更，因本項未切換或改變 active project task。
+**Authorization:** 使用者要求處理此規則的 active-state reconciliation；本規則維護對話具明確規則維護授權。
+
 ## Workflow state
 
 使用者已以「可帶入公司後持續擴充」為短期目標恢復 CP-BR stage-by-stage
