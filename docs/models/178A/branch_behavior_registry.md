@@ -112,7 +112,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-014` | active — review closed | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **L3** `COM._build_mlsd_added_noise()` | Our branch Gaussian 增量；reference 以 PMF 二階矩差對齊 SiCoPR；focused 56 passed，fixed case 符合 golden 容差 |
 | `ALG-015` | active — review closed | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | L3 `build_mlsd_noise()` | our 使用完整 RxFFE；reference 在 unit-main 尺度重算 clipping 與 white `S_qn`，轉回專案尺度；fixed case 與 SiCoPR 對照通過 |
 | `NUM-008` | active — review closed | Stage 7 MLSD DER 加總停止 | `num.mlsd_stop_method`：`fixed_length`／`relative_tail`；後者門檻 `1e-4` | `relative_tail` | **L3** `calculate_der_mlsd()` | 早停回傳已計算項；SiCoPR 同輸入及固定 golden 驗證通過 |
-| `NUM-009` | active — validated；integration pending | Signal／ISI／XT／DDJ PMF response-tap 篩選 | `num.response_tap_threshold`：`None` 使用各 PMF 的 `dy`；非負數為 V；`0` 保留所有非零 taps | `None` | **L5** `Pmf1D.fir_filter()` | 設定與 FFE 行為已驗證；reference golden 通過，fixed-case FFE 隔離對照不變；尚待獨立提交與遠端整合。 |
+| `NUM-009` | active — review closed | Signal／ISI／XT／DDJ PMF response-tap 篩選 | `num.response_tap_threshold`：`None` 使用各 PMF 的 `dy`；非負數為 V；`0` 保留所有非零 taps | `None` | **L5** `Pmf1D.fir_filter()` | 設定與 FFE 行為已驗證；reference golden 通過，fixed-case FFE 隔離對照不變；實作 `15823b6` 已整合至 `origin/main`。 |
 | `ALG-016` | active — review closed | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **L3** `calculate_der_mlsd()` | 選擇 penalty 與沿用既有 CDF 取點；停止控制分至 NUM-008；SiCoPR 邊界對照通過 |
 | `ALG-017` | retired — approved branch | Stage 7 MLSD reported DER | none — 兩種 DER 固定分別記錄 | none | — | 移除輸出選擇；計算用 DER 與 SiCoPR-style diagnostic 各自保存，不影響 COM |
 | `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
@@ -130,7 +130,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `num.pmf_keep_mass` | NUM-006；ADC-input PMF 卷積保留機率質量。 | 完整初次審查與驗證已完成。 |
 | `num.pmf_convolution_method` | NUM-007；FFT／linear。 | 已討論選項及 owner，核准實作並驗證；不因文件標籤不一致重列未審。 |
 | `num.mlsd_stop_method` | NUM-008；MLSD DER 加總停止方式。 | 與 ALG-016 一併討論、核准及驗證。 |
-| `num.response_tap_threshold` | NUM-009；response PMF tap 絕對門檻，`None` 跟隨 dy。 | 契約已實作並驗證；獨立提交與遠端整合待完成。 |
+| `num.response_tap_threshold` | NUM-009；response PMF tap 絕對門檻，`None` 跟隨 dy。 | 審查、驗證與實作整合完成（`15823b6`）。 |
 | `num.fine_grid_df`、`num.relative_threshold`、`num.absolute_threshold` | ALG-018 adaptive grid 的數值參數；曾於 adaptive grid 設計契約討論，預設依現行 config。 | 設計、初始 1 MHz／relative `1e-3` 選擇與功能驗證已完成；門檻的跨案例收斂屬後續實驗，不因此重列為未審分支。 |
 | `num.pmf_grid_quality` | coarse／fine 的 legacy profile effective record。 | 178A 的 ADC resolver 隨即覆寫 dy，final resolver 固定 fine 後亦覆寫 dy；不改變這兩條 production resolver 的有效 dy。移除或相容性變更尚未核准。 |
 | `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | legacy-compatible PMF tap 門檻欄位。 | 178A response taps 現由 `num.response_tap_threshold` 控制；ADC FFE 不再依這兩欄篩選。欄位保留以免擴大相容性變更，不假設其他版本或外部 callers 可直接移除。 |

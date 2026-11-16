@@ -48,7 +48,7 @@ reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
-**2026-11-17 NUM-009：** 核准的 response tap threshold 已實作；`None` 沿用 dy，`0` 保留所有非零 response taps，非負數為 V 門檻；our ADC FFE 保留所有非零 taps，reference 保留既有規則。Focused 89 passed、2 subtests passed；最終版本 fixed reference golden 1 passed；固定案例 ADC FFE 隔離對照 MSE、DFE COM、final COM 不變。外部 Hansel workbook 缺失的 3 項介面測試未能執行；隔離提交／遠端整合待完成。
+**2026-11-17 NUM-009：** 審查結案，實作 `15823b6` 已整合至 `origin/main`。核准的 response tap threshold 已實作；`None` 沿用 dy，`0` 保留所有非零 response taps，非負數為 V 門檻；our ADC FFE 保留所有非零 taps，reference 保留既有規則。Focused 89 passed、2 subtests passed；最終版本 fixed reference golden 1 passed；固定案例 ADC FFE 隔離對照 MSE、DFE COM、final COM 不變。外部 Hansel workbook 缺失的 3 項介面測試未能執行。
 
 **2026-11-16 ALG-012：** 初次審查完成；保留兩個 clipping 選項，L3 `COM._build_final_adc_quantization()` 為 owner。Akinwale 固定 response／noise 輸入的 SiCoPR 4.17 對照中，完整 clipping reconstruction 的 `V_qc` 差 `6.94e-18 V`；ISI／XT／DDJ component 對照及 Gaussian 差異記於 Stage 6 文件。不宣稱一般案例皆對齊；`S_in` 零係數議題依使用者決定延後。此次僅更新文件，不重跑 golden。
 
