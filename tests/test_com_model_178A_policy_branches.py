@@ -368,7 +368,7 @@ def test_178a_reference_adc_support_rejects_bin_integral(reference_cfg):
         _with_methods(reference_cfg, pdf_to_pmf_method="bin_integral")
 
 
-def test_annex_final_adc_pmf_passes_full_taps_and_numerical_threshold(reference_cfg):
+def test_annex_final_adc_pmf_passes_full_taps_without_threshold(reference_cfg):
     cfg = _with_methods(
         reference_cfg,
         final_com_vqc_convention="selected_phase_adc_input",
@@ -387,10 +387,105 @@ def test_annex_final_adc_pmf_passes_full_taps_and_numerical_threshold(reference_
             imp, None, SimpleNamespace(w_lim=taps), runtime,
         )
     np.testing.assert_array_equal(fir.call_args.args[0], taps)
-    assert fir.call_args.kwargs["tap_abs_th"] == runtime.tap_abs_th
+    assert fir.call_args.kwargs["tap_abs_th"] == np.nextafter(0.0, 1.0)
     assert fir.call_args.kwargs["scaling_method"] == "mass_deposit"
     assert fir.call_args.kwargs["initial_bin_range"] is None
     assert (actual, vqc, delta) == (result, 0.01, 0.001)
+
+
+def test_annex_adc_uses_all_taps_even_with_reference_clipping(reference_cfg):
+    cfg = _with_methods(reference_cfg, final_adc_pmf_projection="annex_d3")
+    runtime = _resolve_final_com_pmf_config(cfg.pmf, 0.3, cfg.num)
+    taps = np.zeros(cfg.dte.N_max)
+    taps[cfg.dte.d_w] = 1.0
+    taps[cfg.dte.d_w + 1] = 1e-12
+    imp = SimpleNamespace(post_ffe=SimpleNamespace(adc_input=SimpleNamespace(method="pmf_exact")))
+    noise = Pmf1D.multi_dirac(np.array([0.0]), dx=runtime.dy)
+    with patch.object(com_178a_model, "_reconstruct_final_vqc_sicopr", return_value=(0.01, runtime, noise)), \
+            patch.object(Pmf1D, "fir_filter", return_value=noise) as fir:
+        COM(cfg)._build_final_adc_quantization(imp, None, SimpleNamespace(w_lim=taps), runtime)
+    np.testing.assert_array_equal(fir.call_args.args[0], taps)
+    assert fir.call_args.kwargs["tap_abs_th"] == np.nextafter(0.0, 1.0)
+
+
+@pytest.mark.parametrize("threshold", [None, 0.0, 0.05])
+def test_num009_response_threshold_resolves_and_reaches_fir(reference_cfg, threshold):
+    num = replace(reference_cfg.num, response_tap_threshold=threshold)
+    signal = com_178a_model._build_pmf_pam_L(4)
+    for resolve in (_resolve_adc_input_pmf_config, _resolve_final_com_pmf_config):
+        runtime = resolve(reference_cfg.pmf, 0.3, num)
+        assert runtime.response_tap_threshold == threshold
+        with patch.object(Pmf1D, "fir_filter", return_value=signal) as fir:
+            com_178a_model._build_pmf_interference_178A(
+                signal, np.array([0.01, 0.1]), runtime,
+                projection_method="nearest",
+            )
+        expected = (np.nextafter(runtime.dy, np.inf) if threshold is None
+                    else np.nextafter(0.0, 1.0) if threshold == 0.0 else threshold)
+        assert fir.call_args.kwargs["tap_abs_th"] == expected
+
+
+@pytest.mark.parametrize("value", [-1.0, np.inf, np.nan])
+def test_num009_rejects_invalid_threshold(value):
+    with pytest.raises(ValueError, match="response_tap_threshold"):
+        COMNumericalControlConfig(response_tap_threshold=value)
+
+
+def test_num009_zero_keeps_small_response_tap(reference_cfg):
+    num = replace(reference_cfg.num, response_tap_threshold=0.0)
+    runtime = replace(_resolve_final_com_pmf_config(reference_cfg.pmf, 0.3, num), dy=0.01)
+    signal = com_178a_model._build_pmf_pam_L(4)
+    taps = np.array([0.02, 0.1])
+    full = com_178a_model._build_pmf_interference_178A(signal, taps, runtime, projection_method="nearest")
+    pruned = com_178a_model._build_pmf_interference_178A(
+        signal, taps, replace(runtime, response_tap_threshold=0.05), projection_method="nearest"
+    )
+    assert full.st_idx < pruned.st_idx
+
+
+def test_num009_reference_profile_preserves_dy_threshold():
+    from serdes_coding.io.com_excel_io_178A import _resolve_project_profile_178A
+    from serdes_coding.models.com_178a.config import COMRunProfiles
+
+    num = COMNumericalControlConfig(response_tap_threshold=0.0)
+    _, _, resolved, _, overrides = _resolve_project_profile_178A(
+        {}, COMRunProfiles(), num, False, 1e-6, "sicopr_reference_v1"
+    )
+    assert resolved.response_tap_threshold is None
+    assert overrides["num.response_tap_threshold"]["raw"] == 0.0
+    assert overrides["num.response_tap_threshold"]["effective"] is None
+
+
+@pytest.mark.parametrize("value,expected", [(None, None), (0.0, 0.0), (1e-5, 1e-5)])
+def test_num009_project_config_reader(value, expected):
+    from serdes_coding.io.com_excel_io_178A import _read_project_numerical_control_178A
+
+    num, _ = _read_project_numerical_control_178A({
+        "dy_rel_As": 1e-3, "dy_abs_max": 1e-5,
+        "response_tap_threshold": value,
+    })
+    assert num.response_tap_threshold == expected
+
+
+def test_num009_reference_clipping_scales_absolute_threshold(reference_cfg):
+    runtime = replace(
+        _resolve_final_com_pmf_config(reference_cfg.pmf, 0.3, reference_cfg.num),
+        dy=0.01, response_tap_threshold=0.05,
+    )
+    eq = SimpleNamespace(
+        h_dsamp=SimpleNamespace(ir=np.array([0.1])),
+        h_ISI=SimpleNamespace(ir=np.array([0.1])),
+        h_XTs_w=[], h_w_J=SimpleNamespace(ir=np.array([0.1])),
+    )
+    with patch.object(
+        com_178a_model, "_build_pmf_interference_178A",
+        wraps=com_178a_model._build_pmf_interference_178A,
+    ) as build:
+        com_178a_model._reconstruct_final_vqc_sicopr(
+            SimpleNamespace(sigma_G=0.01), eq, 4, runtime, 5.0, 1.0, 1e-3,
+            pmf_projection_method="nearest", pdf_to_pmf_method="pmf_sample",
+        )
+    assert all(call.args[2].response_tap_threshold == 0.01 for call in build.call_args_list)
 
 
 def test_reference_final_adc_pmf_uses_adc_grid_with_ordinate_scaling(reference_cfg):

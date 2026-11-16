@@ -711,6 +711,7 @@ def _resolve_adc_input_pmf_config(
         dy=num_cfg.adc_input_pmf_grid.resolve_dy(As),
         keep_mass=num_cfg.pmf_keep_mass,
         convolution_method=num_cfg.pmf_convolution_method,
+        response_tap_threshold=num_cfg.response_tap_threshold,
     )
 
 
@@ -726,6 +727,7 @@ def _resolve_final_com_pmf_config(
         dy=num_cfg.final_pmf_grid.resolve_dy(As),
         keep_mass=1.0,
         convolution_method=num_cfg.pmf_convolution_method,
+        response_tap_threshold=num_cfg.response_tap_threshold,
     )
 
 
@@ -756,7 +758,11 @@ def _build_pmf_interference_178A(
         fir=h,
         keep_mass=pmf_cfg.keep_mass,
         dx_ref=pmf_cfg.dy,
-        tap_abs_th=np.nextafter(pmf_cfg.dy, np.inf),
+        tap_abs_th=(np.nextafter(pmf_cfg.dy, np.inf)
+                    if pmf_cfg.response_tap_threshold is None
+                    else (np.nextafter(0.0, 1.0)
+                          if pmf_cfg.response_tap_threshold == 0.0
+                          else pmf_cfg.response_tap_threshold)),
         max_taps=None,
         name=name,
         output_unit="volt",
@@ -913,6 +919,8 @@ def _reconstruct_final_vqc_sicopr(
         pmf_cfg,
         dy=pmf_cfg.dy / main_gain,
         tap_abs_th=pmf_cfg.tap_abs_th / main_gain,
+        response_tap_threshold=(None if pmf_cfg.response_tap_threshold is None
+                                else pmf_cfg.response_tap_threshold / main_gain),
     )
     p_sig = _build_pmf_pam_L(L)
     p_s = _build_pmf_interference_178A(
@@ -2682,10 +2690,11 @@ class COM:
                 quantization_taps = w_lim.copy()
                 # SiCoPR removes zero coefficients before applying its
                 # one-based precursor-position skip to the remaining taps.
-                nonzero_indices = np.flatnonzero(w_lim != 0.0)
-                skip_position = self.cfg.dte.d_w
-                if skip_position < len(nonzero_indices):
-                    quantization_taps[nonzero_indices[skip_position]] = 0.0
+                if self.cfg.alg.final_adc_pmf_projection == "reference_support":
+                    nonzero_indices = np.flatnonzero(w_lim != 0.0)
+                    skip_position = self.cfg.dte.d_w
+                    if skip_position < len(nonzero_indices):
+                        quantization_taps[nonzero_indices[skip_position]] = 0.0
                 # The uniform error exists at the ADC input. Project each
                 # scaled tap to the final (post-FFE) PMF grid in fir_filter.
                 p_delta = Pmf1D.uniform(
@@ -2715,11 +2724,7 @@ class COM:
                 else quantization_taps,
                 keep_mass = pmf_cfg_for_com.keep_mass,
                 dx_ref = pmf_cfg_for_com.dy,
-                tap_abs_th = (
-                    np.nextafter(0.0, 1.0)
-                    if self.cfg.alg.final_adc_pmf_projection == "reference_support"
-                    else pmf_cfg_for_com.tap_abs_th
-                ),
+                tap_abs_th=np.nextafter(0.0, 1.0),
                 max_taps = None,
                 name = "ADC_QN",
                 projection_method=self.cfg.alg.pmf_projection_method,
@@ -2820,7 +2825,9 @@ class COM:
         COM = 20 * np.log10( As / A_ni )
         return COMPMFStatus(
             dy=pmf_cfg_for_com.dy,
-            tap_abs_th=pmf_cfg_for_com.tap_abs_th,
+            tap_abs_th=(np.nextafter(pmf_cfg_for_com.dy, np.inf)
+                        if pmf_cfg_for_com.response_tap_threshold is None
+                        else pmf_cfg_for_com.response_tap_threshold),
             final_vqc_convention=self.cfg.alg.final_com_vqc_convention,
             final_V_qc=final_V_qc,
             final_delta=final_delta,

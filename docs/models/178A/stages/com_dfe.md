@@ -128,9 +128,11 @@ reconstructs the final clipping distribution from the pre-FFE victim signal and
 post-FFE ISI, XT, DDJ, and Gaussian components referred back through the RX FFE
 main gain, then applies the SiCoPR `P_qc` tail rule to obtain `V_qc` and `delta`.
 
-The reference path also follows the SiCoPR quantization-tap selection described
-below; this reference-only behavior is not the complete FIR model. Both V_qc
-conventions share the selected phase, FFE/DFE, and non-quantization final PMFs.
+The `reference_support` ADC PMF path also follows the SiCoPR quantization-tap
+selection described below; this reference-only behavior is not the complete FIR
+model. `annex_d3` uses every nonzero FFE tap even when combined with the
+reference clipping convention. Both V_qc conventions share the selected phase,
+FFE/DFE, and non-quantization final PMFs.
 
 ALG-013 的 concrete owner 是 `COM._build_final_adc_quantization()`。
 其 selector 只在此 owner 操作；`calculate_COM_DFE()` 消費回傳的 `p_qn`、
@@ -200,6 +202,11 @@ COMPMFStatus
 ```
 
 `COM._run_once()` assigns this object to `status.pmf`. `COMStatus.final_COM` returns this `COM` when no MLSD result is present.
+
+NUM-009：`COMPMFStatus.tap_abs_th` 記錄 final response PMF 的有效 tap 門檻；
+`None` 設定對應嚴格大於 final `dy` 的門檻。ADC quantization 的 FFE tap
+不使用此 response threshold；our branch 保留所有非零 tap，reference tap
+選擇仍維持 SiCoPR 既有規則。
 
 The implemented scalar flow uses the configured `DER_0` quantile of `p_combined`, stores its absolute amplitude as `A_ni`, and forms the signal-to-interference/noise ratio in dB from `As` and `A_ni`. This behavior still requires independent equation-level validation.
 

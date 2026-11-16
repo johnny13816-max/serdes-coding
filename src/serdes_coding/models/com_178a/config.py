@@ -372,6 +372,7 @@ class COMNumericalControlConfig(COMDataclassText):
     absolute_threshold: Optional[float] = None
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
+    response_tap_threshold: Optional[float] = None
     pmf_convolution_method: Literal["fft", "linear"] = "fft"
     mlsd_stop_method: Literal["fixed_length", "relative_tail"] = "fixed_length"
 
@@ -393,6 +394,7 @@ class COMNumericalControlConfig(COMDataclassText):
                 self._field("num_trunc_ui", "truncated record length", stored_unit="UI count"),
                 self._field("pmf_grid_quality", "legacy PMF grid quality", stored_unit="policy"),
                 self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
+                self._field("response_tap_threshold", "response tap threshold", stored_unit="V"),
                 self._field("pmf_convolution_method", "PMF convolution method", stored_unit="policy"),
                 self._field("mlsd_stop_method", "MLSD sequence stopping", stored_unit="policy"),
             )),
@@ -417,7 +419,7 @@ class COMNumericalControlConfig(COMDataclassText):
         self.fine_grid_df = float(self.fine_grid_df)
         if not np.isfinite(self.fine_grid_df) or self.fine_grid_df <= 0.0:
             raise ValueError("fine_grid_df must be finite and positive.")
-        for name in ("relative_threshold", "absolute_threshold"):
+        for name in ("relative_threshold", "absolute_threshold", "response_tap_threshold"):
             value = getattr(self, name)
             if value is not None:
                 value = float(value)
@@ -540,6 +542,7 @@ class COMPMFRuntimeConfig(_LeafConfigText):
     _FIELD_UNITS = {
         "dy": "V",
         "tap_abs_th": "V",
+        "response_tap_threshold": "V",
         "keep_mass": "probability",
         "gaussian_n_sigma": "sigma count",
     }
@@ -548,10 +551,15 @@ class COMPMFRuntimeConfig(_LeafConfigText):
     keep_mass: float                  # unit: probability
     gaussian_n_sigma: float           # unit: sigma
     convolution_method: Literal["fft", "linear"] = "fft"
+    response_tap_threshold: Optional[float] = None
 
     def __post_init__(self) -> None:
         if self.convolution_method not in {"fft", "linear"}:
             raise ValueError("convolution_method must be 'fft' or 'linear'.")
+        if self.response_tap_threshold is not None:
+            self.response_tap_threshold = float(self.response_tap_threshold)
+            if not np.isfinite(self.response_tap_threshold) or self.response_tap_threshold < 0.0:
+                raise ValueError("response_tap_threshold must be finite and non-negative.")
         for name in ("dy", "gaussian_n_sigma"):
             value = float(getattr(self, name))
             if not np.isfinite(value) or value <= 0.0:

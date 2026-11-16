@@ -384,6 +384,9 @@ def _resolve_project_profile_178A(
     overrides["num.mlsd_stop_method"] = override_record(
         numerical_control.mlsd_stop_method, "relative_tail"
     )
+    overrides["num.response_tap_threshold"] = override_record(
+        numerical_control.response_tap_threshold, None
+    )
 
     reference_adc_grid = replace(
         numerical_control.adc_input_pmf_grid,
@@ -446,6 +449,7 @@ def _resolve_project_profile_178A(
             num_trunc_ui=4096,
             pmf_convolution_method="linear",
             mlsd_stop_method="relative_tail",
+            response_tap_threshold=None,
             adc_input_pmf_grid=reference_adc_grid,
             final_pmf_grid=reference_final_grid,
         ),
@@ -461,6 +465,7 @@ def _read_project_numerical_control_178A(
     relative = fixed.get("relative_threshold", 1e-3)
     absolute = fixed.get("absolute_threshold")
     grid_controls = {
+        "response_tap_threshold": _fixed_optional_float(fixed, "response_tap_threshold"),
         "fine_grid_df": float(fixed.get("fine_grid_df", 1e6)),
         "relative_threshold": None if _is_blank(relative) else float(relative),
         "absolute_threshold": None if _is_blank(absolute) else float(absolute),

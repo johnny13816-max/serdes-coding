@@ -37,7 +37,7 @@ owner／consumer 位置改變而重編或重用。新 branch 通過 eligibility 
 項目後來判定為從未成立的 non-branch，移除該列但不回退序號。各類別序號只增不減，
 退役 ID 永不重用。ID prefix 記錄 selector 所在 runtime domain，不編入 Stage 或排序資訊。
 
-Next ID allocation cursor：`ALG-019`、`NUM-009`、`SRCH-002`。此 cursor 只記錄各類別
+Next ID allocation cursor：`ALG-019`、`NUM-010`、`SRCH-002`。此 cursor 只記錄各類別
 下一個可核發號碼，不建立舊 ID 對照或歷史映射。
 
 本表依 Stage／function call tree 順序排列，不依 ID 數字排序。跨 Stage 或 shared
@@ -112,6 +112,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-014` | active — review closed | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **L3** `COM._build_mlsd_added_noise()` | Our branch Gaussian 增量；reference 以 PMF 二階矩差對齊 SiCoPR；focused 56 passed，fixed case 符合 golden 容差 |
 | `ALG-015` | active — review closed | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | L3 `build_mlsd_noise()` | our 使用完整 RxFFE；reference 在 unit-main 尺度重算 clipping 與 white `S_qn`，轉回專案尺度；fixed case 與 SiCoPR 對照通過 |
 | `NUM-008` | active — review closed | Stage 7 MLSD DER 加總停止 | `num.mlsd_stop_method`：`fixed_length`／`relative_tail`；後者門檻 `1e-4` | `relative_tail` | **L3** `calculate_der_mlsd()` | 早停回傳已計算項；SiCoPR 同輸入及固定 golden 驗證通過 |
+| `NUM-009` | active — validated；integration pending | Signal／ISI／XT／DDJ PMF response-tap 篩選 | `num.response_tap_threshold`：`None` 使用各 PMF 的 `dy`；非負數為 V；`0` 保留所有非零 taps | `None` | **L5** `Pmf1D.fir_filter()` | 設定與 FFE 行為已驗證；reference golden 通過，fixed-case FFE 隔離對照不變；尚待獨立提交與遠端整合。 |
 | `ALG-016` | active — review closed | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **L3** `calculate_der_mlsd()` | 選擇 penalty 與沿用既有 CDF 取點；停止控制分至 NUM-008；SiCoPR 邊界對照通過 |
 | `ALG-017` | retired — approved branch | Stage 7 MLSD reported DER | none — 兩種 DER 固定分別記錄 | none | — | 移除輸出選擇；計算用 DER 與 SiCoPR-style diagnostic 各自保存，不影響 COM |
 | `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
@@ -129,9 +130,10 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `num.pmf_keep_mass` | NUM-006；ADC-input PMF 卷積保留機率質量。 | 完整初次審查與驗證已完成。 |
 | `num.pmf_convolution_method` | NUM-007；FFT／linear。 | 已討論選項及 owner，核准實作並驗證；不因文件標籤不一致重列未審。 |
 | `num.mlsd_stop_method` | NUM-008；MLSD DER 加總停止方式。 | 與 ALG-016 一併討論、核准及驗證。 |
+| `num.response_tap_threshold` | NUM-009；response PMF tap 絕對門檻，`None` 跟隨 dy。 | 契約已實作並驗證；獨立提交與遠端整合待完成。 |
 | `num.fine_grid_df`、`num.relative_threshold`、`num.absolute_threshold` | ALG-018 adaptive grid 的數值參數；曾於 adaptive grid 設計契約討論，預設依現行 config。 | 設計、初始 1 MHz／relative `1e-3` 選擇與功能驗證已完成；門檻的跨案例收斂屬後續實驗，不因此重列為未審分支。 |
 | `num.pmf_grid_quality` | coarse／fine 的 legacy profile effective record。 | 178A 的 ADC resolver 隨即覆寫 dy，final resolver 固定 fine 後亦覆寫 dy；不改變這兩條 production resolver 的有效 dy。移除或相容性變更尚未核准。 |
-| `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | PMF tap 門檻；前者預設 `1e-3`，後者非 `None` 時覆蓋；現屬 `COMPMFConfig`，不是 `cfg.num` 欄位。 | resolved threshold 作用於 final ADC `annex_d3` FIR；共用 interference PMF 則固定用 `nextafter(dy,+∞)`，reference-support ADC 用極小非零門檻。設定歸屬及不同 consumer 的預期行為尚須獨立確定，不能假設全部共用同一門檻。 |
+| `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | legacy-compatible PMF tap 門檻欄位。 | 178A response taps 現由 `num.response_tap_threshold` 控制；ADC FFE 不再依這兩欄篩選。欄位保留以免擴大相容性變更，不假設其他版本或外部 callers 可直接移除。 |
 | `pmf.dy_override`／`dy_rel_As`／`dy_abs_max`／`keep_mass` | `COMPMFConfig` 的 legacy-compatible 欄位；canonical numerical families 和實際 override 邊界見 `config_tree.md`。 | 178A ADC／final resolvers 會覆寫 resolved dy 與 keep_mass；這不代表外部直接呼叫 `COMPMFConfig.resolve()` 或 adapter compatibility 可無條件移除。 |
 
 ## Responsibility / impact boundaries
@@ -156,6 +158,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `NUM-005` | DFE component／combined PMFs 與 MLSD added-noise PMF 的 voltage spacing；override／relative／capped-relative resolution。Gaussian-replacement flow 直接使用 resolved grid；`scaled_total_pdf` flow 間接沿用 DFE PMFs | NUM-004 ADC-input PMF grid、NUM-006 retained mass、PMF projection／PDF discretization／scalar scaling、MLSD PSD record grid |
 | `NUM-006` | 每個 tap convolution 後對 intermediate PMF 做對稱尾端截斷並重新正規化；`1.0` 關閉截斷。Stage 2／5 是 direct consumers | NUM-004／005 grid spacing、tap threshold、ALG-002 projection、ALG-003 PDF discretization、ALG-008 clipping、NUM-003 PSD record；Stage 6 final PMF 固定 `keep_mass=1.0`，不是此 branch consumer |
 | `NUM-007` | PMF FIR 及 PMF 加總使用 FFT 或直接線性卷積；Stages 2／5／6／7 | PMF grid、tap threshold、keep mass、projection 與 93A default 獨立 |
+| `NUM-009` | Signal／ISI／XT／DDJ PMF response-tap 篩選；ADC-input 與 final domain 使用各自解析的門檻 | ADC FFE taps 不使用此門檻；PMF grid、retained mass、卷積方式與 93A 獨立 |
 | `ALG-010` | floating tap/group selection strategy；owner 依 resolved selector dispatch，並控制該 placement 的完整 solve／limit／MSE／`COMDTEStatus` lifecycle | fixed-tap limiter definition、MMSE/KKT equations、coefficient limits、phase search、equal-score tie-break implementation |
 | `ALG-012` | final-COM clipping voltage convention | final-quantization main-tap accumulation issue |
 | `ALG-013` | final ADC quantization PMF projection/support | pre-DTE ADC PMF；reference option 對 ALG-012 有相依但不合併 owner |
@@ -264,6 +267,7 @@ COM model
    │  └─ _truncate_keep_mass()                               [private executor; non-owner]
    ├─ Pmf1D.fir_filter()/combine()                           [NUM-007 L5 owner set]
    │  └─ _convolve_probability_mass()                        [private executor; non-owner]
+   ├─ Pmf1D.fir_filter(..., tap_abs_th)                       [NUM-009 L5 owner]
    ├─ `_calculate_V_qc()`／`_build_psd_adc_qn()`／`_build_adc_input_pmf_exact()`／`_build_pmf_G()`／`_reconstruct_final_vqc_sicopr()`／`evaluate_delta_com_an()`／`solve_g_an()`／`calculate_der_mlsd()` [ALG-003 consumers]
    │  └─ Pmf1D.gaussian()/uniform() PDF→PMF                     [ALG-003 L5 owner set]
    └─ MLSD scalar-PMF scaling

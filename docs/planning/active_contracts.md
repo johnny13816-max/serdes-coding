@@ -48,6 +48,8 @@ reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
+**2026-11-17 NUM-009：** 核准的 response tap threshold 已實作；`None` 沿用 dy，`0` 保留所有非零 response taps，非負數為 V 門檻；our ADC FFE 保留所有非零 taps，reference 保留既有規則。Focused 89 passed、2 subtests passed；最終版本 fixed reference golden 1 passed；固定案例 ADC FFE 隔離對照 MSE、DFE COM、final COM 不變。外部 Hansel workbook 缺失的 3 項介面測試未能執行；隔離提交／遠端整合待完成。
+
 **2026-11-16 ALG-012：** 初次審查完成；保留兩個 clipping 選項，L3 `COM._build_final_adc_quantization()` 為 owner。Akinwale 固定 response／noise 輸入的 SiCoPR 4.17 對照中，完整 clipping reconstruction 的 `V_qc` 差 `6.94e-18 V`；ISI／XT／DDJ component 對照及 Gaussian 差異記於 Stage 6 文件。不宣稱一般案例皆對齊；`S_in` 零係數議題依使用者決定延後。此次僅更新文件，不重跑 golden。
 
 **2026-11-16 ALG-016／NUM-008：** L3 `calculate_der_mlsd()` 分別處理 penalty／既有 CDF 與 DER 停止。Project `fixed_length`；reference `relative_tail`，門檻 `1e-4`。Focused 54 passed、profile/provenance 40 passed、FFT golden 1 passed；SiCoPR recurrence 共同輸入的提前停止及 penalty 邊界對照通過。Reference linear 固定 case：j=16、phase 5、MSE 0.006191300963670364、DFE COM 1.5247607834260184 dB、final COM 2.895898684873275 dB，符合 golden 容差；不宣稱所有 case 相同。

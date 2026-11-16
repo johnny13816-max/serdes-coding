@@ -206,10 +206,21 @@ listed in [the migration contract](../../planning/comconfig_domain_migration.md#
 | `num_trunc_ui` | `COMConfig.num`（僅 `truncated` 適用） | blank / `None` |
 | `path_grid_mode` | `COMConfig.alg`（Stage 1 path-grid method） | `fixed` |
 | `fine_grid_df` | `COMConfig.num`（adaptive fine-grid target df，Hz） | `1e6` |
+| `response_tap_threshold` | `COMConfig.num`（NUM-009；`None` 使用 PMF grid 間距，非負值為 response tap 絕對門檻，V） | `None` |
 | `relative_threshold` | `COMConfig.num`（adaptive 相對 amplitude 門檻） | `1e-3` |
 | `absolute_threshold` | `COMConfig.num`（adaptive 絕對 amplitude 門檻） | `None` |
 | `pmf_projection_method` | `COMConfig.alg`（workbook 獨立曝露） | `linear` |
 | `pdf_to_pmf_method` | `COMConfig.alg`（由 profile 或 Python 設定） | `bin_integral` |
+
+NUM-009：`None` 保留現有 `|tap| > dy`；非負數使用 `|tap| >= threshold`，
+其中 `0` 保留所有非零 tap。ADC／final PMF 各使用其 domain 的 dy；
+reference clipping 換算至 ADC 尺度時，非 `None` 的 V 門檻也以 main gain
+換算。`sicopr_reference_v1` 固定 `None`；ADC FFE tap 不使用此門檻。
+固定 Akinwale case、reference profile／FFT golden：MSE 與 `0.006191300963670364`
+差小於 `1e-14`、final COM 與 `2.895898684873246 dB` 差小於 `1e-12 dB`。
+隔離 ADC our branch 的相同 case（其他設定維持 reference／FFT）中，FFE threshold
+修改前後 phase 5、MSE `0.006191300963670364`、DFE COM `0.9829708222290694 dB`、
+final COM `2.242127503919277 dB` 均相同；此結果不推廣為其他案例必然不變。
 
 The eight grid fields have primary domain `numerical_control`, exposure
 `advanced`, effect `accuracy/cost`, and workbook class `policy`. Their owners
