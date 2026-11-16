@@ -100,7 +100,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `NUM-003` | active — approved branch | Stages 2／7 Pre-DTE 與 pre-MLSD PSD/correlation record | `num.eq_ch_imp_len`：`full`／`truncated`；`num.num_trunc_ui` 是 branch parameter | `truncated`；`num.num_trunc_ui=4096` | **兩個 L3 owner**：Pre-DTE `_build_pre_dte_psd()`；MLSD `build_mlsd_noise()` | XT window 已驗證並完成遠端整合 |
 | `ALG-008` | active — approved branch | Stage 2 Pre-DTE PSD／per-phase ADC input | `alg.pre_dte_adc_clipping_convention`：`full_jitter_half_tail`／`rj_only_full_tail_reference` | `rj_only_full_tail_reference` | **L3** `COM._build_pre_dte_psd()` | **Closed 2026-11-12** |
 | `NUM-006` | active — approved branch | Stages 2／5 ADC-input FIR-PMF convergence; direct consumers `_build_psd_adc_qn()` and `_build_adc_input_pmf_exact()` | `num.pmf_keep_mass`：`0 < value <= 1`；project `1-1e-5`；reference profile `1.0` | profile 值見 `config_tree.md` | **L5 owner** `Pmf1D.fir_filter()` | **Closed 2026-11-13** |
-| `NUM-007` | active — validated and integrated | Stages 2／5／6／7 PMF convolution | `num.pmf_convolution_method`：`fft`／`linear`；project 預設 `fft` | `linear` | **L5 owner set** `Pmf1D.fir_filter()`／`Pmf1D.combine()` | focused 78 passed；FFT golden passed；linear fixed case 完成；未宣稱全面 reference 對齊 |
+| `NUM-007` | active — review closed；reference evidence bounded | Stages 2／5／6／7 PMF convolution | `num.pmf_convolution_method`：`fft`／`linear`；project 預設 `fft` | `linear` | **L5 owner set** `Pmf1D.fir_filter()`／`Pmf1D.combine()` | 已討論選項與兩個 owner、核准並整合 `564aac4`；focused 78 passed、FFT golden 與 linear fixed case 通過。證據見 `docs/validation/178A_pmf_convolution_evidence.md`；未宣稱全面 reference 對齊 |
 | `NUM-004` | active — approved branch | Stages 2／5 ADC-input PMF grid | `num.adc_input_pmf_grid.*`：`relative_As_with_cap`／`relative_As`＋grid parameters；`dy_override` 優先 | `relative_As_with_cap`；`dy_override=10e-6 V` | **L4** `_resolve_adc_input_pmf_config()`；L5 shared kernel `COMPMFGridControl.resolve_dy()` | **Closed 2026-11-12** |
 | `ALG-009` | retired — approved branch | Stage 2 Pre-DTE PMF method | none — retired; exact PMF is fixed | none — fixed exact-PMF contract | — (retired; former execution point `_build_psd_adc_qn()`) | Retired: Gaussian approximation altered `V_qc`, MSE and selected phase for only 1.5–2% evaluation savings; exact PMF is fixed |
 | `SRCH-001` | active — approved branch | Stage 3 Sampling search control | `srch.pos_sweep_method`：`each_phase`／`coarse_fine`；`pos_coarse_stride` 是 branch parameter | 不覆蓋 | **L1 owner** `COM._run_once()` 中完整且刻意展開的 Stage 3 control block | **Ownership corrected 2026-11-13** |
@@ -117,6 +117,23 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | active — approved branch | Cross-stage PDF→PMF shared utility; consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_build_pmf_G()`、`_reconstruct_final_vqc_sicopr()`、`evaluate_delta_com_an()`、`solve_g_an()`、`calculate_der_mlsd()` | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | active — approved branch | Stage 7 MLSD fixed-grid scalar-PMF scaling; consumers `_build_scaled_total_pdf_added_noise()` and `calculate_der_mlsd()` | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
+## Numerical control 盤點與審查狀態
+
+本盤點同時包含分支及數值參數，避免只看分支分類表而漏掉影響精度的控制。待核對表示目前尚未找到足夠的完整審查證據，不代表已證明從未討論；是否另成分支亦未預先決定。
+
+| 控制 | 現況與已知證據 | 後續狀態 |
+|---|---|---|
+| `num.eq_ch_imp_len`／`num_trunc_ui` | NUM-003；PSD record 長度。曾完成 owner 審查，後續另修改 XT 最大能量 window。 | 原 owner 已審；後續 window 有驗證，完整 numerical 精度與方法審查程度待核對。 |
+| `num.adc_input_pmf_grid.*` | NUM-004；ADC-input PMF 間距及 override。 | owner 審查已結束；數值選擇與精度的完整審查程度待核對。 |
+| `num.final_pmf_grid.*` | NUM-005；final PMF 間距及 override。 | owner 審查已結束；數值選擇、精度與成本的完整審查程度待核對。 |
+| `num.pmf_keep_mass` | NUM-006；ADC-input PMF 卷積保留機率質量。 | 完整初次審查與驗證已完成。 |
+| `num.pmf_convolution_method` | NUM-007；FFT／linear。 | 已討論選項及 owner，核准實作並驗證；不因文件標籤不一致重列未審。 |
+| `num.mlsd_stop_method` | NUM-008；MLSD DER 加總停止方式。 | 與 ALG-016 一併討論、核准及驗證。 |
+| `num.fine_grid_df`、`num.relative_threshold`、`num.absolute_threshold` | ALG-018 adaptive grid 的數值參數；曾於 adaptive grid 設計契約討論，預設依現行 config。 | 設計與功能驗證已做；各參數的數值精度、成本及適用邊界是否需獨立審查待核對，不預設為新分支。 |
+| `num.pmf_grid_quality` | coarse／fine 的 legacy profile effective record；canonical grid 規則另見 NUM-004／005。 | ADC resolver 雖傳入 `COMPMFConfig.resolve()`，但隨即以 `adc_input_pmf_grid` 覆寫 dy；是否仍有其他有效路徑、需要保留或審查待追蹤。 |
+| `pmf.tap_rel_As`／`pmf.tap_abs_th_override` | PMF tap 門檻；前者預設 `1e-3`，後者非 `None` 時覆蓋；現屬 `COMPMFConfig`，不是 `cfg.num` 欄位。 | 會影響哪些 tap 被計算；曾在 ALG-013 提及作為 numerical control，跨 consumer 的實際範圍及完整審查證據待核對。 |
+| `pmf.dy_override`／`dy_rel_As`／`dy_abs_max`／`keep_mass` | `COMPMFConfig` 的 legacy-compatible 欄位；canonical numerical families 和實際 override 邊界見 `config_tree.md`。 | 哪些仍影響 runtime、哪些只為相容而保留待逐項核對；不得僅憑命名視為獨立分支。 |
+
 ## Responsibility / impact boundaries
 
 本表將原本塞在 `Responsibility boundary` 單一欄位的內容拆成「允許改變」與
