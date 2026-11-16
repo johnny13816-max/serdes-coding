@@ -50,7 +50,8 @@ reporting、C2M migration 或 release 工作。
 
 **2026-11-16 ALG-014：** Our branch 維持 Gaussian 校準；reference 使用二階矩
 差計算 `g_an`，兩者統一由 `COM._build_mlsd_added_noise()` 選擇。Focused 56 passed；
-非零平均 PMF 的 SiCoPR 共同輸入與固定 reference case 已驗證，待 isolated integration。
+非零平均 PMF 的 SiCoPR 共同輸入與固定 reference case 已驗證；implementation
+commit `2f0d252` 已推送。下一項從 ALG-015 完整初次審查開始。
 
 **現行更新（2026-11-16）：** ALG-013 完成選項、Stage 6 owner、profile、
 fixed-input SiCoPR PMF 和固定案例 COM 審查；新增 focused boundary tests
