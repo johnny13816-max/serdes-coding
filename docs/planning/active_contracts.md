@@ -48,6 +48,8 @@ reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
+**2026-11-16 ALG-015：** owner `build_mlsd_noise()`；our branch 不變，reference 以 unit-main 尺度重算 clipping，再將 `S_qn` 轉回專案尺度。Focused 51 passed、原 FFT golden 1 passed。固定案例 reference linear profile：phase 5、MSE 0.006191300963670364、DFE COM 1.5247607834260184 dB、final COM 2.895898684873275 dB。專案 `S_qn_rms=22.7386657816 mV` 除以 main gain 58.9224659，等於 SiCoPR 4p17p0 實跑的 0.3859082514 mV；對照限於此固定案例。
+
 **2026-11-16 ALG-014：** Our branch 維持 Gaussian 校準；reference 使用二階矩
 差計算 `g_an`，兩者統一由 `COM._build_mlsd_added_noise()` 選擇。Focused 56 passed；
 非零平均 PMF 的 SiCoPR 共同輸入與固定 reference case 已驗證；implementation

@@ -71,6 +71,7 @@ class TestMLSDNoise178A(unittest.TestCase):
         self.model = COM.__new__(COM)
         self.model.cfg = SimpleNamespace(
             link=self.grid,
+            L=4,
             alg=COMAlgorithmPolicyConfig(),
             num=COMNumericalControlConfig(),
             dte=SimpleNamespace(d_w=0),
@@ -79,6 +80,9 @@ class TestMLSDNoise178A(unittest.TestCase):
                 SNR_TX=20.0,
                 A_DD=0.1,
                 sigma_RJ=0.02,
+                R_LM=0.6,
+                N_qb=6,
+                P_qc=0.01,
             ),
             filter=SimpleNamespace(
                 fr=4.0,
@@ -105,18 +109,87 @@ class TestMLSDNoise178A(unittest.TestCase):
             result.R_ni, result.S_ni.to_autocorrelation(), rtol=1e-12, atol=1e-15
         )
 
-    def test_reference_quantization_stays_white_with_main_tap_gain(self) -> None:
+    def test_reference_quantization_recomputes_white_noise(self) -> None:
         self.model.cfg.alg = COMAlgorithmPolicyConfig(
             mlsd_quantization_psd="main_tap_white"
         )
+        self.model.cfg.num.adc_input_pmf_grid.dy_override = 0.02
+        self.eq_ch.pre_dte.h_dsamp = SampledResponse.from_ir(np.array([1.0]), self.grid)
         result = self.model.build_mlsd_noise(
             self.imp, self.eq_ch, self.dte, self.added_noise
         )
-        density = (self.imp.pre_dte.adc_input.delta**2 / 12.0) / self.fb
+        # Independent signal-PDF and SiCoPR slow-clipping calculation.
+        sigma_x2 = self.sigma_X**2
+        s_xt = model_module._build_psd_from_DFT_response(
+            self.eq_ch.pre_dte.h_XTs_dsamp[0].ir, self.grid, sigma_x2)
+        s_tx = model_module._build_psd_from_DFT_response(
+            self.eq_ch.pre_dte.h_tn.ir, self.grid, 10**(-self.model.cfg.imp.SNR_TX / 10))
+        s_rj = model_module._build_psd_from_DFT_response(
+            self.eq_ch.pre_dte.h_J.ir, self.grid, sigma_x2 * self.model.cfg.imp.sigma_RJ**2)
+        s_rx = model_module._build_psd_rx_noise(self.grid, self.model.cfg.imp, self.model.cfg.filter)
+        sigma = s_rx.add(s_xt).add(s_tx).add(s_rj).filtered_by(self.h_rxffe).to_sigma()
+        indices = np.array([-50, -17, 17, 50])
+        signal = np.zeros(101)
+        signal[indices + 50] = 0.25
+        axis = np.arange(-50, 51) * 0.02
+        gaussian = np.exp(-0.5 * (axis / sigma)**2) * 0.02 / (np.sqrt(2 * np.pi) * sigma)
+        cdf = np.cumsum(np.convolve(signal, gaussian))
+        clip = -(-100 + np.searchsorted(cdf, 0.01)) * 0.02
+        delta = 2 * clip / (2**6 - 1)
+        density = (delta**2 / 12.0) / self.fb
         expected = SampledPSD.from_constant(
             self.grid.theta, density, self.fb, cfg=self.grid
-        ).psd * self.h_rxffe.ir[0] ** 2
+        ).psd
         np.testing.assert_allclose(result.S_qn.psd, expected, rtol=1e-12, atol=1e-15)
+
+    def test_reference_clipping_preserves_unnormalized_gaussian(self) -> None:
+        self.model.cfg.alg = COMAlgorithmPolicyConfig(
+            mlsd_quantization_psd="main_tap_white"
+        )
+        self.model.cfg.num.adc_input_pmf_grid.dy_override = 0.02
+        self.model.cfg.imp.SNR_TX = -20.0
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        # SiCoPR common-input oracle: Gaussian mass 0.32642328575429935,
+        # unnormalized lower-tail clipping value 1.9 V.
+        delta = 2 * 1.9 / 63
+        expected = SampledPSD.from_constant(
+            self.grid.theta, delta**2 / 12 / self.fb, self.fb, cfg=self.grid
+        )
+        np.testing.assert_allclose(result.S_qn.psd, expected.psd, rtol=1e-12, atol=1e-15)
+
+    def test_reference_quantization_disabled(self) -> None:
+        self.model.cfg.alg = COMAlgorithmPolicyConfig(
+            mlsd_quantization_psd="main_tap_white"
+        )
+        self.imp.pre_dte.adc_input.delta = None
+        result = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        np.testing.assert_array_equal(result.S_qn.psd, np.zeros_like(result.S_qn.psd))
+
+    def test_reference_quantization_scales_with_ffe_gain(self) -> None:
+        self.model.cfg.alg = COMAlgorithmPolicyConfig(
+            mlsd_quantization_psd="main_tap_white"
+        )
+        self.model.cfg.num.adc_input_pmf_grid.dy_override = 0.02
+        baseline = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        self.dte.w_lim = self.dte.w_lim * 2.0
+        scaled = self.model.build_mlsd_noise(
+            self.imp, self.eq_ch, self.dte, self.added_noise
+        )
+        np.testing.assert_allclose(scaled.S_qn.psd, 4 * baseline.S_qn.psd, rtol=1e-12, atol=1e-15)
+
+    def test_reference_quantization_rejects_zero_main_gain(self) -> None:
+        self.model.cfg.alg = COMAlgorithmPolicyConfig(
+            mlsd_quantization_psd="main_tap_white"
+        )
+        self.dte.w_lim[0] = 0.0
+        with self.assertRaisesRegex(ValueError, "nonzero finite FFE main tap"):
+            self.model.build_mlsd_noise(self.imp, self.eq_ch, self.dte, self.added_noise)
 
     def test_added_noise_uses_g_an_not_stored_s_an_grid(self) -> None:
         baseline = self.model.build_mlsd_noise(

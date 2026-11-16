@@ -239,7 +239,13 @@ The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 d
 | Method field | Annex/general | Reference profile |
 |---|---|---|
 | `added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` |
-| `mlsd_quantization_psd` | `pre_dte_filtered`：`S_qn` 隨完整 RxFFE filtering | `main_tap_white`：`S_qn` 保持 white，只乘 RxFFE main-tap gain squared |
+| `mlsd_quantization_psd` | `pre_dte_filtered`：`S_qn` 隨完整 RxFFE filtering | `main_tap_white`：以 unit-main-tap RxFFE 尺度依 SiCoPR slow clipping 重算 white `S_qn`，再乘 main-tap gain squared 轉回專案尺度；名稱保留相容性。 |
+
+ALG-015 尺度修正前，固定 Akinwale 專案輸入直接對照 SiCoPR signal PDF／noise PDF／卷積，雖然 `S_qn` 數值相同，但因兩者 RX FFE 增益尺度不同，final COM 降至 2.8736176390 dB，未通過 golden。此結果不可視為 project-domain 對齊。
+
+尺度修正前的 linear convolution run 與 FFT run 皆得到 final COM 2.8736176389536348 dB；差異不是這兩種卷積選擇造成。
+
+SiCoPR 4p17p0 實際案例後續實跑：`t_s=38149`、RxFFE main tap 1、Stage 7 `adc_clip=0.04211 V`、`S_qn_rms=0.3859082514 mV`；專案 `w_lim[d_w]=58.9224659`。使用者核准尺度修正後，reference profile 實測 `S_qn_rms=22.7386657816 mV`，除以 main gain 為 `0.3859082514 mV`；phase 5、MSE `0.006191300963670364`、DFE COM `1.5247607834260184 dB`、final COM `2.895898684873275 dB`。Focused tests 51 passed，原 FFT golden 1 passed；比較僅涵蓋本固定案例，未宣稱一般案例全數一致。
 | `sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` |
 | `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
 

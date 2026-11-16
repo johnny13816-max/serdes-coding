@@ -110,7 +110,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-012` | active — approved branch；reference evidence pending | Stage 6 DFE COM final clipping | `alg.final_com_vqc_convention`：`selected_phase_adc_input`／`sicopr_final_reconstruction` | `sicopr_final_reconstruction` | **L3** `COM._build_final_adc_quantization()` | owner 負責 V_qc／delta 與 p_qn；reference tap 跳過僅為對照 SiCoPR，非完整 FIR 模型；非零 `S_in` 延後，reference 逐項對齊尚待驗證 |
 | `ALG-013` | active — review closed；reference evidence bounded | Stage 6 DFE COM final ADC PMF | `alg.final_adc_pmf_projection`：`annex_d3`／`reference_support` | `reference_support` | **L3** `COM._build_final_adc_quantization()` | Stage 6 owner、兩種選項與互斥驗證已確認；SiCoPR fixed-input PMF 與 fixed-case COM 已對照。NUM-007 控制卷積；不宣稱通用 reference equivalence |
 | `ALG-014` | active — review closed | Stage 7 MLSD added noise | `alg.added_noise_pdf`：`gaussian_addition`／`scaled_total_pdf` | `scaled_total_pdf` | **L3** `COM._build_mlsd_added_noise()` | Our branch Gaussian 增量；reference 以 PMF 二階矩差對齊 SiCoPR；focused 56 passed，fixed case 符合 golden 容差 |
-| `ALG-015` | active — unreviewed existing selector | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | **provisional L3** `build_mlsd_noise()` | 待完整初次審查 |
+| `ALG-015` | active — review closed | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | L3 `build_mlsd_noise()` | our 使用完整 RxFFE；reference 在 unit-main 尺度重算 clipping 與 white `S_qn`，轉回專案尺度；fixed case 與 SiCoPR 對照通過 |
 | `ALG-016` | active — unreviewed existing selector | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **provisional L3** `calculate_der_mlsd()` | 待完整初次審查 |
 | `ALG-017` | active — unreviewed existing selector | Stage 7 MLSD reported DER | `alg.reported_der`：`raw_sequence_sum`／`baseline_pdf_re_evaluation` | `baseline_pdf_re_evaluation` | **provisional L3** `calculate_COM_MLSD()` reported-DER block | 待完整初次審查 |
 | `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
@@ -234,7 +234,7 @@ COM model
 │  ├─ COM._build_mlsd_added_noise()                          [ALG-014 L3 owner]
 │  │  ├─ solve_g_an()                                       [Gaussian executor]
 │  │  └─ _build_scaled_total_pdf_added_noise()               [reference executor]
-│  ├─ build_mlsd_noise()                                     [NUM-003 L3 owner + ALG-015 provisional]
+│  ├─ build_mlsd_noise()                                     [NUM-003 + ALG-015 L3 owner]
 │  │  ├─ resolve MLSD record_cfg and rebuild component PSDs
 │  │  └─ Eq. 178A-54 composition → S_ni／R_ni
 │  ├─ calculate_der_mlsd() recurrence termination            [ALG-016 provisional]

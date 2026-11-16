@@ -2485,19 +2485,12 @@ class COM:
         S_n = S_rn_pre.add(S_xn_pre).add(S_tn_pre).add(S_jn_pre).add(source_qn)
 
         # Eq. (178A-54): the Annex path filters every component by the complete
-        # RxFFE response. The reference realization keeps S_qn white and uses
-        # only the selected main-tap gain.
+        # RxFFE response. The reference realization recomputes a white S_qn.
         quantization_method = self.cfg.alg.mlsd_quantization_psd
         if quantization_method == "pre_dte_filtered":
             S_n_filtered = S_n.filtered_by(H_rxffe)
             S_qn = source_qn.filtered_by(H_rxffe)
         elif quantization_method == "main_tap_white":
-            d_w = int(self.cfg.dte.d_w)
-            if d_w < 0 or d_w >= len(H_rxffe.ir):
-                raise ValueError("main_tap_white requires d_w within H_rxffe.ir.")
-            main_gain = float(H_rxffe.ir[d_w])
-            if not np.isfinite(main_gain):
-                raise ValueError("main_tap_white requires a finite RxFFE main tap.")
             non_qn = SampledPSD(
                 theta=S_n.theta,
                 psd=S_n.psd - source_qn.psd,
@@ -2505,12 +2498,76 @@ class COM:
                 cfg=S_n.cfg,
             )
             S_n_filtered = non_qn.filtered_by(H_rxffe)
-            S_qn = SampledPSD(
-                theta=source_qn.theta,
-                psd=source_qn.psd * main_gain**2,
-                fb=source_qn.fb,
-                cfg=source_qn.cfg,
-            )
+            if delta is None:
+                S_qn = _zero_sampled_psd(record_cfg)
+            else:
+                main_index = int(self.cfg.dte.d_w)
+                if main_index < 0 or main_index >= len(w_lim):
+                    raise ValueError("SiCoPR MLSD clipping requires a valid FFE main tap.")
+                main_gain = abs(float(w_lim[main_index]))
+                if not np.isfinite(main_gain) or main_gain == 0.0:
+                    raise ValueError("SiCoPR MLSD clipping requires a nonzero finite FFE main tap.")
+                # SiCoPR's slow clipping uses a signal PDF and a Gaussian on
+                # that same support. Its Gaussian is not renormalized; use
+                # local arrays rather than the normalized Pmf1D interface.
+                dy = self.cfg.num.adc_input_pmf_grid.resolve_dy(
+                    self.cfg.imp.R_LM / (self.cfg.L - 1)
+                )
+                samples = np.asarray(eq_ch.pre_dte.h_dsamp.ir, dtype=float)[
+                    :record_cfg.sampled_nfft
+                ]
+                taps = samples[np.abs(samples) > dy]
+                taps = taps[np.argsort(np.abs(taps), kind="stable")[::-1]]
+                levels = 2.0 * np.arange(self.cfg.L) / (self.cfg.L - 1) - 1.0
+                signal = np.ones(1)
+                signal_start = 0
+                for tap in taps:
+                    scaled = np.abs(tap) * levels / dy
+                    rounded = np.round(scaled)
+                    ties = np.abs(scaled - np.trunc(scaled)) == 0.5
+                    indices = np.where(ties, np.trunc(scaled) + np.sign(scaled), rounded).astype(int)
+                    kernel = np.zeros(indices[-1] - indices[0] + 1)
+                    np.add.at(kernel, indices - indices[0], 1.0 / self.cfg.L)
+                    occupied = np.flatnonzero(kernel)
+                    if kernel.size >= 64 and occupied.size * 8 <= kernel.size:
+                        convolved = np.zeros(signal.size + kernel.size - 1)
+                        for index in occupied:
+                            convolved[index:index + signal.size] += kernel[index] * signal
+                        signal = convolved
+                    else:
+                        signal = np.convolve(signal, kernel)
+                    signal_start += int(indices[0])
+
+                rj_fraction = (self.cfg.imp.sigma_RJ**2 /
+                    (self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2)
+                    if self.cfg.imp.A_DD**2 + self.cfg.imp.sigma_RJ**2 else 0.0)
+                S_clip = S_rn_pre.add(S_xn_pre).add(S_tn_pre).add(SampledPSD(
+                    theta=S_jn_pre.theta, psd=S_jn_pre.psd * rj_fraction,
+                    fb=S_jn_pre.fb, cfg=S_jn_pre.cfg,
+                )).filtered_by(H_rxffe)
+                # SiCoPR evaluates clipping with a unit-main-tap RxFFE. Bring
+                # the project's output noise back to that amplitude scale.
+                sigma_clip = S_clip.to_sigma() / main_gain
+                if not np.isfinite(sigma_clip) or sigma_clip <= 0.0:
+                    raise ValueError("SiCoPR MLSD clipping requires positive finite noise sigma.")
+                axis = (signal_start + np.arange(signal.size)) * dy
+                gaussian = np.exp(-0.5 * (axis / sigma_clip)**2) * (
+                    dy / (np.sqrt(2.0 * np.pi) * sigma_clip)
+                )
+                # Preserve the full output support while skipping exact-zero
+                # Gaussian tails, as in the reference direct convolution.
+                nonzero = np.flatnonzero(gaussian)
+                combined = np.zeros(signal.size + gaussian.size - 1)
+                if nonzero.size:
+                    lo, hi = int(nonzero[0]), int(nonzero[-1]) + 1
+                    combined[lo:lo + signal.size + hi - lo - 1] = np.convolve(signal, gaussian[lo:hi])
+                index = min(int(np.searchsorted(np.cumsum(combined), self.cfg.imp.P_qc)), combined.size - 1)
+                clipping = -(2 * signal_start + index) * dy
+                delta_ref = 2.0 * clipping / (2**self.cfg.imp.N_qb - 1)
+                S_qn = SampledPSD.from_constant(
+                    record_cfg.theta, (delta_ref**2 * main_gain**2 / 12.0) / record_cfg.fb,
+                    record_cfg.fb, cfg=record_cfg,
+                )
             S_n_filtered = S_n_filtered.add(S_qn)
         else:
             raise ValueError(f"Unsupported MLSD quantization PSD method: {quantization_method}.")
