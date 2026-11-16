@@ -67,6 +67,7 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                 pmf = COMPMFStatus(
                     dy=0.001,
                     tap_abs_th=0.0,
+                    p_combined=p_an,
                     A_ni=A_ni,
                     COM=COM_DFE,
                 )
@@ -122,6 +123,10 @@ class TestMLSDCOMEquation178A47(unittest.TestCase):
                 A_MLSD = -float(p_an.quantile(der))
                 expected_increment = float(20.0 * np.log10(A_MLSD / As))
                 self.assertAlmostEqual(result.A_MLSD, A_MLSD, places=12)
+                self.assertEqual(result.DER_MLSD, der)
+                expected_index = np.searchsorted(p_an.x, -A_MLSD, side="left")
+                expected_index = min(max(expected_index, 0), len(p_an.pmf) - 1)
+                self.assertEqual(result.DER_MLSD_sicopr_style, float(p_an.cdf[expected_index]))
                 self.assertAlmostEqual(result.delta_COM, expected_increment, places=12)
                 self.assertAlmostEqual(
                     result.COM_MLSD_raw - COM_DFE, expected_increment, places=12

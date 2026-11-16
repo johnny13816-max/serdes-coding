@@ -33,7 +33,7 @@
 | `force_grid`、grid overflow guard | utility 的卷積輸出契約與 search 候選處置；`force_grid=False` 是 diagnostic/caller-owned complete-record behavior，不另立 selectable branch。ALG-011 由 Stage 5 owner 明示使用。 |
 | `SampledPSD.filtered_by()` 的 grid 檢查 | utility 一致性契約，無隱藏 regrid 分支。 |
 | TX 時間原點、sinc／boxcar unit-pulse 表示 | 已驗證為比較座標與等價表示；**不建立算法分支**。 |
-| MLSD reference realization | `COMPolicyConfig` 保留 `added_noise_pdf`、`sequence_termination`、`reported_der` 三個具名方法；`align_to_ref=True` 由 adapter 展開成 TC-023 reference 組合。Eq. 178A-49 sign 是直接修正，不是分支。 |
+| MLSD reference realization | `COMPolicyConfig` 保留 `added_noise_pdf`、`sequence_termination` 等具名方法；DER 同時記錄計算值及 SiCoPR-style diagnostic，不再使用 reported DER selector。Eq. 178A-49 sign 是直接修正，不是分支。 |
 
 ## TC-020R3 完成狀態
 

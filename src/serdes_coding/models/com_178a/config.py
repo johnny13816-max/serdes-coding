@@ -1245,7 +1245,6 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
         "pre_dte_filtered", "main_tap_white"
     ] = "pre_dte_filtered"
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum"
-    reported_der: Literal["raw_sequence_sum", "baseline_pdf_re_evaluation"] = "raw_sequence_sum"
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
             TextSection("Channel and pulse", (
@@ -1272,7 +1271,6 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
                 self._field("added_noise_pdf", "added-noise PDF", stored_unit="policy"),
                 self._field("mlsd_quantization_psd", "MLSD quantization PSD", stored_unit="policy"),
                 self._field("sequence_termination", "sequence termination", stored_unit="policy"),
-                self._field("reported_der", "reported DER", stored_unit="policy"),
             )),
         )
 
@@ -1302,7 +1300,6 @@ class COMAlgorithmPolicyConfig(COMDataclassText):
             "added_noise_pdf": {"gaussian_addition", "scaled_total_pdf"},
             "mlsd_quantization_psd": {"pre_dte_filtered", "main_tap_white"},
             "sequence_termination": {"fixed_length_sum", "matlab_relative_tail"},
-            "reported_der": {"raw_sequence_sum", "baseline_pdf_re_evaluation"},
         }
         for name, choices in allowed.items():
             if getattr(self, name) not in choices:

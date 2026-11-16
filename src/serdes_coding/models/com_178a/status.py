@@ -355,7 +355,13 @@ class COMMLSDNoiseStatus(COMDataclassText):
 
 @dataclass(repr=False)
 class COMMLSDStatus(COMDataclassText):
-    """MLSD-only inputs and results, separate from physical impairment stages."""
+    """MLSD-only inputs and results, separate from physical impairment stages.
+
+    DER_MLSD_raw_sequence 是各序列長度錯誤機率貢獻的加總；
+    DER_MLSD 是實際用來計算 COM 的 DER，可能包含 sequence penalty。
+    DER_MLSD_sicopr_style 以 MLSD 增益在 DFE noise distribution 上
+    重新估算，供 SiCoPR 輸出對照，不參與 COM 計算；不保證所有情況對齊。
+    """
     added_noise: COMAddedNoiseStatus
     S_isi: Optional[SampledPSD] = None
     sigma_isi: Optional[float] = None
@@ -367,7 +373,7 @@ class COMMLSDStatus(COMDataclassText):
     der_by_j: Optional[np.ndarray] = None
     DER_MLSD_raw_sequence: Optional[float] = None
     DER_MLSD: Optional[float] = None
-    DER_MLSD_reported: Optional[float] = None
+    DER_MLSD_sicopr_style: Optional[float] = None
     A_MLSD: Optional[float] = None
     delta_COM: Optional[float] = None
     COM_MLSD_raw: Optional[float] = None
@@ -391,7 +397,7 @@ class COMMLSDStatus(COMDataclassText):
                 self._field("der_by_j", "DER contribution by sequence length", stored_unit="dimensionless probability"),
                 self._field("DER_MLSD_raw_sequence", "raw sequence DER", stored_unit="dimensionless probability"),
                 self._field("DER_MLSD", "selected DER", stored_unit="dimensionless probability"),
-                self._field("DER_MLSD_reported", "reported DER", stored_unit="dimensionless probability"),
+                self._field("DER_MLSD_sicopr_style", "SiCoPR-style diagnostic DER", stored_unit="dimensionless probability"),
                 self._field("A_MLSD", "MLSD amplitude", stored_unit="V", display_unit="mV", scale=1e3),
                 self._field("delta_COM", "MLSD COM increment", stored_unit="dB"),
                 self._field("COM_MLSD_raw", "raw COM MLSD", stored_unit="dB"),

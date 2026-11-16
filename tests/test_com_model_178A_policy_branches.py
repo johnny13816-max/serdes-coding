@@ -472,7 +472,7 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert alg.added_noise_pdf == "scaled_total_pdf"
     assert alg.mlsd_quantization_psd == "main_tap_white"
     assert alg.sequence_termination == "matlab_relative_tail"
-    assert alg.reported_der == "baseline_pdf_re_evaluation"
+    assert not hasattr(alg, "reported_der")
     assert alg.final_adc_pmf_projection == "reference_support"
     assert aligned.exe.target == "all_enabled"
     assert sweep.exe.target == "mse"

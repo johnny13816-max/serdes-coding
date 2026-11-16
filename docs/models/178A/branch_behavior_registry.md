@@ -113,7 +113,7 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-015` | active — review closed | Stage 7 MLSD noise PSD | `alg.mlsd_quantization_psd`：`pre_dte_filtered`／`main_tap_white` | `main_tap_white` | L3 `build_mlsd_noise()` | our 使用完整 RxFFE；reference 在 unit-main 尺度重算 clipping 與 white `S_qn`，轉回專案尺度；fixed case 與 SiCoPR 對照通過 |
 | `NUM-008` | active — review closed | Stage 7 MLSD DER 加總停止 | `num.mlsd_stop_method`：`fixed_length`／`relative_tail`；後者門檻 `1e-4` | `relative_tail` | **L3** `calculate_der_mlsd()` | 早停回傳已計算項；SiCoPR 同輸入及固定 golden 驗證通過 |
 | `ALG-016` | active — review closed | Stage 7 MLSD DER recurrence | `alg.sequence_termination`：`fixed_length_sum`／`matlab_relative_tail` | `matlab_relative_tail` | **L3** `calculate_der_mlsd()` | 選擇 penalty 與沿用既有 CDF 取點；停止控制分至 NUM-008；SiCoPR 邊界對照通過 |
-| `ALG-017` | active — unreviewed existing selector | Stage 7 MLSD reported DER | `alg.reported_der`：`raw_sequence_sum`／`baseline_pdf_re_evaluation` | `baseline_pdf_re_evaluation` | **provisional L3** `calculate_COM_MLSD()` reported-DER block | 待完整初次審查 |
+| `ALG-017` | retired — approved branch | Stage 7 MLSD reported DER | none — 兩種 DER 固定分別記錄 | none | — | 移除輸出選擇；計算用 DER 與 SiCoPR-style diagnostic 各自保存，不影響 COM |
 | `ALG-002` | active — approved branch | Cross-stage PMF target-grid projection (Stages 3／5／6／7); consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_reconstruct_final_vqc_sicopr()`、`calculate_der_mlsd()` | `alg.pmf_projection_method`：`linear`／`nearest` | `nearest` | **L5 owner set** `Pmf1D.multi_dirac()`／`scale_x()`／`resample_dx()`／`fir_filter()` | **Closed 2026-11-11** |
 | `ALG-003` | active — approved branch | Cross-stage PDF→PMF shared utility; consumers `_calculate_V_qc()`、`_build_psd_adc_qn()`、`_build_adc_input_pmf_exact()`、`_build_pmf_G()`、`_reconstruct_final_vqc_sicopr()`、`evaluate_delta_com_an()`、`solve_g_an()`、`calculate_der_mlsd()` | `alg.pdf_to_pmf_method`：`bin_integral`／`pmf_sample` | `pmf_sample` | **L5 owner set** `Pmf1D.gaussian()`／`uniform()` | **Closed 2026-11-11** |
 | `ALG-004` | active — approved branch | Stage 7 MLSD fixed-grid scalar-PMF scaling; consumers `_build_scaled_total_pdf_added_noise()` and `calculate_der_mlsd()` | `alg.pmf_scaling_method`：`mass_deposit`／`interpolate_ordinates` | `interpolate_ordinates` | **L5** `Pmf1D.scale_x()` | **Closed 2026-11-11** |
@@ -145,7 +145,6 @@ choice 欄標示為 `none — retired`；不保留歷史 legal values 作為目�
 | `ALG-014` | added-noise PDF construction | `S_isi`、`S_ni` definitions |
 | `ALG-015` | Eq. 178A-54 的 MLSD quantization-noise PSD composition | MMSE noise、RxFFE taps、`S_an`、`S_isi`、DER solver |
 | `ALG-016` | DER recurrence termination | Eq. 178A-49 的共同 sign definition |
-| `ALG-017` | reported DER formation | raw sequence DER 必須獨立保留 |
 
 ## 分支 ownership / function-position tree
 
@@ -239,7 +238,7 @@ COM model
 │  │  ├─ resolve MLSD record_cfg and rebuild component PSDs
 │  │  └─ Eq. 178A-54 composition → S_ni／R_ni
 │  ├─ calculate_der_mlsd()                                  [ALG-016 + NUM-008 L3 owner]
-│  └─ calculate_COM_MLSD() reported DER formation            [ALG-017 provisional]
+│  └─ calculate_COM_MLSD() 固定記錄計算用及 SiCoPR-style diagnostic DER
 └─ Cross-domain L5 PMF operations
    ├─ `_calculate_V_qc()`／`_build_psd_adc_qn()`／`_build_adc_input_pmf_exact()`／`_reconstruct_final_vqc_sicopr()`／`calculate_der_mlsd()` [ALG-002 injectors]
    │  └─ Pmf1D.multi_dirac()/scale_x()/resample_dx()/fir_filter() [ALG-002 owner set]

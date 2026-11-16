@@ -2938,15 +2938,11 @@ class COM:
         delta_COM = float(20.0 * np.log10(A_MLSD / imp_status.As))
         COM_MLSD_raw = COM_DFE + delta_COM
         DER_MLSD_raw_sequence = float(np.sum(der_by_j))
-        if self.cfg.alg.reported_der == "baseline_pdf_re_evaluation":
-            # MATLAB 4.17 re-evaluates the published DER on the original DFE
-            # PDF at the amplitude implied by the calculated MLSD increment.
-            DER_MLSD_reported = _reference_cdf_ev(
-                pmf_dfe.p_combined,
-                imp_status.As * 10.0 ** (delta_COM / 20.0),
-            )
-        else:
-            DER_MLSD_reported = DER_MLSD
+        # Diagnostic only; does not feed back into the MLSD COM calculation.
+        DER_MLSD_sicopr_style = _reference_cdf_ev(
+            pmf_dfe.p_combined,
+            imp_status.As * 10.0 ** (delta_COM / 20.0),
+        )
         mlsd_status = COMMLSDStatus(
             added_noise=added_noise,
             S_isi=noise.S_isi,
@@ -2959,7 +2955,7 @@ class COM:
             der_by_j=der_by_j,
             DER_MLSD_raw_sequence=DER_MLSD_raw_sequence,
             DER_MLSD=DER_MLSD,
-            DER_MLSD_reported=DER_MLSD_reported,
+            DER_MLSD_sicopr_style=DER_MLSD_sicopr_style,
             A_MLSD=A_MLSD,
             delta_COM=delta_COM,
             COM_MLSD_raw=COM_MLSD_raw,

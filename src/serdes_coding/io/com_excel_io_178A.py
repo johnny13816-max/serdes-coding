@@ -370,7 +370,6 @@ def _resolve_project_profile_178A(
         added_noise_pdf="scaled_total_pdf",
         mlsd_quantization_psd="main_tap_white",
         sequence_termination="matlab_relative_tail",
-        reported_der="baseline_pdf_re_evaluation",
     )
     overrides: dict[str, object] = {
         f"alg.{field_name}": override_record(

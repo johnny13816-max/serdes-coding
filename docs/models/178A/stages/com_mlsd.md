@@ -241,7 +241,6 @@ The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 d
 | `added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` |
 | `mlsd_quantization_psd` | `pre_dte_filtered`：`S_qn` 隨完整 RxFFE filtering | `main_tap_white`：以 unit-main-tap RxFFE 尺度依 SiCoPR slow clipping 重算 white `S_qn`，再乘 main-tap gain squared 轉回專案尺度；名稱保留相容性。 |
 | `sequence_termination` | `fixed_length_sum`：不使用 penalty，沿用 project CDF 取點 | `matlab_relative_tail`：到達截斷長度才套用 reference penalty，沿用 SiCoPR CDF 取點 |
-| `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
 
 ALG-015 尺度修正前，固定 Akinwale 專案輸入直接對照 SiCoPR signal PDF／noise PDF／卷積，雖然 `S_qn` 數值相同，但因兩者 RX FFE 增益尺度不同，final COM 降至 2.8736176390 dB，未通過 golden。此結果不可視為 project-domain 對齊。
 
@@ -417,7 +416,7 @@ COMMLSDStatus
 ├── der_by_j
 ├── DER_MLSD_raw_sequence
 ├── DER_MLSD
-├── DER_MLSD_reported
+├── DER_MLSD_sicopr_style
 ├── A_MLSD
 ├── delta_COM
 ├── COM_MLSD_raw
@@ -425,6 +424,14 @@ COMMLSDStatus
 ```
 
 The complete dataclass lifecycle is defined in [Status tree](../status_tree.md).
+
+`COMMLSDStatus` 的 DER 欄位：
+
+- `DER_MLSD_raw_sequence`：各序列長度的錯誤機率貢獻之加總，不含額外 sequence penalty。
+- `DER_MLSD`：實際用於計算 COM 的 DER，依設定可能包含 sequence penalty。
+- `DER_MLSD_sicopr_style`：用 MLSD 增益在 DFE noise distribution 上重新估算的 diagnostic DER，與 `DER_MLSD` 同時保存，不參與 COM 計算；不保證所有情況均與 SiCoPR 對齊。
+
+ALG-017 移除驗證：focused 62 passed；既有 Akinwale reference-profile FFT golden 通過，MSE 與 `0.006191300963670364` 的差小於 `1e-14`，final COM 與 `2.895898684873246 dB` 的差小於 `1e-12 dB`。此比較僅涵蓋該固定案例。
 
 ## Failure conditions
 
