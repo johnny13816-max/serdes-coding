@@ -48,6 +48,8 @@ reporting、C2M migration 或 release 工作。
 
 ## Current queue
 
+**2026-11-16 ALG-016／NUM-008：** L3 `calculate_der_mlsd()` 分別處理 penalty／既有 CDF 與 DER 停止。Project `fixed_length`；reference `relative_tail`，門檻 `1e-4`。Focused 54 passed、profile/provenance 40 passed、FFT golden 1 passed；SiCoPR recurrence 共同輸入的提前停止及 penalty 邊界對照通過。Reference linear 固定 case：j=16、phase 5、MSE 0.006191300963670364、DFE COM 1.5247607834260184 dB、final COM 2.895898684873275 dB，符合 golden 容差；不宣稱所有 case 相同。
+
 **2026-11-16 ALG-015：** owner `build_mlsd_noise()`；our branch 不變，reference 以 unit-main 尺度重算 clipping，再將 `S_qn` 轉回專案尺度。Focused 51 passed、原 FFT golden 1 passed。固定案例 reference linear profile：phase 5、MSE 0.006191300963670364、DFE COM 1.5247607834260184 dB、final COM 2.895898684873275 dB。專案 `S_qn_rms=22.7386657816 mV` 除以 main gain 58.9224659，等於 SiCoPR 4p17p0 實跑的 0.3859082514 mV；對照限於此固定案例。
 
 **2026-11-16 ALG-014：** Our branch 維持 Gaussian 校準；reference 使用二階矩

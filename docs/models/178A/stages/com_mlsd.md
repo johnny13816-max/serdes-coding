@@ -169,7 +169,7 @@ reference case 驗證，但跨 case 正定性仍由 runtime guard 保護。
 ### Eq. 178A-48：每個 sequence-length 的 detector error
 
 每個 `j` 以 `u_j`／`V_j` 建 threshold，查 `p_j` 的 CDF，再乘 PAM sequence
-機率；目前將無窮和以 `trunc_len` 截斷：
+機率；以 `trunc_len` 為計算上限，NUM-008 可提前停止：
 
 ```python
 # com_model_178A.py::calculate_der_mlsd()
@@ -240,17 +240,31 @@ The added-noise numerical solver currently uses function defaults `cvg_th=1e-2 d
 |---|---|---|
 | `added_noise_pdf` | `gaussian_addition` | `scaled_total_pdf` |
 | `mlsd_quantization_psd` | `pre_dte_filtered`：`S_qn` 隨完整 RxFFE filtering | `main_tap_white`：以 unit-main-tap RxFFE 尺度依 SiCoPR slow clipping 重算 white `S_qn`，再乘 main-tap gain squared 轉回專案尺度；名稱保留相容性。 |
+| `sequence_termination` | `fixed_length_sum`：不使用 penalty，沿用 project CDF 取點 | `matlab_relative_tail`：到達截斷長度才套用 reference penalty，沿用 SiCoPR CDF 取點 |
+| `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
 
 ALG-015 尺度修正前，固定 Akinwale 專案輸入直接對照 SiCoPR signal PDF／noise PDF／卷積，雖然 `S_qn` 數值相同，但因兩者 RX FFE 增益尺度不同，final COM 降至 2.8736176390 dB，未通過 golden。此結果不可視為 project-domain 對齊。
 
 尺度修正前的 linear convolution run 與 FFT run 皆得到 final COM 2.8736176389536348 dB；差異不是這兩種卷積選擇造成。
 
 SiCoPR 4p17p0 實際案例後續實跑：`t_s=38149`、RxFFE main tap 1、Stage 7 `adc_clip=0.04211 V`、`S_qn_rms=0.3859082514 mV`；專案 `w_lim[d_w]=58.9224659`。使用者核准尺度修正後，reference profile 實測 `S_qn_rms=22.7386657816 mV`，除以 main gain 為 `0.3859082514 mV`；phase 5、MSE `0.006191300963670364`、DFE COM `1.5247607834260184 dB`、final COM `2.895898684873275 dB`。Focused tests 51 passed，原 FFT golden 1 passed；比較僅涵蓋本固定案例，未宣稱一般案例全數一致。
-| `sequence_termination` | `fixed_length_sum` | `matlab_relative_tail` |
-| `reported_der` | `raw_sequence_sum` | `baseline_pdf_re_evaluation` |
-
 `execution_profile` 不進入 model；project Excel adapter 一次展開右欄設定。Eq. 178A-49
 sign 不在此表，因為它是共同公式修正。
+
+NUM-008：`num.mlsd_stop_method` 的 `fixed_length` 算到 `cfg.mlsd.trunc_len`；
+`relative_tail` 在當前項小於或等於累加 DER 的 `1e-4` 時停止，並遵守
+SiCoPR 的 record 長度一半上限。當提前停止發生於 penalty 邊界之前，reference
+回傳已算項之和、不套用 penalty。`der_by_j` 僅包含已計算項；停止門檻不是剩餘誤差保證。
+
+### ALG-016 提前停止評估（2026-11-16）
+
+固定 Akinwale、`sicopr_reference_v1`／linear、phase 5：以同一輸入計算完整 128 項，再事後套用 SiCoPR「新項 ≤ 目前總和 × 1e-4」規則，於第 16 項停止。128 項 raw DER 為 `0.0002350875497785791`；前 16 項為 `0.00023498733000974997`，差 `1.0021976883e-7`（完整值的 0.04263%）。使用同一 PMF 的 inverse CDF 估算，兩者 final COM 均為 `2.895898684873275 dB`，不表示已實作提前停止或所有案例 COM 不變。
+
+同一 process 量測 128 項約 12.31 s；另以 `trunc_len=16` 重算約 0.94 s（含該次末項 penalty 的額外運算，僅用於估時，其 penalty 結果不作為提前停止 DER）。Gaussian 合成條件 `b=0.95`、`rho=0.7`、`As/sigma=4` 下，單項規則在 j=2 停止，但 j=3 較大，漏掉的尾和約為完整 DER 的 4.70%；不構成真實通道統計結論。停止條件與有限長度 penalty 應獨立評估；未修改程式。
+
+NUM-008 修改後的共同輸入對照：Gaussian 合成 PMF、`b=0.95`、`rho=0.7`、`As=4`、64-point record，以 SiCoPR 1.2.1／4p17p0 的 `MLSE_U1_c_178A` 比較 inverse-CDF 前的 DER；隔離測試中以同一 PMF 取代 reference 的 `_scaleCDF`，只對照 recurrence。`trunc_len=16` 兩邊均於第 2 項提前停止，DER 均為 `1.4179897276359229e-5`；`trunc_len=2` 兩邊到達 penalty 邊界，DER 差 `1.73e-15`。此為受控同輸入比較，非全面 reference 等價。
+
+最終實作固定 Akinwale case：focused 54 passed（另 profile/provenance 40 passed）、FFT golden 1 passed；`sicopr_reference_v1`／linear 實際於 j=16 停止，DER `0.00023498733000974997`、phase 5、MSE `0.006191300963670364`、DFE COM `1.5247607834260184 dB`、final COM `2.895898684873275 dB`，符合既有 golden 容差。
 
 ## Top-level flow
 
@@ -343,8 +357,8 @@ is the Parseval check when the full response is retained.
 
 - validates PAM order, signal amplitude, first feedback coefficient, truncation length, added-noise PMF, and autocorrelation length;
 - builds `p_1 = conv(p_an, scale(p_an, +b_lim_1))` for Eq. 178A-52, then repeatedly convolves `scale(p_an, 1-b_lim_1)` for Eq. 178A-53; `scale_x()` preserves probability mass while representing the PDF's `1/|scale|` factor;
-- evaluates one weighted detector-error contribution for each `j=1..trunc_len`;
-- returns the contribution vector `der_by_j` and its sum `DER_MLSD` without modifying either input.
+- evaluates weighted detector-error contributions through the configured limit or an earlier NUM-008 stop;
+- returns evaluated `der_by_j` and the selected `DER_MLSD`; the latter may contain the ALG-016 penalty at the configured boundary, without modifying either input.
 
 The intermediate PMF recurrence remains local to the function. The top-level flow stores only the contribution vector and total DER in the completed status. Eq. 178A-52 signed scaling is covered by an asymmetric synthetic PMF; a symmetric fixed reference PMF alone cannot detect its sign.
 

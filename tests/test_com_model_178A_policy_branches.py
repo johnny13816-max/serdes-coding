@@ -92,6 +92,8 @@ def test_178a_runtime_domains_are_canonical_and_legacy_names_are_absent(referenc
 def test_pmf_convolution_profile_and_resolvers(reference_cfg):
     assert COMNumericalControlConfig().pmf_convolution_method == "fft"
     assert reference_cfg.num.pmf_convolution_method == "linear"
+    assert COMNumericalControlConfig().mlsd_stop_method == "fixed_length"
+    assert reference_cfg.num.mlsd_stop_method == "relative_tail"
     As = reference_cfg.imp.R_LM / (reference_cfg.L - 1)
     assert _resolve_adc_input_pmf_config(reference_cfg.pmf, As, reference_cfg.num).convolution_method == "linear"
     assert _resolve_final_com_pmf_config(reference_cfg.pmf, As, reference_cfg.num).convolution_method == "linear"
@@ -516,6 +518,11 @@ def test_178a_reference_execution_profile_is_expanded_by_excel_adapter(reference
     assert overrides["alg.mlsd_quantization_psd"] == {
         "raw": "pre_dte_filtered",
         "effective": "main_tap_white",
+        "overridden_by_profile": "sicopr_reference_v1",
+    }
+    assert overrides["num.mlsd_stop_method"] == {
+        "raw": "fixed_length",
+        "effective": "relative_tail",
         "overridden_by_profile": "sicopr_reference_v1",
     }
     assert overrides["num.adc_input_pmf_grid.dy_override"] == {

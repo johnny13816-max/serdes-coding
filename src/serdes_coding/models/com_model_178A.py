@@ -1327,15 +1327,16 @@ def calculate_der_mlsd(
     pmf_scaling_method: Literal["mass_deposit", "interpolate_ordinates"] = "mass_deposit",
     pmf_projection_method: Literal["linear", "nearest"] = "linear",
     sequence_termination: Literal["fixed_length_sum", "matlab_relative_tail"] = "fixed_length_sum",
+    stop_method: Literal["fixed_length", "relative_tail"] = "fixed_length",
     convolution_method: Literal["fft", "linear"] = "fft",
 ) -> tuple[float, np.ndarray]:
     """Evaluate the truncated Annex 178A MLSD detector error ratio.
 
     This function implements Eqs. (178A-48), (178A-49), (178A-52), and
     (178A-53). ``p_j`` is deliberately local: it is only the state needed to
-    construct the next sequence-length term.  The returned ``der_by_j`` holds
-    the weighted Eq. (178A-48) contribution for each ``j=1..trunc_len``;
-    therefore ``der_by_j.sum()`` is the truncated ``DER_MLSD``.
+    construct the next sequence-length term. ``der_by_j`` holds only the
+    evaluated weighted terms; the selected DER may additionally use the
+    reference truncation penalty at the configured length.
 
     The caller supplies the Eq. (178A-51) added-noise PDF and Eq. (178A-54)
     autocorrelation directly. Neither input is modified.
@@ -1366,10 +1367,15 @@ def calculate_der_mlsd(
     if R_ni is None:
         raise ValueError("R_ni is required before calculating DER_MLSD.")
     R_ni = np.asarray(R_ni)
-    if R_ni.ndim != 1 or R_ni.size < trunc_len + 1:
+    if stop_method not in {"fixed_length", "relative_tail"}:
+        raise ValueError("stop_method must be 'fixed_length' or 'relative_tail'.")
+    if R_ni.ndim != 1:
+        raise COMLengthMismatchError("MLSD R_ni must be one-dimensional.")
+    max_j = trunc_len if stop_method == "fixed_length" else min(trunc_len, R_ni.size // 2)
+    if max_j < 1 or R_ni.size < max_j + 1:
         raise COMLengthMismatchError(
-            "MLSD R_ni must be one-dimensional with at least trunc_len + 1 "
-            f"entries; got shape {R_ni.shape}, trunc_len={trunc_len}."
+            f"MLSD R_ni requires at least {max_j + 1} entries for "
+            f"stop_method={stop_method!r}; got shape {R_ni.shape}."
         )
     if np.iscomplexobj(R_ni) and not np.allclose(R_ni.imag, 0.0, atol=1e-15):
         raise ValueError("MLSD R_ni must be real-valued.")
@@ -1381,7 +1387,7 @@ def calculate_der_mlsd(
     # described after Eq. (178A-54).
     from scipy.linalg import toeplitz
 
-    der_by_j = np.empty(trunc_len, dtype=float)
+    der_by_j = np.empty(max_j, dtype=float)
     p_j: Optional[Pmf1D] = None
     # Eq. (178A-52): p_an(y / b_1) / |b_1| is the PDF of +b_1 times the noise.
     p_1_term = p_an.scale_x(
@@ -1408,8 +1414,10 @@ def calculate_der_mlsd(
         )
     p_trunc = p_an
     truncation_term: Optional[float] = None
+    running_der = 0.0
+    der_before_penalty = 0.0
 
-    for j in range(1, trunc_len + 1):
+    for j in range(1, max_j + 1):
         if j == 1:
             # Eq. (178A-52): convolve p_an with the scaled first term.
             # scale_x includes the PDF's 1 / |b_1| normalization.
@@ -1445,9 +1453,12 @@ def calculate_der_mlsd(
 
         # Eq. (178A-48), including the probability of a j-event sequence.
         der_by_j[j - 1] = ((L - 1.0) / L) ** (j - 1) * der_event
+        previous_der = running_der
+        running_der += float(der_by_j[j - 1])
 
         if sequence_termination == "matlab_relative_tail":
             if j == trunc_len:
+                der_before_penalty = previous_der
                 # MATLAB 4.17 truncation penalty drops the final u_j element and
                 # evaluates the separately accumulated p_trunc distribution.
                 u_trunc = u_j[:j]
@@ -1464,14 +1475,20 @@ def calculate_der_mlsd(
                 assert p_later_term is not None
                 p_trunc = p_trunc.combine(p_later_term, name=f"MLSD p_trunc_{j}", convolution_method=convolution_method)
 
+        if stop_method == "relative_tail" and der_by_j[j - 1] <= 1e-4 * running_der:
+            break
+
+    der_by_j = der_by_j[:j]
+
     if not np.all(np.isfinite(der_by_j)) or np.any(der_by_j < 0.0):
         raise COMError("MLSD DER contributions must be finite and non-negative.")
 
     # Eq. (178A-48): sum the truncated j-event contributions.
     DER_MLSD = float(np.sum(der_by_j))
-    if sequence_termination == "matlab_relative_tail":
-        assert truncation_term is not None
-        DER_MLSD = float(np.sum(der_by_j[:-1]) + truncation_term)
+    if sequence_termination == "matlab_relative_tail" and truncation_term is not None:
+        DER_MLSD = float(der_before_penalty + truncation_term)
+    elif sequence_termination == "matlab_relative_tail":
+        DER_MLSD = running_der
     return DER_MLSD, der_by_j
 
 
@@ -2901,6 +2918,7 @@ class COM:
             pmf_scaling_method=self.cfg.alg.pmf_scaling_method,
             pmf_projection_method=self.cfg.alg.pmf_projection_method,
             sequence_termination=self.cfg.alg.sequence_termination,
+            stop_method=self.cfg.num.mlsd_stop_method,
             convolution_method=self.cfg.num.pmf_convolution_method,
         )
         if not np.isfinite(DER_MLSD) or not 0.0 < DER_MLSD < 0.5:

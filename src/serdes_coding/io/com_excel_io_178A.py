@@ -382,6 +382,9 @@ def _resolve_project_profile_178A(
     overrides["num.pmf_convolution_method"] = override_record(
         numerical_control.pmf_convolution_method, "linear"
     )
+    overrides["num.mlsd_stop_method"] = override_record(
+        numerical_control.mlsd_stop_method, "relative_tail"
+    )
 
     reference_adc_grid = replace(
         numerical_control.adc_input_pmf_grid,
@@ -443,6 +446,7 @@ def _resolve_project_profile_178A(
             eq_ch_imp_len="truncated",
             num_trunc_ui=4096,
             pmf_convolution_method="linear",
+            mlsd_stop_method="relative_tail",
             adc_input_pmf_grid=reference_adc_grid,
             final_pmf_grid=reference_final_grid,
         ),

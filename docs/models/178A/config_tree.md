@@ -375,6 +375,16 @@ ADC-input FIR-PMF：每個 tap convolution 後保留對稱的目標機率質量�
 兩個 L5 owner 為 `Pmf1D.fir_filter()` 和 `Pmf1D.combine()`。此選項不改 93A 預設。
 固定案例已完成 FFT golden 與 linear 完整 run；不代表所有案例 reference 等價。
 
+NUM-008 設定 inventory（核准實作）：`num.mlsd_stop_method` 屬 `numerical_control`、
+`advanced`、effect 為 accuracy／cost，L3 owner 為 `calculate_der_mlsd()`；僅影響
+178A Stage 7 DER 加總，不影響 penalty 選擇、CDF 取點、其他 stages 或 93A。Python API
+raw value 可為 `fixed_length` 或 `relative_tail`；project effective 預設為
+`fixed_length`，`sicopr_reference_v1` 覆寫為 `relative_tail`（門檻固定 `1e-4`）。
+Project／custom 接受合法值，reference profile 鎖定並在 adapter provenance 匯出 raw、
+effective 及 override source；Python `COMConfig.num` 與 export 保留 effective value。
+既有 workbook 不新增必填欄位，未提供時採 project default，profile 再覆寫。
+`cfg.mlsd.trunc_len` 仍提供最大長度，並非固定預設 128。
+
 ## Requiredness and runtime fallback
 
 - A required Ad Hoc intrinsic absent from the source is a conversion failure; do not fill it from the template.

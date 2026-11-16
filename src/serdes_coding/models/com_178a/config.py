@@ -373,6 +373,7 @@ class COMNumericalControlConfig(COMDataclassText):
     pmf_grid_quality: Literal["coarse", "fine"] = "fine"
     pmf_keep_mass: float = float(1 - 1e-5)
     pmf_convolution_method: Literal["fft", "linear"] = "fft"
+    mlsd_stop_method: Literal["fixed_length", "relative_tail"] = "fixed_length"
 
     def _text_sections(self) -> tuple[TextSection, ...]:
         return (
@@ -393,6 +394,7 @@ class COMNumericalControlConfig(COMDataclassText):
                 self._field("pmf_grid_quality", "legacy PMF grid quality", stored_unit="policy"),
                 self._field("pmf_keep_mass", "retained PMF mass", stored_unit="dimensionless probability"),
                 self._field("pmf_convolution_method", "PMF convolution method", stored_unit="policy"),
+                self._field("mlsd_stop_method", "MLSD sequence stopping", stored_unit="policy"),
             )),
         )
 
@@ -408,6 +410,8 @@ class COMNumericalControlConfig(COMDataclassText):
         )
 
     def __post_init__(self) -> None:
+        if self.mlsd_stop_method not in {"fixed_length", "relative_tail"}:
+            raise ValueError("mlsd_stop_method must be 'fixed_length' or 'relative_tail'.")
         if self.pmf_convolution_method not in {"fft", "linear"}:
             raise ValueError("pmf_convolution_method must be 'fft' or 'linear'.")
         self.fine_grid_df = float(self.fine_grid_df)
