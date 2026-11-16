@@ -86,6 +86,8 @@ AGENTS.md
 - 功能／算法 review boundary 完成契約、驗證與文件同步後，必須獨立 commit 至本機 `main` 並 push
   `origin/main`；未確認 remote 已包含該 commit，不得標 `Closed`。不得自行建立 Git branch/worktree；
   直接在 `main` 有具體安全／技術障礙時，先取得使用者明確同意。分類、stage、commit 與 push 由 Agent 負責。
+- 每個子項標記完成或切換下一項前，依 [`project_workflow.md` 的子項完成與切換 gate](docs/architecture/project_workflow.md#子項完成與切換-gate)
+  更新所屬技術文件及變動的權威狀態來源，判定 boundary 的 commit/push 狀態，並明確保留尚未完成條件。
 - 僅提交可歸屬且公開安全的 boundary。`.venv`、`results/`、cache、temporary/rebuildable output 不提交；
   external/reference data 須先確認來源、license、provenance 與 public-safe boundary，無法確認時不 push。
   既有 dirty state 不得 reset、stash、刪除、覆蓋或混入無關變更；詳細同步與結案流程見

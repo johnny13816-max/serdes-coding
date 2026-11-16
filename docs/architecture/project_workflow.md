@@ -190,6 +190,17 @@ repository change 的組成檔，不是各自獨立的 chat deliverables。使�
   workbook 製造 render 工作。此 repo-batch 規則界定 spreadsheet skill 視覺檢查在 repository config/tracker
   維護中的抽樣與範圍；單獨 workbook deliverable 不適用此縮減。
 
+### 子項完成與切換 gate
+
+每次準備將一個子項標記完成，或從它切換到下一項工作時，先完成一次交接核對：
+
+1. 對照該子項的驗收條件與證據，分清已完成、待完成及不適用項目；未完成的條件不得因測試通過而隱去。
+2. 同步本次改變所屬的權威技術文件。若確認不需文件變更，記錄具體理由。若狀態、owner、剩餘項目或 next gate 改變，立即更新該狀態的權威來源（如 active contract、tracker 或 roadmap），不得留到整個大型契約最後才補。
+3. 判定這個子項是否已成為可獨立 review、驗證及還原的 boundary。已完成 boundary 依 Main-first Git integration commit/push；尚未完成或無法安全分割的工作保留為明確 pending，不得提前 commit 來宣稱完成。
+4. 只有完成上述核對後，才更新子項狀態並選擇下一步。若下一步仍屬同一大型契約，可繼續執行，但父契約維持 active，直至所有適用條件完成。
+
+HANDOFF 仍只在 handoff、active-task switch、pause/block 或 closure 時依其 lifecycle 更新；不要求每個子項都複製一份歷史摘要。切換回報應簡短說明子項狀態、更新的技術／狀態文件、commit/push 狀態，以及下一個尚未完成的 gate。此 gate 是既有文件、狀態與 Git closure 要求的執行時入口，不另增重複的驗證流程。
+
 ### 6. Verification
 
 程式與必要文件完成後才做最終驗證。依契約執行 focused tests 與既定 COM baseline；使用固定 case、
