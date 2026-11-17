@@ -84,7 +84,7 @@ fixed-input SiCoPR PMF 和固定案例 COM 審查；新增 focused boundary test
 | --- | --- | --- | --- |
 | GOV-V1-002 — 178A review 與 v1.0 狀態收斂 | **Closed with corrected claim** | governance 文件已提交；全面 PASS claim 已撤回，P1/P2 evidence 保留 | 以 roadmap 逐章完成剩餘 review |
 | CFG-178A — COMConfig domain/runtime migration | **Closed 2026-11-10** | `cfg.src/alg/num/srch/exe` 是唯一 runtime tree；temporary aliases 與 draft `group` vocabulary 已移除；profile provenance 位於 export-only adapter resolution；八個 populated cases、search smoke、focused integration、Python 3.7 validator 與 fixed golden 通過；已整合為單一 local commit | 無；後續 config 變更另立 boundary |
-| CP-BR — 178A complete branch review | **Review complete — remote sync pending** | 2026-11-17 completion audit 已核對 production selectors、retired behaviors、registry ownership 與既有 evidence，未發現新的未審 selectable behavior；ALG-011 固定為 circular FFE，ALG-012 維持 bounded closure | Remote integration 受本機五個既有 rule commits（`b200d8e`…`b536855`）的 push authorization gate 限制 |
+| CP-BR — 178A complete branch review | **Closed 2026-11-17** | Completion audit 未發現新的未審 selectable behavior；ALG-011 固定為 circular FFE，ALG-012 維持 bounded closure；tracker、roadmap、active state 與 HANDOFF 已收斂 | Boundary commit `ed316a8` 已推送並確認存在於 `origin/main`；後續工作由使用者另選目標 |
 | 178A P4–P8 — Remaining design-review chapters | Paused / superseded where CP-BR overlaps | 不重複 CP-BR ownership work；非 branch 章節仍維持暫停 | 完成 CP-BR 後重新盤點 |
 | P9 / release preparation | Paused | release candidate、claim boundary、regression/CI、package/tag | 使用者選擇 Goal C |
 | ARC-CROSS-001 — Current-schema 93A golden case | Paused | 選定 source case、schema strategy、baseline 與 validation level；不改 93A equations | 使用者選擇 Goal B |
