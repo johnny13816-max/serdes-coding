@@ -6,29 +6,26 @@
 
 ```text
 Handoff state: ACTIVE
-Generated at: 2026-11-13 Asia/Taipei
+Generated at: 2026-11-17 Asia/Taipei
 Source branch: main
-Source revision: current main includes the isolated NUM-006 owner-validation and documentation closure
-Active task: CP-BR complete initial branch review — ALG-011
-Current phase: prior Closed items stay closed; every remaining item is reviewed from eligibility without relying on first/second-review labels
+Source revision: local main includes the isolated CP-BR closure boundary; origin/main 45dae92; remote sync pending
+Active task: CP-BR branch review closure integration
+Current phase: Review complete; authoritative state and local boundary are complete; remote integration pending
 Collaboration mode: Co-Build architecture review
 Approved boundary: Stage 1–7 are retained as runtime-sequence/navigation labels but are not ownership coordinates. Use COM root runtime flow separately from Stage-numbered L1 domain/control function sets, then functional blocks and operations/helpers. Dataclass/physical goal defines domain ownership; loop/caller relationships do not transfer ownership.
-Completed: NUM-006 keeps project 1-1e-5 and reference 1.0. L5 public Pmf1D.fir_filter() is the owner; after each tap convolution it symmetrically truncates to the target retained mass and renormalizes. Value 1.0 disables truncation.
-NUM-006 boundary: Stage 2 Pre-DTE and Stage 5 Post-FFE are direct consumers. _resolve_adc_input_pmf_config() only injects the value and private _truncate_keep_mass() only executes it. Stage 6 final PMF fixes keep_mass=1.0 and is not a branch consumer. Grid spacing, projection, PDF discretization, clipping and PSD record controls stay independent.
-NUM-006 evidence: public owner now rejects non-finite or out-of-range values; legal-input numerical behavior, project/reference values and Stage flows are unchanged. Focused PMF/policy suite 53 passed; golden was not rerun.
-Independent future idea: adaptive Stage 1 short/long response-grid classification is recorded in future_ideas.md and isolated in commit a9ab622. It has no branch ID and must not be coupled to NUM-003.
-In progress: ALG-011 is next and has not begun technical review.
-Queued: ALG-011–017 require the same complete initial-review process; their historical approved/owner labels are not authoritative.
-Blocked: none.
-Next recommended action: begin ALG-011 by mapping current rxffe_record_realization options and every production consumer.
-Next action owner: Codex presents the ALG-011 eligibility/scope review before any new implementation.
-Post-review cleanup: after every remaining complete initial review is closed, remove all legacy branch IDs, legacy mappings and historical branch records from current authoritative/active documents; retain only the current branch design. Git history is not rewritten.
-Stop point: ALG-011 remains read-only until eligibility, scope, options, owner and validation contract are discussed and explicitly approved.
+Completed: ALG-012 review closed in 2db1646; its S_in zero-coefficient question was explicitly deferred. NUM-009 implementation 15823b6 and review closure 45dae92 are on origin/main.
+Completed: production selectors、retired behaviors、registry ownership 與既有 validation evidence 已逐一核對；未發現新的未審 selectable behavior。ALG-012 tracker 已依 bounded closure evidence 收斂；active state 與 roadmap 已移除過期 next-task 結論。
+Current issue: unrelated adaptive-grid、rule lifecycle 與 plot normalization dirty changes remain preserved and excluded from the CP-BR closure boundary。
+Queued: CP-BR 沒有剩餘 branch review；P4–P8 非 branch 章節維持暫停，等待使用者選定下一目標。
+Blocked: remote integration pending。Local main 比 `origin/main` 多五個既有 rule commits（`b200d8e`…`b536855`）；未取得一併 push 的明確授權前不得推送。
+Next recommended action: resolve whether the five prior rule commits and the CP-BR closure commit may be pushed together。
+Next action owner: 使用者決定 remote authorization；Codex 執行獲准的 push 與 remote verification。
+Stop point: campaign state is Review complete；do not mark remote sync complete until `origin/main` contains the closure commit.
 Evidence links: docs/models/178A/branch_behavior_registry.md;
                 docs/models/178A/stages/pre_dte.md;
                 docs/models/178A/stages/post_ffe.md;
                 docs/planning/active_contracts.md
-Dirty-state summary: clean after the isolated NUM-006 owner-validation and documentation closure commit.
+Dirty-state summary: multiple pre-existing code and documentation changes plus untracked files; preserve them. Inspect git status and isolate task-specific hunks before any commit.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。CP-BR 的完成不構成

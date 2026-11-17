@@ -55,9 +55,11 @@ Stage 2 L3 `_build_pre_dte_psd()` 單一 owner 執行；D3.2 確認 full-jitter�
 project method，MATLAB 4.17 RJ-only／`P_qc` 保留為 reference-only 對照。
 ALG-009 已在 cost/accuracy review 後退休，Stage 3 固定使用 exact PMF。ALG-010
 floating tap/group selection 已完成完整初次審查：保留三種 strategies，owner 為 L3
-`COM_MMSE_DTE`／`COM_MMSE_DTE.run()`，production 不需修改。下一項為 NUM-006
-`pmf_keep_mass`；之後所有剩餘項目仍依 algorithm-review 進行完整初次審查，
-不採信歷史一次／二次或 approved 標籤。
+`COM_MMSE_DTE`／`COM_MMSE_DTE.run()`，production 不需修改。先前記載的
+「下一項 NUM-006 `pmf_keep_mass`」已失效。2026-11-17 completion audit 已逐一核對
+production selectors、retired behaviors、branch registry 與既有 validation evidence；
+未發現新的未審 selectable behavior。CP-BR 技術審查已完成，目前只剩 tracker、
+active state、Git integration 與 remote closure。
 93A、reporting、
 C2M migration 與 public release 維持暫停。
 
