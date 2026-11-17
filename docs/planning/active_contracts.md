@@ -21,8 +21,8 @@ v1.0 release 狀態見
 ## Temporary rule contract — RC-20261117-001
 
 **Boundary:** 定義單一文件 owner、項目結案時的有界跨文件一致性核對、歷史／過期內容處置與跨 session 恢復依據。
-**狀態:** 已寫入 `documentation_contract.md`、`project_workflow.md` 與 `AGENTS.md`。
-**下一 gate:** 提交規則 boundary，再以 closure commit 記錄結案；不改變 CP-BR project task。
+**狀態:** Closed；規則實作 commit `1b5df29`。
+**Evidence:** 規則與驗證見 [`rule_changes.md`](rule_changes.md)。HANDOFF 未變更，因本項未切換或改變 CP-BR project task。
 **Authorization:** 使用者要求以規則約束文件收斂、整理與知識傳遞；本規則維護對話具明確規則維護授權。
 
 ## Workflow state
