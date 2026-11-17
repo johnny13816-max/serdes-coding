@@ -8,8 +8,8 @@ v1.0 release 狀態見
 ## Temporary rule contract — RC-20261117-003
 
 **Boundary:** 建立逐檔 document lifecycle registry、固定 lifecycle/owner/update/closure 規則與機械性 checker；只整理規則 metadata，不收斂 branch-review 技術內容。
-**Status:** Implemented；registry/checker validation passed，local/remote integration pending。
-**Next gate:** 建立 isolated rule commit、push 並確認 `origin/main`；之後於獨立 project-maintenance 對話啟動 Boundary B。
+**Status:** Closed；registry/checker validation 與 local/remote integration 已完成，implementation commit `b147050` 已同步至 `origin/main`。
+**Next gate:** 於獨立 project-maintenance 對話啟動 Boundary B，依已核准 disposition 執行刪除與 branch-review 文件收斂。
 **Evidence:** [`rule_changes.md`](rule_changes.md#rc-20261117-003--document-lifecycle-registry-and-enforcement)、[`../document_registry.md`](../document_registry.md)、[`document_disposition_manifest.md`](document_disposition_manifest.md)。
 **Authorization:** 使用者已確認改善計畫；本對話為規則維護 boundary。
 
