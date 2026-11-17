@@ -5,33 +5,12 @@ E/G/T 證據見 [`reference_alignment_contracts.md`](reference_alignment_contrac
 v1.0 release 狀態見
 [`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
 
-## Temporary rule contract — RC-20261117-003
-
-**Boundary:** 建立逐檔 document lifecycle registry、固定 lifecycle/owner/update/closure 規則與機械性 checker；只整理規則 metadata，不收斂 branch-review 技術內容。
-**Status:** Closed；registry/checker validation 與 local/remote integration 已完成，implementation commit `b147050` 已同步至 `origin/main`。
-**Next gate:** 於獨立 project-maintenance 對話啟動 Boundary B，依已核准 disposition 執行刪除與 branch-review 文件收斂。
-**Evidence:** [`rule_changes.md`](rule_changes.md#rc-20261117-003--document-lifecycle-registry-and-enforcement)、[`../document_registry.md`](../document_registry.md)、[`document_disposition_manifest.md`](document_disposition_manifest.md)。
-**Authorization:** 使用者已確認改善計畫；本對話為規則維護 boundary。
-
 ## Temporary rule contract — RC-20261115-001
 
 **Boundary:** 修改 branch ID lifecycle、registry ordering、retired records 與舊 ID cleanup 規則；不接管或修改 CP-BR project task。
-**Next gate:** HANDOFF 的過寬 cleanup 摘要待 project dirty state 可安全同步時更新，之後關閉本 RC。push 暫緩，因 `origin/main` 落後的 16 個既有 project commits 超出本規則變更範圍。
+**Status:** Implemented；project-side HANDOFF reconciliation 已完成，待規則專用對話確認並關閉本 RC。
+**Next gate:** 規則專用對話核對最新 HANDOFF 與 `origin/main` 後執行 closure；不得由 project-maintenance 對話修改規則結論。
 **Authorization:** 使用者已核准 change contract；本規則專用對話有明確規則維護授權。
-
-## Temporary rule contract — RC-20261116-001
-
-**Boundary:** 在子項完成或切換下一項前，核對驗收證據、權威技術文件與狀態來源、commit/push 邊界及 pending 條件。
-**Status:** Closed；Workflow rule implemented in commit `2a8f6dc`，本次 active-state reconciliation 與 closure 記錄已完成。
-**Evidence:** 規則詳細決策與驗證見 [`rule_changes.md`](rule_changes.md)。HANDOFF 未變更，因本項未切換或改變 active project task。
-**Authorization:** 使用者要求處理此規則的 active-state reconciliation；本規則維護對話具明確規則維護授權。
-
-## Temporary rule contract — RC-20261117-001
-
-**Boundary:** 定義單一文件 owner、項目結案時的有界跨文件一致性核對、歷史／過期內容處置與跨 session 恢復依據。
-**狀態:** Closed；規則實作 commit `1b5df29`。
-**Evidence:** 規則與驗證見 [`rule_changes.md`](rule_changes.md)。HANDOFF 未變更，因本項未切換或改變 CP-BR project task。
-**Authorization:** 使用者要求以規則約束文件收斂、整理與知識傳遞；本規則維護對話具明確規則維護授權。
 
 ## Workflow state
 

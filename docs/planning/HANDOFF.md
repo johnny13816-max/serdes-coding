@@ -8,22 +8,22 @@
 Handoff state: IDLE
 Generated at: 2026-11-17 Asia/Taipei
 Source branch: main
-Source revision: local main and origin/main include document lifecycle implementation b147050; closure-state reconciliation follows
-Active task: none — RC-20261117-003 document lifecycle boundary Closed 2026-11-17
-Current phase: lifecycle registry, enforcement, validation and remote integration complete
+Source revision: local main and origin/main at 5ad6845 (Boundary B disposition execution)
+Active task: none — Boundary B deletion slice completed and integrated 2026-11-17
+Current phase: approved document dispositions and lifecycle registry reconciliation complete
 Collaboration mode: project maintenance
-Approved boundary: none — rule boundary closed; Boundary B must start in a separate project-maintenance conversation.
-Completed: 逐檔 lifecycle registry、owner/update/closure 規則、機械性 checker 與 quality gate 已建立；104 筆 registry coverage 驗證通過。
-Current issue: unrelated adaptive-grid technical-document changes remain preserved and excluded from the rule boundary。
-Queued: Boundary B — 執行已核准的三項刪除，並收斂 branch-review 文件與 active state。
+Approved boundary: none.
+Completed: 已刪除 manifest 核准的三項 legacy/superseded 文件；registry、execution evidence、commit 與 origin/main 已同步。
+Current issue: 既有 adaptive-grid technical-document changes 仍保留為未提交 hunks，未納入 Boundary B commit。
+Queued: broader branch-review 文件收斂；RC-20261115-001 由規則專用對話確認 closure。
 Blocked: none.
-Next recommended action: 在獨立 project-maintenance 對話啟動 Boundary B preflight，依 disposition manifest 執行核准處置。
-Next action owner: Codex 依使用者已核准 manifest 執行；技術結論改動仍須另行確認。
-Stop point: 本規則對話不得執行 Boundary B 刪除或混入既有 adaptive-grid dirty hunks。
+Next recommended action: 先核對既有 adaptive-grid dirty hunks 的 owner／validation，再決定是否形成獨立 technical-document commit。
+Next action owner: 使用者選定技術文件收斂或規則 closure；Codex 依所選 boundary 執行。
+Stop point: 不得將既有 adaptive-grid hunks 與規則 closure 或其他 project-maintenance commit 混合。
 Evidence links: docs/document_registry.md;
                 docs/planning/document_disposition_manifest.md;
-                docs/planning/rule_changes.md#rc-20261117-003--document-lifecycle-registry-and-enforcement
-Dirty-state summary: multiple pre-existing code and documentation changes plus untracked files; preserve them. Inspect git status and isolate task-specific hunks before any commit.
+                commit 5ad6845
+Dirty-state summary: branch registry、com_dfe、post_ffe、active_contracts 與 future_ideas 有既有未提交修改；preserve and isolate before commit.
 ```
 
 93A、reporting、C2M migration 與 release 項目維持暫停。本次 utility closure 不構成
