@@ -115,6 +115,12 @@ When quantization is enabled, `_build_adc_input_pmf_exact()` uses the selected p
 
 When `N_qb` or `P_qc` is absent, the ADC-input method is `disabled` and no `delta` is produced.
 
+**延後確認 — 非零 interference noise `S_in`：** D3.2 的 final-quantization
+Gaussian noise 定義包含 `S_in`；目前此處的 ADC-input Gaussian sigma 使用
+`S_rn + S_tn + S_jn_RJ`。一般不使用 interference calibration 的情況
+`S_in = 0`；非零 `S_in` 是否屬於本專案支援範圍及如何納入，留待需要時確認，
+目前不新增支援，也不宣稱非零情況已對齊 D3.2。
+
 This exact material is prepared regardless of the faster pre-DTE clipping method. Final DFE COM consumes its `delta` under the default `annex_d3` policy; the separate reference-only final policy reconstructs its own clipping amplitude in `calculate_COM_DFE()` without changing this stored selected-phase material.
 
 ### 7. Build reporting PSDs
