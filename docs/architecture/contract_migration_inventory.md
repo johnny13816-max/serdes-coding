@@ -106,6 +106,7 @@ S4P port order 只應該出現在 S4P 轉 Sdd 的入口，例如 `from_s4p_array
 - `causal_ir` 是 raw IR circular shift 後、依 causality contract 得到的分析結果。
 - `from_tf()` 對每個 circular shift 計算頭尾各 5% record 的能量和，選最小值；`causal_shift_samples` 保存 raw→causal shift。
 - plot / cascade / COM path 使用 `causal_ir`。
+- `LinkSegment.plot_ir(normalize_main_cursor=True)` 僅將繪圖值除以 IR 最大絕對值；不修改 response。精確零值或非有限 main cursor 會報錯；任意有限非零尺度均可正規化。`SparamModel.plot_ir()` 提供相同選項。
 - `ir2tf()` 預設使用 `raw_ir` 保留 round-trip definition。
 - `to_sampled_response(pos=0, source="causal")` 將 CT response 轉為 symbol-rate `SampledResponse`。它以所選的 raw/causal IR 回推 CT TF，再對完整 two-sided DFT 做 alias sum；在 `Nfft % per_ui == 0` 時，結果必須與 `source_ir[pos::per_ui]` 再 `SampledResponse.from_ir()` 相同。
 - `source="causal"` 是 COM 預設，對齊 `pulse.ir[pos::per_ui]`；`source="raw"` 僅用於維護 TF round-trip 的 time reference。

@@ -1184,6 +1184,7 @@ class SparamModel:
         gamma_load: Union[float, complex, np.ndarray] = 0.0,
         dc: Literal["hold", "skrf", "error"] = "hold",
         label: str | None = None,
+        normalize_main_cursor: bool = False,
     ) -> Axes:
         """
         Debug-plot the time-domain IR of one S-domain scalar response.
@@ -1213,6 +1214,8 @@ class SparamModel:
         label:
             Optional curve label. Useful when plotting multiple responses on
             the same Axes.
+        normalize_main_cursor:
+            If True, normalize the plotted IR by its largest absolute sample.
         """
         seg = self._debug_LinkSegment(
             cfg,
@@ -1221,7 +1224,15 @@ class SparamModel:
             gamma_load=gamma_load,
             dc=dc,
         )
-        return seg.plot_ir(ax=ax, save_path=save_path, x_unit=x_unit, x_origin=x_origin, xlim_ui=xlim_ui, label=label)
+        return seg.plot_ir(
+            ax=ax,
+            save_path=save_path,
+            x_unit=x_unit,
+            x_origin=x_origin,
+            xlim_ui=xlim_ui,
+            label=label,
+            normalize_main_cursor=normalize_main_cursor,
+        )
 
     def plot_sbr(
         self,

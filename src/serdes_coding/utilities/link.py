@@ -1612,6 +1612,7 @@ class LinkSegment:
         x_origin: Literal["start", "max"] = "max",
         xlim_ui: Optional[tuple[float, float]] = None,
         label: str | None = None,
+        normalize_main_cursor: bool = False,
     ) -> Axes:
         """
         Plot impulse response.
@@ -1634,11 +1635,21 @@ class LinkSegment:
         label:
             Optional curve label. Useful when plotting multiple responses on
             the same Axes.
+        normalize_main_cursor:
+            If True, plot ir divided by its largest absolute sample.
         """
+        response = self.ir
+        ylabel = "h(t)"
+        if normalize_main_cursor:
+            main = float(np.max(np.abs(response)))
+            if not np.isfinite(main) or main == 0.0:
+                raise ValueError("Cannot normalize IR because the main cursor is zero or non-finite.")
+            response = response / main
+            ylabel = "h(t) / main cursor"
         return self._plot_time_response(
-            response=self.ir,
+            response=response,
             name="ir",
-            ylabel="h(t)",
+            ylabel=ylabel,
             title="Impulse Response",
             ax=ax,
             save_path=save_path,
