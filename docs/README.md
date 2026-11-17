@@ -9,6 +9,7 @@ This directory contains the maintained project documentation. Start with the arc
 2. [Project structure](architecture/project_structure.md)
 3. [Project evolution and extension framework](architecture/evolution_strategy.md)
 4. [Documentation contract](architecture/documentation_contract.md)
+   and [Document lifecycle registry](document_registry.md)
 5. [Software layers](architecture/software_layers.md)
    and [Utility grid](architecture/utility_grid.md)
    and [COM dataclass text contract](architecture/dataclass_text_contract.md)
@@ -44,6 +45,8 @@ docs/
 - `docs/planning/` contains active proposals and is not authoritative until its decisions are incorporated into the maintained documents.
 - `docs/planning/HANDOFF.md` is short-lived recovery context; it never overrides Git, tracker or authoritative docs.
 - `docs/planning/NOTES.md` contains candidate lessons only; permanent rules require review and promotion.
+- `docs/document_registry.md` is the single per-file lifecycle inventory. It owns metadata only and never overrides
+  the content authority named by each entry.
 - Files explicitly marked as migration inventories are not authoritative and are excluded from the reading order.
 
 Concrete case values belong in workbooks and case-local README files. Reference-data provenance belongs beside the dataset. Do not duplicate either into project-wide rules.

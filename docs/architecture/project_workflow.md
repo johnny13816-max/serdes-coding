@@ -106,8 +106,10 @@ mode, dataclass, workbook row, or runtime behavior.
 
 1. 核對 canonical cwd、Git root、`AGENTS.md`、branch 與 `git status`。
 2. 保護既有修改；辨認 active item、approved boundary、next gate。
-3. 只讀取與任務相關的 authority、code 與 evidence。
-4. 使用 task header；非平凡修改先給 scope tree／before-after tree。
+3. 由 [`../document_registry.md`](../document_registry.md) 確認 task-owning document 的
+   authority、lifecycle、content owner 與 update trigger；registry 與實際狀態矛盾時先停止並收斂。
+4. 只讀取與任務相關的 authority、code 與 evidence。
+5. 使用 task header；非平凡修改先給 scope tree／before-after tree。
 
 ### 2. Read-only work
 
@@ -220,6 +222,9 @@ tracker、render 或 commit 變更不使數值驗證失效，不得因此重跑�
 
 - 結案前依 [`documentation_contract.md` 的 Update rule](documentation_contract.md#update-rule)
   核對受影響技術文件與實作的同步情況，記錄已同步文件或無需更新的理由；必要文件未同步不得 Closed。
+- 文件 boundary 必須同步 lifecycle registry，並以專案 `.venv` 執行
+  `python scripts/check_document_lifecycle.py`；coverage、owner、active linkage 或 lifecycle
+  disposition 有錯時不得 commit／Closed。
 - 每個可獨立 review/rollback 的責任邊界一個 commit；protected behavior 必須獨立 commit。
 - 不提交無法安全歸屬的既有 dirty changes。需要 GitHub sync 的 workflow 在切換下一項前先 push。
 - `Closed` 需要契約修改、適用驗證、必要技術文件、最小狀態紀錄、

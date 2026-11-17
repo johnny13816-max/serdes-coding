@@ -49,6 +49,49 @@ Rule documents constrain how the project is changed. Technical documents define 
 documents help work progress but cannot redefine either class. A completed item promotes durable content into the
 appropriate technical owner before its issue is closed; copying a temp contract verbatim is not promotion.
 
+## Lifecycle registry
+
+[`../document_registry.md`](../document_registry.md) 是 project document lifecycle metadata
+的唯一逐檔清單。Registry 只擁有 authority class、lifecycle、content owner、update
+trigger 與 closure disposition；它不擁有文件內的技術結論，也不得取代 architecture、
+model、validation、operations 或 state owner。
+
+Lifecycle 使用以下固定值：
+
+| Lifecycle | Meaning | Update / closure rule |
+|---|---|---|
+| `live` | 現行 rule、technical authority、runbook、index 或 state owner | 所屬 boundary 改變時同步；不得被 temporary document 覆蓋。 |
+| `active-temporary` | 唯一 active boundary 的暫存 contract | 必須由 `active_contracts.md` 指向；完成後不得保留此狀態。 |
+| `paused-temporary` | 已明確暫停、可依 resume gate 恢復的 contract | 只在使用者恢復該 boundary 時更新；不得作為現行 behavior。 |
+| `historical-frozen` | 已結束的 evidence、decision record 或 superseded contract | 原則上凍結；header／registry 必須指向 current owner，或說明它只擁有 dated evidence。 |
+| `migration-inventory` | 尚在分流內容的過渡 inventory | 只能縮減或完成 migration；不得承接新的 durable contract。 |
+| `retire-pending` | 已確認無 current ownership value、等待核准刪除 | 不得被引用為 active/current；刪除後從 registry 移除並在 closure evidence 記錄。 |
+
+Authority class 使用 `rule`、`architecture`、`model`、`evidence`、`operations`、
+`state`、`working` 或 `index`。`lifecycle=live` 不表示每次任務都要修改；它表示
+該文件仍是現行 owner，只有 update trigger 成立時才更新。
+
+每個由 Git 追蹤的 project document（`AGENTS.md`、repository `README.md`、
+`docs/**/*.md`、`docs/**/*.xlsx`）必須恰好有一筆 registry entry。新增、改名、
+搬移或 lifecycle transition 與 registry update 必須在同一 commit。執行
+`python scripts/check_document_lifecycle.py` 檢查 coverage、enum、owner target、
+active-contract linkage 與 historical/current-owner boundary；檢查通過是文件 commit
+及 closure 的必要條件。
+
+Lifecycle transition 固定為：
+
+```text
+new live authority ────────────────────────────────→ live
+new modifying item → active-temporary → live promotion + delete
+                                      └→ paused-temporary → active-temporary
+                                      └→ historical-frozen（僅限允許保留的 ADR/evidence）
+migration-inventory → content promoted → retire-pending → delete
+```
+
+不得以 `historical-frozen` 逃避 durable-content promotion，也不得僅為保持檔案而
+把 completed temp contract 改成 `paused-temporary`。Destructive disposition 先列入
+manifest，確認 owner/evidence 已保留並取得使用者核准後才刪除。
+
 A raw Python call graph is not an architecture document. Calls to validation,
 array conversion, plotting helpers, NumPy, SciPy, and trivial accessors are
 omitted unless they change data ownership or mathematical behavior.
@@ -193,6 +236,10 @@ quantities.
 每項專案修改在標記 `Closed` 前，必須辨認受影響的技術文件，核對其描述是否與修改後的實作一致，
 並在同一責任邊界內完成必要同步。若無需更新，須在結案紀錄簡述理由；若尚有必要文件未同步，
 則不得標記 `Closed`。
+
+同一核對也必須確認 registry entry、lifecycle 與 update trigger。文件內容沒有改變，
+不代表 lifecycle metadata 一定不需改變；反之，僅更新 registry 不得取代必要的 owner
+document 同步。
 
 文件同步以既有的唯一權威文件為主，不要求每次修改新增文件，也不得藉技術文件同步修改專案治理規則。
 

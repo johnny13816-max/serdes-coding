@@ -2,7 +2,12 @@
 
 This directory contains active change contracts and unresolved future work. Planning documents describe proposed changes; they do not override implemented code or authoritative architecture documentation.
 
-## Active planning documents
+## State and working documents
+
+此清單描述 planning 文件的角色，不表示每個列出的 item contract 都是 active。
+逐檔 `live / active-temporary / paused-temporary / historical-frozen / retire-pending`
+狀態以 [`../document_registry.md`](../document_registry.md) 為準；只有
+`active_contracts.md` 可指定 executable active boundary。
 
 - [rule_change 提案與決策](rule_changes.md)：規則提案的集中狀態與評估結果；不授權修改規則。
 - [v1.0 platform roadmap](v1_0_roadmap.md): the platform review sequence and current chapter-level completion state.
@@ -26,6 +31,9 @@ When a plan is completed:
 6. create a small closure commit when the actual boundary SHA must be recorded after the implementation commit.
 
 Do not keep completed plans as a second source of project behavior.
+
+新增或改變 planning 文件 lifecycle 時，必須同步 registry。Closed contract 未完成
+promotion／delete／historical disposition 前，不得只修改 header 便視為結案。
 
 ## Temporary contract rule
 

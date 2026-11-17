@@ -5,6 +5,14 @@ E/G/T 證據見 [`reference_alignment_contracts.md`](reference_alignment_contrac
 v1.0 release 狀態見
 [`../operations/v1_0_release_gate.md`](../operations/v1_0_release_gate.md)。
 
+## Temporary rule contract — RC-20261117-003
+
+**Boundary:** 建立逐檔 document lifecycle registry、固定 lifecycle/owner/update/closure 規則與機械性 checker；只整理規則 metadata，不收斂 branch-review 技術內容。
+**Status:** Implemented；registry/checker validation passed，local/remote integration pending。
+**Next gate:** 建立 isolated rule commit、push 並確認 `origin/main`；之後於獨立 project-maintenance 對話啟動 Boundary B。
+**Evidence:** [`rule_changes.md`](rule_changes.md#rc-20261117-003--document-lifecycle-registry-and-enforcement)、[`../document_registry.md`](../document_registry.md)、[`document_disposition_manifest.md`](document_disposition_manifest.md)。
+**Authorization:** 使用者已確認改善計畫；本對話為規則維護 boundary。
+
 ## Temporary rule contract — RC-20261115-001
 
 **Boundary:** 修改 branch ID lifecycle、registry ordering、retired records 與舊 ID cleanup 規則；不接管或修改 CP-BR project task。

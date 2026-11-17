@@ -3,6 +3,19 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261117-003 — Document lifecycle registry and enforcement
+
+- 日期／狀態：2026-11-17／Implemented；validation passed，local/remote integration pending。
+- 問題：文件類別與 owner 原則已有定義，但沒有逐檔 lifecycle inventory；`planning/` 混有 active、paused、closed、historical 與未處置 temp contracts，agent 無法機械性判斷哪些文件仍 actively maintained。
+- 依據：使用者要求先完整整理、定義並以規則強制後續 lifecycle，再另立 project boundary 收斂 branch-review 文件。現況盤點亦確認 93A coverage、planning lifecycle 與 completed temp disposition 不一致。
+- 評估／決策：建立單一 `docs/document_registry.md`，只擁有 authority/lifecycle metadata；固定 lifecycle enum、transition、update trigger 與 closure disposition。新增 checker 驗證 tracked-document coverage、owner target、active linkage 與 historical boundary，並納入 quality gate。Registry 不取代任何技術 owner。
+- 修改範圍：`AGENTS.md`、`documentation_contract.md`、`project_workflow.md`、docs/planning indexes、lifecycle registry、checker、quality gate、本紀錄與 isolated active-state hunk。不修改 production code、模型結論、既有 project dirty hunks或 branch-review 技術內容。
+- 刪除 gate：本 boundary 只產生 disposition manifest；任何既有文件刪除須先由使用者確認 manifest，未確認前保留原檔。
+- 驗證：registry 覆蓋 104 筆現行／待處置文件；project `.venv` 執行 lifecycle checker 通過，local-link scan 與 `git diff --check` 通過。Quality-gate command 已加入 workflow；本機未安裝額外 YAML parser，未為此改動環境。既有 project dirty hunks 均保持未納入。
+- Disposition decision：使用者選擇方案 1，核准後續 Boundary B 刪除 legacy branch matrix、retired CP-BR matrix 與 untracked short/long adaptive draft；本規則 boundary 不執行刪除。
+- 評估者／授權依據：使用者確認本改善計畫，並要求先完成規則治理，再於獨立 project-maintenance 對話執行 branch-review 文件收斂。
+- Commit evidence：implementation commit pending。
+
 ## RC-20261117-002 — Review campaign 範圍與結案
 
 - 日期／狀態：2026-11-17／Closed。

@@ -109,6 +109,10 @@ AGENTS.md
 
 - 架構、public API、dataclass tree、call tree、config/status、workbook mapping、branch behavior、
   validation 或使用方式變更，必須在同一 change 更新唯一權威文件。
+- 新增、改名、搬移或改變任何 project document 的 lifecycle 前，必須同步
+  [`docs/document_registry.md`](docs/document_registry.md)，並在文件 commit 前執行
+  `python scripts/check_document_lifecycle.py`。未登錄文件、重複 lifecycle owner、
+  closed temporary contract 未處置或 historical 文件未指回 current owner 時不得結案。
 - 文件以中文為主，technical term 保留英文；記錄 contract、assumption、limitation 與 deferred idea，
   不為小型 local fix 製造重複文件。
 - 公開 repository 不保存私有資料、公司命名、內部 claim、私有 PDF 或無法公開驗證的 golden。
