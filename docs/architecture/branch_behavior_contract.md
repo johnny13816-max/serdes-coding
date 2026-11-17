@@ -210,3 +210,29 @@ Branch review 的文件更新不是結案後補做，而是 review 本身的一�
 即使是 documentation-only ownership relocation，只要 durable contract 有變更，
 也需要 commit 才能標記 `Closed`。若使用者選擇稍後批次 commit，項目只能停在
 `Implemented / validation passed — integration pending`。
+
+## Review campaign boundary and closure
+
+一組有順序的 branch reviews（例如某版本的完整 branch review）是有限的 review campaign，
+不得在收尾時臨時擴大成全 repo cleanup 或新一輪 selector discovery。Campaign 開始時，
+active state 必須連到權威 Registry，並固定本輪涵蓋的 branch／candidate 清單、明確排除項目
+與完成條件。依 Stage／owner 順序逐項審查；若尚未建立清單，開始前只從權威 Registry
+整理一次，不重做已完成的 production inventory。
+
+Campaign 可標記 `Review complete`，當且僅當：清單內每個項目均有核准的 review outcome 與所需
+evidence，權威 Registry 已同步，且無清單內的未決技術判斷。Review outcome 可為 approved、
+retired、fixed/non-branch 或明確排除；排除項目須有理由。campaign-level closeout 只做必要的
+狀態／tracker／HANDOFF 對帳，移除已完成項目作為 active next step 的舊引用，記錄 review boundary
+commit。這些最小狀態紀錄若需要 commit，納入該 campaign 的 closure boundary。
+
+以下不得自行加入 campaign 範圍，也不得阻擋其技術審查完成：已明確排除的 non-branch/deferred
+議題、其他功能或算法工作、歷史文件整理、未納入本輪的 temporary draft、無關 dirty hunks，
+以及已完成盤點後沒有新證據支持的重複 selector inventory。若新證據指出清單遺漏或某項分類
+有矛盾，只擴大受影響的項目並記錄證據與理由；不重開其他已完成項目。遇到無關 dirty state，
+只隔離並保護，不要求先清理它才能完成本 campaign。
+
+`Review complete` 是技術審查 campaign 的結案狀態；Git remote integration 另依一般 workflow
+記為 `remote sync pending` 或完成。若 push 會夾帶另一個未授權責任邊界，保持 remote sync
+pending 並提出明確 blocker，不得因此重做或撤銷已完成的 branch reviews，也不得把它報成整個
+審查仍有技術未決項。只有 campaign 自身的必要文件／狀態／commit 尚未完成時，才可阻止
+`Review complete`。

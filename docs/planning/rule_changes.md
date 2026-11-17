@@ -3,6 +3,16 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261117-002 — Review campaign 範圍與結案
+
+- 日期／狀態：2026-11-17／Implemented；待規則 boundary commit 後 Closed。
+- 問題：有限的 branch review 在完成逐項審查後，仍被無關 `plot_ir` 工作、歷史文件整理、deferred non-branch issue、重複盤點與混合 dirty state 拉長；technical review completion 又與 Git remote integration 混為一個狀態。
+- 依據：使用者提供的 CP-BR preflight 顯示 branch inventory 已完成且無新遺漏，但結案被多個不同責任邊界事項延後。
+- 評估／決策：接受以權威 Registry 中的有限清單和明確排除項定義 campaign；逐項結果完成後，只做必要狀態收尾。新證據可局部擴大受影響項目；無關工作不得成為 blocker。技術 review completion 與 remote integration 分別記錄。
+- 修改範圍：`branch_behavior_contract.md`、`project_workflow.md` 與本紀錄；不修改 CP-BR tracker、project code、既存 dirty hunks、active project state 或 HANDOFF。
+- 驗證：情境核對涵蓋有限 inventory、每項 outcome、明確排除 non-branch/deferred issue、隔離無關 dirty hunks、新證據只局部擴大，以及 remote sync pending 不重開技術審查；相對連結與 anchor 已核對，`git diff --check` 通過。
+- 評估者／授權依據：使用者要求以規則使逐項完成的 branch review 能依預期收尾；本規則維護對話具明確規則維護授權。
+
 ## RC-20261117-001 — 知識收斂與跨 session 傳遞
 
 - 日期／狀態：2026-11-17／Closed。

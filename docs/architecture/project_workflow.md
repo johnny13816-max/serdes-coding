@@ -199,6 +199,8 @@ repository change 的組成檔，不是各自獨立的 chat deliverables。使�
 3. 判定這個子項是否已成為可獨立 review、驗證及還原的 boundary。已完成 boundary 依 Main-first Git integration commit/push；尚未完成或無法安全分割的工作保留為明確 pending，不得提前 commit 來宣稱完成。
 4. 只有完成上述核對後，才更新子項狀態並選擇下一步。若下一步仍屬同一大型契約，可繼續執行，但父契約維持 active，直至所有適用條件完成。
 
+若工作是有限的多項 review campaign（例如完整 branch review），campaign 開始時先固定權威清單、排除項與完成條件；逐項完成後，只執行該清單所需的最小狀態收尾。不得把無關 dirty state、歷史清理或其他 deferred/non-branch work 加入 blocker。Campaign 的技術 review completion 與 remote integration 分開記錄；具體條件依該 review contract 執行。Branch review 適用 [`Branch review campaign boundary and closure`](branch_behavior_contract.md#review-campaign-boundary-and-closure)。
+
 HANDOFF 仍只在 handoff、active-task switch、pause/block 或 closure 時依其 lifecycle 更新；不要求每個子項都複製一份歷史摘要。切換回報應簡短說明子項狀態、更新的技術／狀態文件、commit/push 狀態，以及下一個尚未完成的 gate。此 gate 是既有文件、狀態與 Git closure 要求的執行時入口，不另增重複的驗證流程。
 
 ### 6. Verification
