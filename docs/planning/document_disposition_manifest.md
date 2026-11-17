@@ -1,11 +1,10 @@
 # Document disposition manifest
 
-狀態：**Approved disposition — execution deferred to Boundary B**｜2026-11-17
+狀態：**Executed in Boundary B**｜2026-11-17
 
-本清單是 RC-20261117-003 的逐檔處置提案。它不改變任何模型、分支或驗證結論。
-規則 boundary 只建立分類與 enforcement；實際 planning／branch 文件整理必須在後續
-project-maintenance boundary 執行。使用者已於 2026-11-17 選擇方案 1，核准下列三項
-全部刪除；Boundary A 只記錄決定，不跨界執行刪除。
+本清單是 RC-20261117-003 的逐檔處置與 Boundary B 執行紀錄。它不改變任何模型、分支或
+驗證結論。規則 boundary 只建立分類與 enforcement；使用者於 2026-11-17 選擇方案 1，
+核准下列三項全部刪除，並由後續 project-maintenance Boundary B 執行。
 
 ## Decision rules
 
@@ -69,13 +68,16 @@ project-maintenance boundary 執行。使用者已於 2026-11-17 選擇方案 1�
 | `docs/planning/tc026_alg004_signed_scaling.md` | ALG-004 signed-scaling evidence |
 | `docs/planning/util_snp_001_sparam_representation.md` | S-parameter representation implementation contract |
 
-## Delete after user confirmation
+## Executed deletions — Boundary B
 
-| Path | Evidence and replacement | Proposed execution |
+| Path | Evidence and replacement | Execution evidence |
 |---|---|---|
-| `docs/planning/178A_algorithm_branch_matrix.xlsx` | Formula-linked legacy branch matrix; current branch registry owns classification. Workbook inspection also found corrupted legacy text, so it is not a reliable current source. | Delete in branch-document convergence; remove registry row. |
-| `docs/planning/company_platform_cpbr_matrix.md` | Header already declares it a retired duplicate of the authoritative branch registry. | Delete in branch-document convergence; remove obsolete references. |
-| `docs/planning/temp_contract_short_long_grid_178A.md` | Untracked 1,318-line superseded draft; durable adaptive-grid content is already in the formal contract, stage docs and validation evidence. | Delete only after explicit confirmation; remove `retire-pending` registry row. |
+| `docs/planning/178A_algorithm_branch_matrix.xlsx` | Formula-linked legacy branch matrix; current branch registry owns classification. Workbook inspection also found corrupted legacy text, so it is not a reliable current source. | Deleted 2026-11-17；registry row removed；pre-delete SHA-256 `A5822D9DB9732894F15CC5C10887D112BA7464ACF114AF44AD9645636FB37FD2`. |
+| `docs/planning/company_platform_cpbr_matrix.md` | Header already declares it a retired duplicate of the authoritative branch registry. | Deleted 2026-11-17；registry row removed；no obsolete references remained；pre-delete SHA-256 `6A34F479C901908418DBAD4EB0877A26593CA4ECE9AB9B497DDA1CFB9EEAFB48`. |
+| `docs/planning/temp_contract_short_long_grid_178A.md` | Untracked 1,318-line superseded draft; durable adaptive-grid content is already in the formal contract, stage docs and validation evidence. | Deleted 2026-11-17；`retire-pending` registry row removed；pre-delete SHA-256 `9C7BB2ED9C19D6CE4545230FB4F9811B4F88AE02B9BE048095705A34AE25AC68`. |
+
+Boundary B 僅執行上述核准處置與 registry/reference 同步；未修改模型、算法、branch behavior，
+也未接管既有 adaptive-grid dirty hunks。
 
 ## Coverage gaps recorded, not auto-expanded
 
@@ -83,7 +85,7 @@ project-maintenance boundary 執行。使用者已於 2026-11-17 選擇方案 1�
   coverage gap; do not create speculative documents until the user resumes 93A and production source is reviewed.
 - `docs/architecture/contract_migration_inventory.md` remains `migration-inventory`; it may only shrink as
   source-checked content moves to current owners.
-- `active_contracts.md` currently contains excess closed history. Slimming it and converging branch-review
-  documents belong to the separate project-maintenance boundary after this rule boundary closes.
+- `active_contracts.md` currently contains excess closed history. Slimming it and further branch-review
+  convergence were not part of this deletion-only Boundary B slice and remain separate follow-up work.
 - Existing dirty changes in 178A registry/stage docs、`active_contracts.md`、`future_ideas.md` and the untracked
   adaptive draft are preserved; this rule boundary does not stage or rewrite their project content.

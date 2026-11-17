@@ -66,7 +66,6 @@
 | `docs/operations/search_execution.md` | `operations` | `live` | `self` | `supported-execution-change` | `maintain` |
 | `docs/operations/v1_0_release_gate.md` | `operations` | `live` | `self` | `supported-execution-change` | `maintain` |
 | `docs/planning/178A_adaptive_grid_change_contract.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
-| `docs/planning/178A_algorithm_branch_matrix.xlsx` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/178a_branch_inventory.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/active_contracts.md` | `state` | `live` | `self` | `owned-state-change` | `maintain` |
 | `docs/planning/alg001_missing_dc_completion.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
@@ -75,8 +74,7 @@
 | `docs/planning/comconfig_domain_migration.md` | `working` | `historical-frozen` | `docs/architecture/configuration_architecture.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/company_platform_cp1_gap_map.md` | `working` | `historical-frozen` | `docs/planning/v1_0_rebaseline.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/company_platform_cp2_contract_draft.md` | `working` | `paused-temporary` | `self` | `user-resume` | `resume-promote-or-retire` |
-| `docs/planning/company_platform_cpbr_matrix.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
-| `docs/planning/document_disposition_manifest.md` | `working` | `paused-temporary` | `self` | `resume-with-branch-document-convergence` | `execute-approved-disposition-then-retire` |
+| `docs/planning/document_disposition_manifest.md` | `working` | `historical-frozen` | `docs/document_registry.md` | `frozen` | `retain-dated-evidence` |
 | `docs/planning/e003_pmf_grid_numerical_control.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/future_ideas.md` | `state` | `live` | `self` | `owned-state-change` | `maintain` |
 | `docs/planning/HANDOFF.md` | `state` | `live` | `self` | `owned-state-change` | `maintain` |
@@ -101,7 +99,6 @@
 | `docs/planning/tc024_mlsd_quantization_psd.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/tc025_alg003_gaussian_support.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/tc026_alg004_signed_scaling.md` | `working` | `historical-frozen` | `docs/models/178A/branch_behavior_registry.md` | `frozen` | `review-retention-in-convergence` |
-| `docs/planning/temp_contract_short_long_grid_178A.md` | `working` | `retire-pending` | `docs/planning/178A_adaptive_grid_change_contract.md` | `frozen` | `delete-after-user-confirmation` |
 | `docs/planning/util_eye_001_linksegment_eye.md` | `working` | `paused-temporary` | `self` | `durable-owner-promotion` | `promote-before-freeze-or-retire` |
 | `docs/planning/util_snp_001_sparam_representation.md` | `working` | `historical-frozen` | `docs/architecture/sparameter_model_contract.md` | `frozen` | `review-retention-in-convergence` |
 | `docs/planning/utility_grid_contract_draft.md` | `working` | `paused-temporary` | `self` | `user-resume` | `resume-promote-or-retire` |
