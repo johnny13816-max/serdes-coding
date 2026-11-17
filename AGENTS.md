@@ -88,6 +88,8 @@ AGENTS.md
   直接在 `main` 有具體安全／技術障礙時，先取得使用者明確同意。分類、stage、commit 與 push 由 Agent 負責。
 - 每個子項標記完成或切換下一項前，依 [`project_workflow.md` 的子項完成與切換 gate](docs/architecture/project_workflow.md#子項完成與切換-gate)
   更新所屬技術文件及變動的權威狀態來源，判定 boundary 的 commit/push 狀態，並明確保留尚未完成條件。
+- 結案或跨 session 交接前，依 [`documentation_contract.md` 的知識收斂規則](docs/architecture/documentation_contract.md#knowledge-convergence-and-cross-session-transfer)
+  核對本項在技術 owner、狀態來源與仍有效 snapshot 中的一致性；舊待辦未清除或狀態矛盾未解決時不得標 Closed。
 - 僅提交可歸屬且公開安全的 boundary。`.venv`、`results/`、cache、temporary/rebuildable output 不提交；
   external/reference data 須先確認來源、license、provenance 與 public-safe boundary，無法確認時不 push。
   既有 dirty state 不得 reset、stash、刪除、覆蓋或混入無關變更；詳細同步與結案流程見

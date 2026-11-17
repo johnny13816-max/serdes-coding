@@ -213,3 +213,26 @@ records the selector, legal behaviors, and validation evidence.
 At active-item closure, apply the lifecycle in `project_workflow.md`: promote durable content, reconcile trackers,
 dispose of the temp contract, then slim HANDOFF and NOTES. Protected contracts or ADR-like decisions may remain only
 as clearly marked historical evidence with a link to the current technical authority.
+
+## Knowledge convergence and cross-session transfer
+
+Treat project documentation as the durable memory for decisions and current state; conversation history and agent
+recollection are temporary context. Each fact has one owning source according to the authority hierarchy above.
+Other files may link to that source or carry a necessary current-state summary, but duplicated explanations must not
+become competing authorities.
+
+Before closing a non-trivial item or handing work to another session, perform a bounded reconciliation using the
+item ID/name and affected behavior. Check the technical owner documents identified for the change, `active_contracts.md`,
+the applicable tracker/roadmap, the temporary contract, and HANDOFF/NOTES only when they refer to the item. For every
+matching current-work reference, determine whether it is authoritative current state, a synchronized pointer, valid
+historical evidence, or stale content. Resolve contradictions before closure: remove completed work from active queues
+and obsolete next steps; keep historical evidence only when marked `Historical / non-authoritative` and linked to its
+current owner; delete superseded temporary plans unless an allowed historical record must remain. Do not scan unrelated
+history or rewrite unrelated documents as part of this check.
+
+The closure record must identify the status-owning source, the documents checked and updated, any stale entry removed
+or historical record retained, and the reason when a document did not need an update. Commit the reconciled records
+with the item boundary or its authorized closure commit. A new session resumes from current Git, the authoritative
+technical owner, and the status-owning source; it must not reopen an item from chat recollection or a stale snapshot.
+If these sources disagree, reconcile them before continuing or report the specific blocker. HANDOFF remains a compact
+snapshot and never becomes the source of truth.

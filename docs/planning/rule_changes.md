@@ -3,6 +3,18 @@
 本文件只保存規則提案與處理結果，不授權修改規則，也不取代現行規則。
 流程與狀態定義見 [project_workflow.md](../architecture/project_workflow.md#rule_change-流程)。
 
+## RC-20261117-001 — 知識收斂與跨 session 傳遞
+
+- 日期／狀態：2026-11-17／Implemented；驗證完成、active state reconciled，待規則 boundary commit。
+- 問題：相同項目的閉合狀態分散在權威技術文件、active contract、tracker、HANDOFF 與暫存契約；完成項目仍可能以舊 next step 出現，且新 session 可能依賴聊天記憶而重開。
+- 依據：使用者指出 agent 記憶有上限，因此文件整理、歸檔與狀態傳遞是最需可控的合作環節；`log.txt` 顯示 ALG-012 已在分支表結案，卻因 active contracts/HANDOFF 舊紀錄而反覆被當成待辦。
+- 評估／決策：接受以單一 owner、有界的結案文件核對、過期 active reference 清理、歷史紀錄明確降級與跨 session 依權威文件恢復，建立可查證的收斂 gate；不要求全 repo 歷史掃描或每次複製同一說明。
+- 修改範圍：`AGENTS.md`、`documentation_contract.md`、`project_workflow.md`、本紀錄及 `active_contracts.md` 的獨立 rule-state entry；不修改專案程式或既存 project hunks。
+- 驗證：`git diff --check` 通過；AGENTS／workflow／documentation-contract anchors 與相對連結已核對。情境核對覆蓋：已結案 ID 從 active queue 移除、歷史 evidence 保留但標為 non-authoritative 並連回 owner、未出現在 handoff 的項目不觸發 HANDOFF 改寫、權威狀態矛盾時停止恢復。
+- 評估者／授權依據：本規則維護對話；使用者要求以規則約束文件收斂、整理與跨 session 傳遞。
+- Commit evidence：待規則 boundary commit。
+- 下一 gate：提交規則 boundary，之後以 closure commit 記錄 Closed。
+
 ## RC-20261116-001 — 子項完成與切換 gate
 
 - 日期／狀態：2026-11-16／Closed。

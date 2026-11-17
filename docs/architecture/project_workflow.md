@@ -275,6 +275,9 @@ Open issue
 實際 commit SHA，先提交 code/tests/technical docs 的 boundary commit，再用小型 closure commit 更新 tracker、
 temp-contract disposition、HANDOFF 與 NOTES。若不需要 post-commit SHA，一個 isolated commit 可同時完成兩階段。
 
+issue 關閉或 handoff 前，依 [`documentation_contract.md` 的 Knowledge convergence and cross-session transfer](documentation_contract.md#knowledge-convergence-and-cross-session-transfer)
+執行有界文件核對：確認完成項目已從 active queue／next step 移除，保留的歷史紀錄已標示為非權威並連回現行 owner，且同步文件已納入對應 commit。不得只改一份摘要就宣稱跨文件結案。
+
 Temp contract 的 durable 內容依 owner 分流：API/architecture 進 `docs/architecture/`；version/stage/equation
 進 `docs/models/`；驗收方法與數值進 `docs/validation/`；執行方式進 `docs/operations/`。合併完成後：
 
